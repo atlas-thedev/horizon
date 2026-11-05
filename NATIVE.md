@@ -10,7 +10,9 @@ What this fork changes (and nothing else):
 
 - the player-facing name "Horizon" becomes "Native" (menus, boot screen, window title, logs),
   applied by `tools/native/rebrand.py`;
-- the Windows executable icon is the Native Client icon (`packaging/native/icon.ico.b64`);
+- the Windows executable icon and the game window icon are Minecraft's own Java Edition icon (26.3), fetched
+  from Mojang's asset servers and checked against pinned SHA-1 hashes by `tools/native/make_vanilla_icon.py`
+  (the launch screen's mark is still the Native one, `packaging/native/icon64.png.b64`);
 - the boot screen is the launcher's own launch screen (black, the Native mark, "Native Client" and the
   sweeping bar, no console wall), drawn both by the early Windows paint and by the game's renderer, and the
   window opens at Minecraft's 854 x 480 instead of 1280 x 720, applied by `tools/native/boot_screen.py`
