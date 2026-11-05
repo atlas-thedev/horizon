@@ -1,17 +1,17 @@
-//! Native Client session and friend presence for the Native edition of the
-//! engine.
-//!
-//! The launcher trades the account's Native session for a game-only ticket
-//! (`nmt1.…`) and writes it to `<game dir>/.native/session.json`, the same
-//! hand-off the Java mod reads. This module checks that ticket against
-//! `/v1/mod/me`, remembers the account for the title screen, and reports what
-//! the player is doing to `/v1/mod/presence` (the same endpoint the Java mod
-//! uses) so friends see it in Relay.
-//!
-//! Everything network-facing runs on its own daemon thread; the game only
-//! reads [`native_account`] from the render thread. Paths are fully qualified
-//! because this file is included inside `discord_presence`, which already
-//! imports several of the same names.
+// Native Client session and friend presence for the Native edition of the
+// engine.
+//
+// The launcher trades the account's Native session for a game-only ticket
+// (`nmt1.…`) and writes it to `<game dir>/.native/session.json`, the same
+// hand-off the Java mod reads. This module checks that ticket against
+// `/v1/mod/me`, remembers the account for the title screen, and reports what
+// the player is doing to `/v1/mod/presence` (the same endpoint the Java mod
+// uses) so friends see it in Relay.
+//
+// Everything network-facing runs on its own daemon thread; the game only
+// reads `native_account` from the render thread. Paths are fully qualified
+// because this file is included inside `discord_presence`, which already
+// imports several of the same names.
 
 const DEFAULT_API: &str = "https://api.playnative.net";
 const FILE_LIMIT: u64 = 16 * 1024;

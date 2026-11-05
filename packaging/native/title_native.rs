@@ -1,5 +1,5 @@
-//! Native Client's title screen mark and account line, drawn over the classic
-//! title logo. `title.rs` includes this file from `draw_logo`.
+// Native Client's title screen mark and account line, drawn over the classic
+// title logo. `title.rs` includes this file from `draw_logo`.
 
 /// The wordmark above the logo and the account line under it.
 pub fn native_title_branding(atlas: &HudAtlas, batch: &mut HudBatch, w: f32) {
