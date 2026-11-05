@@ -1,6 +1,6 @@
 name: native build
 # Builds the Native Client edition of Horizon's game client (MIT licensed, NATIVE.md): the newest upstream
-# Nightly's source, rebranded by tools/native/rebrand.py, with the Native icon. Publishes the Windows client as
+# Nightly's source, rebranded by tools/native/rebrand.py, with the Native icon and launch screen (boot_screen.py). Publishes the Windows client as
 # the release `native-<date>-<commit>` named after the upstream Nightly it matches. The Native launcher installs
 # upstream's signed engine for that Nightly and swaps in this client.
 on:
@@ -60,13 +60,14 @@ jobs:
           git clone --filter=blob:none "https://github.com/$UPSTREAM.git" src
           cd src
           git checkout "nightly-source/${{ steps.up.outputs.date }}-${{ steps.up.outputs.short }}" 2> /dev/null || git checkout "${{ steps.up.outputs.short }}"
-      - name: Rebrand and set the Native icon
+      - name: Rebrand, set the Native icon and launch screen
         if: steps.need.outputs.build == 'true'
         run: |
           python native/tools/native/rebrand.py src
           base64 -d native/packaging/native/icon.ico.b64 > src/packaging/icons/horizon.ico
           base64 -d native/packaging/native/icon64.png.b64 > src/crates/horizon-theme/icons/horizon-64.png
           cp native/packaging/native/title_edition.rs src/crates/horizon-client-render/src/title_edition.rs
+          python native/tools/native/boot_screen.py src native
       - uses: dtolnay/rust-toolchain@stable
         if: steps.need.outputs.build == 'true'
       - uses: Swatinem/rust-cache@v2
