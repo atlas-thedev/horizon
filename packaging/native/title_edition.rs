@@ -1,5 +1,5 @@
 //! The banner under the classic title screen's logo: Native Client's
-//! "NATIVE" with the Rust cog in front of it.
+//! "EXPERIMENTAL" with the Rust cog in front of it.
 //!
 //! Vanilla's `textures/gui/title/edition.png` reads "JAVA EDITION"; Horizon
 //! never ships Mojang's art, so this banner is rebuilt at load time with its
@@ -31,7 +31,7 @@ const COG_W: usize = 40;
 const COG_H: usize = 39;
 const COG_GAP: usize = 12;
 
-const WORD: &str = "NATIVE";
+const WORD: &str = "EXPERIMENTAL";
 
 /// 5x7 letter bitmaps, one string per row.
 fn letter(c: char) -> [&'static str; 7] {
@@ -46,7 +46,6 @@ fn letter(c: char) -> [&'static str; 7] {
         'T' => ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."],
         'A' => [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
         'L' => ["#....", "#....", "#....", "#....", "#....", "#....", "#####"],
-        'V' => ["#...#", "#...#", "#...#", "#...#", "#...#", ".#.#.", "..#.."],
         _ => ["....."; 7],
     }
 }
