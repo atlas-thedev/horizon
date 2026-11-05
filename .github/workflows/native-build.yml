@@ -7,6 +7,7 @@ on:
   schedule:
     - cron: '41 */6 * * *'
   # A change to the patches or this workflow rebuilds even if this Nightly already has a release.
+  # (Rebuilt after reverting #3 so the published client matches main.)
   push:
     branches: [main]
     paths:
