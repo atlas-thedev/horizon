@@ -65,6 +65,8 @@ jobs:
         run: |
           python native/tools/native/rebrand.py src
           base64 -d native/packaging/native/icon.ico.b64 > src/packaging/icons/horizon.ico
+          base64 -d native/packaging/native/icon64.png.b64 > src/crates/horizon-theme/icons/horizon-64.png
+          cp native/packaging/native/title_edition.rs src/crates/horizon-client-render/src/title_edition.rs
       - uses: dtolnay/rust-toolchain@stable
         if: steps.need.outputs.build == 'true'
       - uses: Swatinem/rust-cache@v2
