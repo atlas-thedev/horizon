@@ -26,6 +26,7 @@ RUST_DIRS = (
     'crates/horizon-client-core/src', 'crates/horizon-client-input/src',
     'crates/horizon-client-lib/src', 'crates/horizon-prepare/src',
     'crates/horizon-theme/src', 'crates/horizon-assets/src',
+    'crates/horizon-threads/src',
 )
 LANG_DIR = 'crates/horizon-client/assets/horizon/lang/'
 
@@ -50,6 +51,10 @@ for name in files:
     new = STR.sub(fix_string, old)
     if name == 'crates/horizon-client/src/ui_theme.rs':
         new = new.replace('"Rust based minecraft client"', '"Native Client (Rust engine)"')
+        new = new.replace('"Horizon"', '"Native"')
+    if name == 'crates/horizon-threads/src/boot_paint.rs':
+        new = new.replace('"Rust based minecraft client"', '"Native Client (Rust engine)"')
+        new = new.replace('"Horizon"', '"Native"')
     if name in ('crates/horizon-client/src/game.rs', 'crates/horizon-client/src/game/no_resources.rs',
                 'crates/horizon-client/src/game/split/windows.rs'):
         new = new.replace('.with_title("Native")', '.with_title("Native Client")')
