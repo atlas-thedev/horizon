@@ -1,5 +1,5 @@
 name: native check
-# Compiles the Native Client edition (rebrand.py + the Native icon + boot_screen.py on the newest upstream
+# Compiles the Native Client edition (rebrand.py + boot_screen.py + the Java Edition icon on the newest upstream
 # Nightly's source) on every change to those files, so a pull request shows a broken launch screen before
 # the six-hourly build trips over it. It publishes nothing.
 on:
@@ -47,13 +47,14 @@ jobs:
           git clone --filter=blob:none "https://github.com/$UPSTREAM.git" src
           cd src
           git checkout "nightly-source/${{ steps.up.outputs.date }}-${{ steps.up.outputs.short }}" 2> /dev/null || git checkout "${{ steps.up.outputs.short }}"
-      - name: Rebrand, set the Native icon and launch screen
+      - name: Rebrand, set the launch screen and the Java Edition icon
         run: |
           python native/tools/native/rebrand.py src
-          base64 -d native/packaging/native/icon.ico.b64 > src/packaging/icons/horizon.ico
           base64 -d native/packaging/native/icon64.png.b64 > src/crates/horizon-theme/icons/horizon-64.png
           cp native/packaging/native/title_edition.rs src/crates/horizon-client-render/src/title_edition.rs
           python native/tools/native/boot_screen.py src native
+          python -m pip install --quiet pillow
+          python native/tools/native/make_vanilla_icon.py src/packaging/icons/horizon.ico src/crates/horizon-theme/icons/horizon-64.png
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
