@@ -19,6 +19,10 @@ on:
         description: Rebuild even if this Nightly already has a Native release
         type: boolean
         default: false
+      nightly:
+        description: Release tag to build (native-YYYY-MM-DD-<commit>); empty builds the newest Nightly
+        type: string
+        default: ''
 permissions:
   contents: write
 concurrency:
@@ -40,15 +44,26 @@ jobs:
           path: native
       - name: Find the upstream Nightly
         id: up
+        env:
+          REQUESTED: ${{ inputs.nightly }}
         run: |
           python - <<'PY'
           import json, os, re, subprocess
-          out = subprocess.check_output(['gh', 'api', f"repos/{os.environ['UPSTREAM']}/releases/tags/nightly"], text=True, encoding='utf-8')
-          name = json.loads(out)['name']
-          m = re.match(r'^Nightly (\d{4}-\d{2}-\d{2}) \u00b7 ([0-9a-f]+)$', name)
-          if not m:
-              raise SystemExit(f'Unexpected Nightly title: {name!r}')
-          date, short = m.groups()
+          requested = (os.environ.get('REQUESTED') or '').strip()
+          if requested:
+              # Rebuild a client for the Nightly a player already has installed.
+              m = re.match(r'^native-(\d{4}-\d{2}-\d{2})-([0-9a-f]{7,40})$', requested)
+              if not m:
+                  raise SystemExit(f'Unexpected release tag: {requested!r}')
+              date, short = m.groups()
+              name = f'Nightly {date} \u00b7 {short}'
+          else:
+              out = subprocess.check_output(['gh', 'api', f"repos/{os.environ['UPSTREAM']}/releases/tags/nightly"], text=True, encoding='utf-8')
+              name = json.loads(out)['name']
+              m = re.match(r'^Nightly (\d{4}-\d{2}-\d{2}) \u00b7 ([0-9a-f]+)$', name)
+              if not m:
+                  raise SystemExit(f'Unexpected Nightly title: {name!r}')
+              date, short = m.groups()
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'date={date}\nshort={short}\ntag=native-{date}-{short}\nname={name}\n')
           PY
