@@ -6,6 +6,13 @@ name: native build
 on:
   schedule:
     - cron: '41 */6 * * *'
+  # A change to the patches or this workflow rebuilds even if this Nightly already has a release.
+  push:
+    branches: [main]
+    paths:
+      - 'tools/native/**'
+      - 'packaging/native/**'
+      - '.github/workflows/native-build.yml'
   workflow_dispatch:
     inputs:
       force:
@@ -48,7 +55,7 @@ jobs:
       - name: Skip when already built
         id: need
         run: |
-          if [ "${{ inputs.force }}" != "true" ] && gh release view "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          if [ "${{ inputs.force }}" != "true" ] && [ "${{ github.event_name }}" != "push" ] && gh release view "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "build=false" >> "$GITHUB_OUTPUT"
             echo "${{ steps.up.outputs.tag }} already exists"
           else
