@@ -11,8 +11,15 @@ What this fork changes (and nothing else):
 - the player-facing name "Horizon" becomes "Native" (menus, boot screen, window title, logs),
   applied by `tools/native/rebrand.py`;
 - the Windows executable icon is the Native Client icon (`packaging/native/icon.ico.b64`);
+- the boot screen is the launcher's own launch screen (black, the Native mark, "Native Client" and the
+  sweeping bar, no console wall), drawn both by the early Windows paint and by the game's renderer, and the
+  window opens at Minecraft's 854 x 480 instead of 1280 x 720, applied by `tools/native/boot_screen.py`
+  with `packaging/native/boot_paint.rs` and `packaging/native/native_boot.rs`. The launcher still passes
+  the size, fullscreen and reduced-motion choices of its own settings. Each change names the exact upstream
+  text it replaces, and the build fails when upstream changed it;
 - `.github/workflows/native-build.yml` builds the newest upstream Nightly with those changes and publishes
-  the client as the release `native-<date>-<commit>`.
+  the client as the release `native-<date>-<commit>`; `.github/workflows/native-check.yml` compiles the same
+  changes on every pull request.
 
 Crate names, identifiers, the release-signing code and the game's own assets are upstream's. Minecraft is
 a trademark of Mojang AB; this is not an official Minecraft product.
