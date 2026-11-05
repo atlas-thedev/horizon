@@ -96,6 +96,7 @@ jobs:
           cd dist
           sha256sum horizon-client-windows-x64.exe > SHA256SUMS
           printf '%s\n' '{"upstream_release":"${{ steps.up.outputs.name }}","upstream_commit":"${{ steps.up.outputs.short }}"}' > compat.json
+          gh release delete "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2> /dev/null || true
           gh release create "${{ steps.up.outputs.tag }}" horizon-client-windows-x64.exe SHA256SUMS compat.json \
             --repo "$GITHUB_REPOSITORY" \
             --title "Native engine for ${{ steps.up.outputs.name }}" \
