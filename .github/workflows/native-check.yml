@@ -1,0 +1,71 @@
+name: native check
+# Compiles the Native Client edition (rebrand.py + the Native icon + boot_screen.py on the newest upstream
+# Nightly's source) on every change to those files, so a pull request shows a broken launch screen before
+# the six-hourly build trips over it. It publishes nothing.
+on:
+  pull_request:
+    paths:
+      - 'tools/native/**'
+      - 'packaging/native/**'
+      - '.github/workflows/native-*.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: horizon-rust/horizon
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: native
+      - name: Find the upstream Nightly
+        id: up
+        run: |
+          python - <<'PY'
+          import json, os, re, subprocess
+          out = subprocess.check_output(['gh', 'api', f"repos/{os.environ['UPSTREAM']}/releases/tags/nightly"], text=True, encoding='utf-8')
+          name = json.loads(out)['name']
+          m = re.match(r'^Nightly (\d{4}-\d{2}-\d{2}) \u00b7 ([0-9a-f]+)$', name)
+          if not m:
+              raise SystemExit(f'Unexpected Nightly title: {name!r}')
+          date, short = m.groups()
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'date={date}\nshort={short}\ntag=native-{date}-{short}\nname={name}\n')
+          PY
+      - name: Upstream source of that Nightly
+        run: |
+          git clone --filter=blob:none "https://github.com/$UPSTREAM.git" src
+          cd src
+          git checkout "nightly-source/${{ steps.up.outputs.date }}-${{ steps.up.outputs.short }}" 2> /dev/null || git checkout "${{ steps.up.outputs.short }}"
+      - name: Rebrand, set the Native icon and launch screen
+        run: |
+          python native/tools/native/rebrand.py src
+          base64 -d native/packaging/native/icon.ico.b64 > src/packaging/icons/horizon.ico
+          base64 -d native/packaging/native/icon64.png.b64 > src/crates/horizon-theme/icons/horizon-64.png
+          cp native/packaging/native/title_edition.rs src/crates/horizon-client-render/src/title_edition.rs
+          python native/tools/native/boot_screen.py src native
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src
+          shared-key: native-check
+      - name: Compile the client
+        working-directory: src
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo check --locked -p horizon-client -p horizon-client-lib
+      - name: The boot screen's own tests
+        working-directory: src
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo test --locked -p horizon-client --lib ui_theme
