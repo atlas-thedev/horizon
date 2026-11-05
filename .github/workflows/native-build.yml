@@ -1,0 +1,99 @@
+name: native build
+# Builds the Native Client edition of Horizon's game client (MIT licensed, NATIVE.md): the newest upstream
+# Nightly's source, rebranded by tools/native/rebrand.py, with the Native icon. Publishes the Windows client as
+# the release `native-<date>-<commit>` named after the upstream Nightly it matches. The Native launcher installs
+# upstream's signed engine for that Nightly and swaps in this client.
+on:
+  schedule:
+    - cron: '41 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even if this Nightly already has a Native release
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: native-build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: horizon-rust/horizon
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: native
+      - name: Find the upstream Nightly
+        id: up
+        run: |
+          python - <<'PY'
+          import json, os, re, subprocess
+          out = subprocess.check_output(['gh', 'api', f"repos/{os.environ['UPSTREAM']}/releases/tags/nightly"], text=True, encoding='utf-8')
+          name = json.loads(out)['name']
+          m = re.match(r'^Nightly (\d{4}-\d{2}-\d{2}) \u00b7 ([0-9a-f]+)$', name)
+          if not m:
+              raise SystemExit(f'Unexpected Nightly title: {name!r}')
+          date, short = m.groups()
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'date={date}\nshort={short}\ntag=native-{date}-{short}\nname={name}\n')
+          PY
+      - name: Skip when already built
+        id: need
+        run: |
+          if [ "${{ inputs.force }}" != "true" ] && gh release view "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "${{ steps.up.outputs.tag }} already exists"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upstream source of that Nightly
+        if: steps.need.outputs.build == 'true'
+        run: |
+          git clone --filter=blob:none "https://github.com/$UPSTREAM.git" src
+          cd src
+          git checkout "nightly-source/${{ steps.up.outputs.date }}-${{ steps.up.outputs.short }}" 2> /dev/null || git checkout "${{ steps.up.outputs.short }}"
+      - name: Rebrand and set the Native icon
+        if: steps.need.outputs.build == 'true'
+        run: |
+          python native/tools/native/rebrand.py src
+          base64 -d native/packaging/native/icon.ico.b64 > src/packaging/icons/horizon.ico
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.need.outputs.build == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.need.outputs.build == 'true'
+        with:
+          workspaces: src
+          shared-key: native
+      - name: Build the client
+        if: steps.need.outputs.build == 'true'
+        working-directory: src
+        env:
+          HORIZON_VERSION: nightly-${{ steps.up.outputs.date }}
+          HORIZON_NIGHTLY: ${{ steps.up.outputs.date }} ${{ steps.up.outputs.short }}
+        run: cargo build --release --locked -p horizon-client -p horizon-client-lib --bin horizon-client
+      - name: Check it starts and has no foreign DLLs
+        if: steps.need.outputs.build == 'true'
+        working-directory: src
+        run: |
+          target/release/horizon-client.exe --help | grep -q -- '--resources'
+          python tools/check_imports.py target/release/horizon-client.exe
+      - name: Publish
+        if: steps.need.outputs.build == 'true'
+        run: |
+          mkdir dist
+          cp src/target/release/horizon-client.exe dist/horizon-client-windows-x64.exe
+          cd dist
+          sha256sum horizon-client-windows-x64.exe > SHA256SUMS
+          printf '%s\n' '{"upstream_release":"${{ steps.up.outputs.name }}","upstream_commit":"${{ steps.up.outputs.short }}"}' > compat.json
+          gh release create "${{ steps.up.outputs.tag }}" horizon-client-windows-x64.exe SHA256SUMS compat.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Native engine for ${{ steps.up.outputs.name }}" \
+            --notes "Rebranded Horizon client built from upstream's ${{ steps.up.outputs.name }} (MIT, see NATIVE.md)."
