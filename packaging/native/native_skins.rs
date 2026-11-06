@@ -273,6 +273,20 @@ impl Directory {
         self.owned(name, id, self_name).is_some()
     }
 
+    /// The name mark (`NameTags.decorate`): `Some(plus)` when the player plays
+    /// from Native. The signed-in account itself counts even before it has a
+    /// published look, unless the server gave its name a premium UUID.
+    pub fn mark(&self, name: &str, id: Option<u128>, self_name: Option<&str>) -> Option<bool> {
+        if name.is_empty() {
+            return None;
+        }
+        if let Some(entry) = self.owned(name, id, self_name) {
+            return Some(entry.plus);
+        }
+        let is_self = self_name.is_some_and(|mine| key(mine) == key(name));
+        (is_self && id.is_none_or(|id| uuid_version(id) == 3)).then_some(false)
+    }
+
     /// `SkinDirectory.cosmetics`: the 3D cosmetics a player wears.
     pub fn cosmetics(&self, name: &str, id: Option<u128>, self_name: Option<&str>) -> &[CosmeticRef] {
         self.owned(name, id, self_name)
@@ -417,6 +431,7 @@ fn write() -> std::sync::RwLockWriteGuard<'static, Directory> {
 fn start() {
     static STARTED: OnceLock<()> = OnceLock::new();
     STARTED.get_or_init(|| {
+        crate::native_marks::set_lookup(mark_of);
         let spawned = std::thread::Builder::new()
             .name("Native skins".into())
             .spawn(|| run(&api()));
@@ -424,6 +439,13 @@ fn start() {
             log::warn!("Native: skin sync unavailable: {e}");
         }
     });
+}
+
+/// The name marks' lookup (`native_marks`): `Some(plus)` for a Native player.
+fn mark_of(name: &str, id: Option<u128>) -> Option<bool> {
+    let self_name = crate::discord_presence::native_account();
+    let directory = shared().read().unwrap_or_else(|e| e.into_inner());
+    directory.mark(name, id, self_name.as_deref())
 }
 
 /// Only Native over https (or loopback http for development) is asked for
@@ -895,6 +917,17 @@ mod tests {
         assert_eq!(frame_at(&animation, Duration::from_millis(0)), 0);
         assert_eq!(frame_at(&animation, Duration::from_millis(250)), 2);
         assert_eq!(frame_at(&animation, Duration::from_millis(450)), 0);
+    }
+
+    #[test]
+    fn marks_go_to_native_players_and_the_signed_in_account() {
+        let d = directory(serde_json::json!([{"n": "Gold", "s": sha('a'), "x": true}, {"n": "Plain", "s": sha('a')}]));
+        assert_eq!(d.mark("gold", Some(OFFLINE), None), Some(true));
+        assert_eq!(d.mark("plain", Some(OFFLINE), None), Some(false));
+        assert_eq!(d.mark("stranger", Some(OFFLINE), None), None);
+        // No published look yet, but it is the account the launcher signed in.
+        assert_eq!(d.mark("Me", Some(OFFLINE), Some("me")), Some(false));
+        assert_eq!(d.mark("Me", Some(PREMIUM), Some("me")), None);
     }
 
     #[test]
