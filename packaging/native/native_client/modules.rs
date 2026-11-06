@@ -22,6 +22,18 @@ impl Modules {
         all.extend(super::hud_modules::all());
         all.extend(super::status_modules::all());
         all.extend(super::extra_modules::all());
+        all.extend(super::gameplay_modules::all());
+        all.extend(super::gameplay_modules::late());
+        // The order the Java mod registers them in: it is the order of the menu's grid.
+        const ORDER: [&str; 44] = [
+            "fps", "cps", "keystrokes", "coords", "direction", "clock", "memory", "ping", "server", "speed", "scoreboard", "bossbar",
+            "togglesprint", "zoom", "fullbright", "bgfps", "effects", "armor", "inventory", "crosshair", "hitbox-colours",
+            "critical-colours", "watermark", "nether-coords", "moon-phase", "day-night", "totem-counter", "item-counter", "playtime",
+            "reach", "combo", "cooldowns", "block-overlay", "low-fire", "damage-tint", "freelook", "no-hurt-cam", "motion-blur",
+            "time-changer", "weather-changer", "voice", "voice-overlay", "now-playing", "discord-rpc",
+        ];
+        let rank = |id: &str| ORDER.iter().position(|o| *o == id).unwrap_or(ORDER.len());
+        all.sort_by_key(|m| rank(m.state.id));
         let mut modules = Modules {
             all,
             file: game_dir.map(|d| d.join("config").join("native-modules.json")),
@@ -42,6 +54,18 @@ impl Modules {
     }
 
     /// Something changed: written to disk shortly after.
+    /// The wheel turned by `dy` in the world: true when an enabled module took it.
+    pub fn on_scroll(&mut self, held: &std::collections::HashSet<i32>, dy: f64) -> bool {
+        let g = super::module::GameView { keys_down: held.iter().copied().collect(), playing: true, ..Default::default() };
+        let mut taken = false;
+        for m in &mut self.all {
+            if m.state.enabled && m.behaviour.on_scroll(&m.state, &g, dy) {
+                taken = true;
+            }
+        }
+        taken
+    }
+
     pub fn enabled(&self, id: &str) -> bool {
         self.all.iter().any(|m| m.state.id == id && m.state.enabled)
     }

@@ -60,6 +60,7 @@ python3 native/tools/native/native_skins.py src native
 python3 native/tools/native/native_marks.py src native
 python3 native/tools/native/native_cosmetics.py src native
 python3 native/tools/native/native_ui.py src native
+python3 native/tools/native/native_tweaks.py src native
 python3 native/tools/native/native_client.py src native
 python3 native/tools/native/make_vanilla_icon.py src/packaging/icons/horizon.ico src/crates/horizon-theme/icons/horizon-64.png
 

@@ -46,6 +46,16 @@ pub struct GameView {
     pub playing: bool,
     pub hud_allowed: bool,
     pub vitals: Vitals,
+    /// The window has the focus, and how long since the player last touched a key or the mouse.
+    pub focused: bool,
+    pub idle_ms: f64,
+    /// GLFW codes of the keys held right now.
+    pub keys_down: Vec<i32>,
+    /// Sprint and sneak are latched on (the game's toggle keys).
+    pub sprint_toggled: bool,
+    pub sneak_toggled: bool,
+    /// The crosshair is over a living thing.
+    pub target_living: bool,
     /// Distance to the entity under the crosshair, in blocks.
     pub reach: Option<f64>,
     /// Items on cooldown (bare id) and how much of it is left (1 to 0).
@@ -66,6 +76,11 @@ pub const ATTACK: usize = 7;
 pub const USE: usize = 8;
 
 impl GameView {
+    /// A key (GLFW code) is held right now.
+    pub fn is_down(&self, code: i32) -> bool {
+        code >= 0 && self.keys_down.contains(&code)
+    }
+
     /// `Game.facing`: the compass direction faced (S, SW, W, NW, N, NE, E, SE).
     pub fn facing(&self) -> &'static str {
         const NAMES: [&str; 8] = ["S", "SW", "W", "NW", "N", "NE", "E", "SE"];
@@ -290,6 +305,27 @@ pub trait Behaviour: Send {
     fn needs_vitals(&self) -> bool {
         false
     }
+    /// Draws a live preview in the module page's stage (a box x, y, w, h); `now` is the UI clock in ms.
+    /// False gets the default icon.
+    #[allow(clippy::too_many_arguments)]
+    fn preview(&mut self, _m: &ModuleState, _c: &mut Canvas, _g: &GameView, _now: f64, _x: f32, _y: f32, _w: f32, _h: f32) -> bool {
+        false
+    }
+    /// Drawn over the game while playing, for modules that are not a movable box (the crosshair); the HUD
+    /// editor draws it too (`editing`).
+    fn overlay(&mut self, _m: &ModuleState, _c: &mut Canvas, _g: &GameView, _now: f64, _editing: bool) {}
+    /// True when `overlay` would draw something right now.
+    fn overlays(&self, _m: &ModuleState, _g: &GameView) -> bool {
+        false
+    }
+    /// The wheel turned by `dy` in the world; true when the module took it (the hotbar then keeps still).
+    fn on_scroll(&mut self, _m: &ModuleState, _g: &GameView, _dy: f64) -> bool {
+        false
+    }
+    /// False: the module page has no preview, its options fill the page.
+    fn has_preview(&self) -> bool {
+        true
+    }
 }
 
 /// A module's switch, settings and place, without its behaviour (so a
@@ -371,6 +407,19 @@ impl Module {
             },
             behaviour,
         }
+    }
+
+    /// A module with no place on the HUD (`Module` rather than `HudModule`), off until switched on.
+    pub fn plain(
+        id: &'static str,
+        name: &'static str,
+        description: &'static str,
+        category: &'static str,
+        icon: u32,
+        settings: Vec<Setting>,
+        behaviour: Box<dyn Behaviour>,
+    ) -> Self {
+        Self::new(id, name, description, category, icon, false, settings, None, behaviour)
     }
 
     /// A HUD module in the HUD category.
@@ -490,7 +539,7 @@ impl Module {
 
     /// True when the module page shows a live preview beside its settings.
     pub fn has_preview(&self) -> bool {
-        self.state.category != SETTINGS
+        self.state.category != SETTINGS && self.behaviour.has_preview()
     }
 
     /// `Module.shownSettings`: the module's own settings that currently do something.

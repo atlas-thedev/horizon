@@ -14,6 +14,7 @@ pub mod icons;
 pub mod image;
 pub mod shapes;
 pub mod theme;
+pub mod tweaks;
 
 pub use atlas::Atlas;
 pub use canvas::Canvas;

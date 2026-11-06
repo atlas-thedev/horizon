@@ -9,12 +9,14 @@
 //! thread.
 
 mod extra_modules;
+mod gameplay_modules;
 mod hud_editor;
 mod hud_modules;
 mod keys;
 mod menu;
 mod module;
 mod modules;
+mod previews;
 mod scroll;
 mod setting;
 mod status;
@@ -68,6 +70,10 @@ struct State {
     sample_items: HashMap<u64, ItemStack>,
     /// Effect ids by `status_modules::effect_key`, for the icons.
     effect_names: HashMap<u64, String>,
+    /// GLFW codes of the keys and mouse buttons held, as the window events told.
+    held: std::collections::HashSet<i32>,
+    /// The game's own toggle-sprint and toggle-sneak options before Toggle Sprint took them over.
+    toggles_before: Option<(bool, bool)>,
 }
 
 thread_local! {
@@ -94,6 +100,8 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             items: Vec::new(),
             sample_items: sample_stacks(),
             effect_names: sample_effect_names(),
+            held: std::collections::HashSet::new(),
+            toggles_before: None,
         });
         f(state)
     })
@@ -166,6 +174,12 @@ impl Game<'_> {
         let clock = self.native_clock();
         GameView {
             vitals,
+            focused: self.focused,
+            idle_ms: self.last_input.elapsed().as_secs_f64() * 1000.0,
+            keys_down: state.held.iter().copied().collect(),
+            sprint_toggled: self.toggles.is_down(1),
+            sneak_toggled: self.toggles.is_down(0),
+            target_living: in_world && self.crosshair_living() == Some(true),
             reach: if in_world { self.native_reach() } else { None },
             cooldowns: if in_world && state.modules.enabled("cooldowns") { self.native_cooldowns() } else { Vec::new() },
             day_time: clock.as_ref().map_or(0, |c| c.day_time),
@@ -217,6 +231,21 @@ impl Game<'_> {
             }
             state.modules.tick();
             extra_modules::tick(g.in_world);
+            // Toggle Sprint hands the game's own toggle options its choice, and puts them back when it is off.
+            let tw = native_ui::tweaks::get();
+            match (tw.toggle_sprint || tw.toggle_sneak, state.toggles_before) {
+                (true, None) => state.toggles_before = Some((self.settings.toggle_sprint, self.settings.toggle_crouch)),
+                (false, Some((sprint, crouch))) => {
+                    self.settings.toggle_sprint = sprint;
+                    self.settings.toggle_crouch = crouch;
+                    state.toggles_before = None;
+                }
+                _ => {}
+            }
+            if let Some((sprint, crouch)) = state.toggles_before {
+                self.settings.toggle_sprint = tw.toggle_sprint || sprint;
+                self.settings.toggle_crouch = tw.toggle_sneak || crouch;
+            }
             let mut action = menu::Action::None;
             let mut copied = None;
             if !g.hud_allowed && !open {
@@ -227,6 +256,15 @@ impl Game<'_> {
             let c = &mut state.canvas;
             c.begin(fb[0], fb[1], scale);
             let (w, h) = (c.width(), c.height());
+            // The modules that draw over the game without a box of their own (the crosshair).
+            let now = native_ui::canvas::clock_ms();
+            if g.hud_allowed {
+                for m in &mut state.modules.all {
+                    if m.state.enabled && m.state.hud.is_none() && m.behaviour.overlays(&m.state, &g) {
+                        m.behaviour.overlay(&m.state, c, &g, now, false);
+                    }
+                }
+            }
             // `HudOverlay.draw`.
             for m in &mut state.modules.all {
                 if !m.state.enabled || m.state.hud.is_none() || !m.behaviour.visible(&m.state, &g) {
@@ -275,6 +313,7 @@ impl Game<'_> {
     /// Every window event, before the game handles it. True when the Native
     /// UI took it (the game then never sees it).
     pub(super) fn native_window_event(&mut self, event: &WindowEvent) -> bool {
+        self.native_track_input(event);
         if self.native_mod_screen() == Some(MOD_ID) {
             return self.native_menu_event(event);
         }
@@ -297,6 +336,18 @@ impl Game<'_> {
                 s.who = who;
             });
             return true;
+        }
+        // The wheel turns a module (Zoom) before it turns the hotbar.
+        if let WindowEvent::MouseWheel { delta, .. } = event
+            && self.screen == Screen::Playing
+        {
+            let dy = match delta {
+                MouseScrollDelta::LineDelta(_, y) => f64::from(*y),
+                MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
+            };
+            if with_state(|s| s.modules.on_scroll(&s.held, dy)) {
+                return true;
+            }
         }
         if let WindowEvent::MouseInput {
             state: ElementState::Pressed,
@@ -480,6 +531,48 @@ fn sample_effect_names() -> HashMap<u64, String> {
         .into_iter()
         .map(|e| (status_modules::effect_key(&e.id), e.id))
         .collect()
+}
+
+impl Game<'_> {
+    /// Keeps the held keys and mouse buttons (GLFW codes) the modules read.
+    fn native_track_input(&mut self, event: &WindowEvent) {
+        match event {
+            WindowEvent::KeyboardInput { event: key, .. } => {
+                if let PhysicalKey::Code(code) = key.physical_key
+                    && let Some(g) = keys::glfw(code)
+                {
+                    let down = key.state == ElementState::Pressed;
+                    with_state(|s| {
+                        if down {
+                            s.held.insert(g);
+                        } else {
+                            s.held.remove(&g);
+                        }
+                    });
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let code = match button {
+                    MouseButton::Left => 0,
+                    MouseButton::Right => 1,
+                    MouseButton::Middle => 2,
+                    MouseButton::Back => 3,
+                    MouseButton::Forward => 4,
+                    MouseButton::Other(n) => i32::from(*n) + 2,
+                };
+                let down = *state == ElementState::Pressed;
+                with_state(|s| {
+                    if down {
+                        s.held.insert(code);
+                    } else {
+                        s.held.remove(&code);
+                    }
+                });
+            }
+            WindowEvent::Focused(false) => with_state(|s| s.held.clear()),
+            _ => {}
+        }
+    }
 }
 
 impl State {

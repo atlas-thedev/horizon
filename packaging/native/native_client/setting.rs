@@ -5,6 +5,16 @@
 
 use serde_json::Value;
 
+/// The live list a dropdown setting offers.
+#[derive(Clone, Copy, Debug)]
+pub struct DeviceList(pub fn() -> Vec<String>);
+
+impl PartialEq for DeviceList {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 as usize == other.0 as usize
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
     Bool { value: bool, def: bool },
@@ -18,7 +28,7 @@ pub enum Kind {
     /// A small pixel drawing (the custom crosshair) and the player's saved drawings.
     Pixels { size: usize, grid: Vec<bool>, def: Vec<bool>, saved: Vec<Vec<bool>>, mirror: bool },
     /// A choice from a live list (microphones, speakers, the counted item). "" is `empty_label`.
-    Device { value: String, options: fn() -> Vec<String>, empty_label: &'static str },
+    Device { value: String, options: DeviceList, empty_label: &'static str },
     /// `ModuleBinding`: a module's toggle chord, a GLFW key and SHIFT 1 / CONTROL 2 / ALT 4; unbound by default.
     Binding { key: i32, modifiers: i32 },
 }
@@ -60,7 +70,7 @@ impl Setting {
     }
     /// A choice from a live list, shown as a dropdown.
     pub fn device(id: &'static str, label: &'static str, options: fn() -> Vec<String>, empty_label: &'static str) -> Self {
-        Self::new(id, label, Kind::Device { value: String::new(), options, empty_label })
+        Self::new(id, label, Kind::Device { value: String::new(), options: DeviceList(options), empty_label })
     }
     /// A module's toggle keybind, unbound.
     pub fn binding() -> Self {

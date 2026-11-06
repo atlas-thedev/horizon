@@ -661,7 +661,6 @@ impl Menu {
     /// The live preview: the module drawn large over a game scene, inside its own card.
     #[allow(clippy::too_many_arguments)]
     fn stage(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, mi: usize, x: f32, y: f32, w: f32, h: f32) {
-        let _ = ui;
         c.round(x, y, w, h, 12.0, CARD);
         c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE);
         let inset = 6.0;
@@ -692,7 +691,7 @@ impl Menu {
             m.paint(c, ix + (iw - sz[0]) / 2.0, iy + (ih - sz[1]) / 2.0, &sample);
             c.pop_alpha();
             set_hud_scale(m, keep);
-        } else {
+        } else if !m.behaviour.preview(&m.state, c, &sample, ui.now, ix, iy, iw, ih) {
             let cy = iy + ih / 2.0;
             c.circle(ix + iw / 2.0, cy, 32.0, if enabled { 0xFFF4F4F5 } else { theme::SUBTLE_HOVER });
             c.icon(m.state.icon, 24.0, ix + iw / 2.0, cy, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });

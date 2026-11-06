@@ -276,7 +276,7 @@ impl Widgets {
         match &s.kind {
             Kind::Binding { .. } => ROW + 36.0,
             Kind::Pixels { size, .. } => ROW + PIX_CELL * *size as f32 + 18.0,
-            Kind::Device { options, .. } if open_device() == Some(s.id) => ROW + 30.0 * (1 + options().len()) as f32 + 8.0,
+            Kind::Device { options, .. } if open_device() == Some(s.id) => ROW + 30.0 * (1 + (options.0)().len()) as f32 + 8.0,
             _ => ROW,
         }
     }
@@ -431,7 +431,7 @@ impl Widgets {
         let bh = 28.0;
         let (bx, by) = (x + w - bw, y + (ROW - bh) / 2.0);
         let open = open_device() == Some(key);
-        let list = options();
+        let list = (options.0)();
         let current = if value.is_empty() { empty_label.to_owned() } else { value.clone() };
         let missing = !value.is_empty() && !list.contains(&value);
         let over = ui.hover(c, bx, by, bw, bh);
