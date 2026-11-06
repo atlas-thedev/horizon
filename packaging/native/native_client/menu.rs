@@ -5,6 +5,8 @@
 
 use super::module::{GameView, Module};
 use super::modules::Modules;
+use super::locker::Locker;
+use super::screenshots::Screenshots;
 use super::scroll::Scroll;
 use super::setting::{Kind, Setting};
 use super::textfield::TextField;
@@ -74,6 +76,11 @@ pub struct Menu {
     logo: Option<Arc<Image>>,
     backdrop: Option<Arc<Image>>,
     confirm_reset: bool,
+    shots: Screenshots,
+    locker: Locker,
+    who: String,
+    /// The instance folder (screenshots live under it).
+    pub game_dir: Option<std::path::PathBuf>,
     s_title: Setting,
     s_notify: Setting,
     s_activity: Setting,
@@ -93,6 +100,13 @@ impl Default for Menu {
 }
 
 impl Menu {
+    /// A menu for the instance in `game_dir`.
+    pub fn new_in(game_dir: Option<std::path::PathBuf>) -> Self {
+        let mut menu = Self::new();
+        menu.game_dir = game_dir;
+        menu
+    }
+
     pub fn new() -> Self {
         let mut search = TextField::new("menu:search");
         search.max_length = 64;
@@ -117,6 +131,10 @@ impl Menu {
             logo: Image::decode(assets::LOGO),
             backdrop: Image::decode(assets::HUD_BACKGROUND),
             confirm_reset: false,
+            shots: Screenshots::new(),
+            locker: Locker::new(),
+            who: String::new(),
+            game_dir: None,
             s_title: Setting::bool("title", "Native title screen", true),
             s_notify: Setting::bool("notify", "Message notifications in game", true),
             s_activity: Setting::bool("activity", "Show friends what I'm playing", true),
@@ -156,6 +174,17 @@ impl Menu {
             self.confirm_reset = false;
             return true;
         }
+        if self.tab ==            TAB_COSMETICS | TAB_SHOTS | TAB_MUSIC => {
+                header(c, TABS[self.tab], mx, py, hh);
+                if self.tab == TAB_COSMETICS {
+                    let store = "Get more in the Native Store";
+                    let sw = c.text_width(font::MEDIUM, 11.5, store);
+                    c.icon(theme::I_STORE, 14.0, mx + mw - 20.0 - sw - 12.0, py + hh / 2.0, theme::TEXT_MUTED);
+                    let lh = c.line_height(font::MEDIUM, 11.5);
+                    c.text(font::MEDIUM, 11.5, store, mx + mw - 20.0 - sw, py + (hh - lh) / 2.0, theme::TEXT_MUTED);
+                }&& self.shots.escape() {
+            return true;
+        }
         if self.selected.is_some() {
             self.selected = None;
             self.page_at = ui.now;
@@ -182,6 +211,12 @@ impl Menu {
             return;
         }
         self.tab = t;
+        if t == TAB_SHOTS {
+            self.shots.stale();
+        }
+        if t == TAB_COSMETICS {
+            self.locker.opened();
+        }
         self.selected = None;
         self.widgets.listening = None;
         self.confirm_reset = false;
@@ -192,6 +227,7 @@ impl Menu {
     #[allow(clippy::too_many_arguments)]
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &mut UiConfig, who: Option<&str>, in_world: bool) -> Action {
         let mut action = Action::None;
+        self.who = who.unwrap_or("").to_owned();
         let (w_all, h_all) = (c.width(), c.height());
         let e = ease(clamp01(((ui.now - self.shown_at) / 260.0) as f32));
         if in_world {
@@ -308,7 +344,14 @@ impl Menu {
 
     /// The tabs another part of the port draws (cosmetics, screenshots, music).
     fn other_tab(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) -> Action {
-        let _ = ui;
+        if self.tab == TAB_SHOTS {
+            self.shots.draw(ui, c, self.game_dir.as_deref(), x, y, w, h);
+            return Action::None;
+        }
+        if self.tab == TAB_COSMETICS {
+            self.locker.draw(ui, c, &self.who, self.page_at, x, y, w, h);
+            return Action::None;
+        }
         empty(c, x, y, w, h.min(260.0), theme::I_SPARKLES, "Coming soon", "This page is still being ported to the Rust Edition.");
         Action::None
     }

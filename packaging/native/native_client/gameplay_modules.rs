@@ -10,7 +10,7 @@ use super::previews;
 use super::setting::{self, Kind, Setting};
 use horizon_client::native_ui::canvas::clock_ms;
 use horizon_client::native_ui::tweaks::{self, TimeView, Zoom};
-use horizon_client::native_ui::{Canvas, font, icons, theme};
+use horizon_client::native_ui::{Canvas, icons, theme};
 
 pub fn all() -> Vec<Module> {
     vec![
@@ -993,6 +993,5 @@ mod tests {
             // Every module takes its settings in the page without panicking.
             let _ = m.shown_settings();
         }
-        let _ = font::BOLD;
     }
 }

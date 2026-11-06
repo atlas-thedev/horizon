@@ -10,13 +10,18 @@
 
 mod extra_modules;
 mod gameplay_modules;
+mod boxes;
 mod hud_editor;
 mod hud_modules;
 mod keys;
+mod locker;
 mod menu;
 mod module;
 mod modules;
+mod net;
+mod preview3d;
 mod previews;
+mod screenshots;
 mod scroll;
 mod setting;
 mod status;
@@ -24,6 +29,7 @@ mod status_modules;
 mod textfield;
 mod ui;
 mod uiconfig;
+mod wardrobe;
 mod widgets;
 
 use super::{Game, ItemStack, Screen};
@@ -83,14 +89,16 @@ thread_local! {
 fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|cell| {
         let mut slot = cell.borrow_mut();
-        let state = slot.get_or_insert_with(|| State {
+        let state = slot.get_or_insert_with(|| {
+            net::start(game_dir());
+            State {
             canvas: native_ui::canvas(),
             modules: Modules::new(game_dir()),
             clicks: [VecDeque::new(), VecDeque::new()],
             moved: None,
             speed: 0.0,
             ui: Ui::default(),
-            menu: Menu::new(),
+            menu: Menu::new_in(game_dir()),
             cfg: UiConfig::load(game_dir().as_deref()),
             events: Vec::new(),
             was_open: false,
@@ -102,6 +110,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             effect_names: sample_effect_names(),
             held: std::collections::HashSet::new(),
             toggles_before: None,
+            }
         });
         f(state)
     })

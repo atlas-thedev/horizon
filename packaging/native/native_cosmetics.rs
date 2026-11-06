@@ -724,3 +724,134 @@ mod tests {
         assert!(Model::parse(br#"{"texture":[0,0],"parts":[{}]}"#).is_err());
     }
 }
+
+// ── the Locker's preview ─────────────────────────────────────────────────
+
+/// A box of a part, for the preview to draw (`CosmeticModel.Cube`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PreviewCube {
+    pub origin: [f32; 3],
+    pub size: [f32; 3],
+    pub uv: [f32; 2],
+    pub inflate: f32,
+    pub mirror: bool,
+}
+
+/// One step of walking a model the way `CosmeticRenderer` does.
+#[derive(Debug)]
+pub enum Walk<'a> {
+    Push,
+    Pop,
+    /// Into a root part: the bone it hangs on.
+    Root(Bone),
+    /// The part's pose after its animations: pivot in pixels, rotation in radians.
+    Transform { pos: [f32; 3], rot: [f32; 3] },
+    Cubes(&'a [PreviewCube]),
+}
+
+fn axis_index(axis: Axis) -> usize {
+    match axis {
+        Axis::X => 0,
+        Axis::Y => 1,
+        Axis::Z => 2,
+    }
+}
+
+/// Position in an animation's cycle, 0 to 1 (`CosmeticPose.cycle`).
+fn cycle(a: &Anim, time: f64) -> f64 {
+    (f64::from(a.speed) * time + f64::from(a.phase)).rem_euclid(1.0)
+}
+
+fn walk_part(p: &NcmPart, time: f64, sink: &mut dyn FnMut(Walk)) {
+    sink(Walk::Push);
+    let mut pos = p.pivot;
+    let mut rot = p.rotation.map(f32::to_radians);
+    for a in &p.anims {
+        let i = axis_index(a.axis);
+        match a.motion {
+            Some(Motion::Spin) => {
+                let degrees = (f64::from(a.speed) * time + f64::from(a.phase) * 360.0).rem_euclid(360.0);
+                rot[i] += (degrees as f32).to_radians();
+            }
+            Some(Motion::Swing) => {
+                rot[i] += (f64::from(a.amplitude) * (std::f64::consts::TAU * cycle(a, time)).sin()).to_radians() as f32;
+            }
+            Some(Motion::Bob) => {
+                pos[i] += (f64::from(a.amplitude) * (std::f64::consts::TAU * cycle(a, time)).sin()) as f32;
+            }
+            None => {}
+        }
+    }
+    sink(Walk::Transform { pos, rot });
+    if !p.cubes.is_empty() {
+        let cubes: Vec<PreviewCube> = p
+            .cubes
+            .iter()
+            .map(|c| PreviewCube { origin: c.origin, size: c.size, uv: c.uv, inflate: c.inflate, mirror: c.mirror })
+            .collect();
+        sink(Walk::Cubes(&cubes));
+    }
+    for child in &p.children {
+        walk_part(child, time, sink);
+    }
+    sink(Walk::Pop);
+}
+
+impl Model {
+    /// The texture size the model's UVs are on.
+    pub fn texture_size(&self) -> [f32; 2] {
+        self.texture
+    }
+
+    /// Walks the parts `side` wears at `time` seconds, as `CosmeticRenderer.render` does with no armour worn.
+    pub fn walk(&self, side: u8, time: f64, sink: &mut dyn FnMut(Walk)) {
+        let side = if side != 0 { side } else { self.default_side() };
+        for root in self.roots.iter().filter(|r| r.side == 0 || r.side == side) {
+            sink(Walk::Push);
+            sink(Walk::Root(root.bone));
+            walk_part(root, time, sink);
+            sink(Walk::Pop);
+        }
+    }
+
+    /// `CosmeticModel.coversHead`, for the preview (a hood hides the skin's hat layer).
+    pub fn hides_hat(&self) -> bool {
+        self.roots.iter().filter(|r| r.bone == Bone::Head).any(|r| wraps(r, glam::Mat4::IDENTITY))
+    }
+}
+
+enum Preview {
+    Loading,
+    Ready(Arc<Model>),
+    Failed(Instant),
+}
+
+fn previews() -> &'static Mutex<HashMap<String, Preview>> {
+    static MODELS: OnceLock<Mutex<HashMap<String, Preview>>> = OnceLock::new();
+    MODELS.get_or_init(Default::default)
+}
+
+/// A cosmetic's model for the Locker's preview; the first ask starts the download.
+pub fn preview_model(base: &str, hash: &str) -> Option<Arc<Model>> {
+    let mut cache = previews().lock().unwrap_or_else(|e| e.into_inner());
+    match cache.get(hash) {
+        Some(Preview::Ready(m)) => return Some(m.clone()),
+        Some(Preview::Loading) => return None,
+        Some(Preview::Failed(at)) if at.elapsed() < RETRY => return None,
+        _ => {}
+    }
+    cache.insert(hash.to_owned(), Preview::Loading);
+    let (base, hash) = (base.to_owned(), hash.to_owned());
+    let spawned = std::thread::Builder::new().name("Native cosmetic model".into()).spawn({
+        let (base, hash) = (base.clone(), hash.clone());
+        move || {
+            let model = fetch(&base, &hash, MAX_MODEL_BYTES).and_then(|b| Model::parse(&b).ok());
+            let state = model.map_or_else(|| Preview::Failed(Instant::now()), |m| Preview::Ready(Arc::new(m)));
+            previews().lock().unwrap_or_else(|e| e.into_inner()).insert(hash, state);
+        }
+    });
+    if spawned.is_err() {
+        cache.insert(hash, Preview::Failed(Instant::now()));
+    }
+    None
+}
