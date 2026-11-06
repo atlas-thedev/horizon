@@ -96,6 +96,13 @@ impl Scroll {
         self.target += dy;
     }
 
+    /// Jump straight to the bottom (no glide) for a view of height `view_h`.
+    pub fn snap_bottom(&mut self, view_h: f32) {
+        let max = (self.content - view_h).max(0.0);
+        self.target = max;
+        self.offset = max;
+    }
+
     pub fn to_bottom(&mut self) {
         self.target = 1e9;
     }

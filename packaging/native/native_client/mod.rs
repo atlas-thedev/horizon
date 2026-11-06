@@ -13,6 +13,7 @@ mod gameplay_modules;
 mod avatars;
 mod boxes;
 mod chat_media;
+mod common;
 mod gif;
 mod hud_editor;
 mod hud_modules;
@@ -24,6 +25,8 @@ mod modules;
 mod net;
 mod preview3d;
 mod relay;
+mod relay_chat;
+mod relay_view;
 mod previews;
 mod screenshots;
 mod scroll;
@@ -31,6 +34,7 @@ mod setting;
 mod status;
 mod status_modules;
 mod textfield;
+mod toasts;
 mod ui;
 mod uiconfig;
 mod wardrobe;
@@ -83,7 +87,12 @@ struct State {
     /// GLFW codes of the keys and mouse buttons held, as the window events told.
     held: std::collections::HashSet<i32>,
     /// The game's own toggle-sprint and toggle-sneak options before Toggle Sprint took them over.
-    toggles_before: Option<(bool, bool)>,
+    /// The Relay chat, and whether it is what the Native screen shows.
+    relay: relay_view::RelayView,
+    relay_open: bool,
+    /// The chat to open the Relay screen on (from a toast).
+    relay_select: Option<String>,
+    toasts: toasts::Toasts,
 }
 
 thread_local! {
@@ -115,6 +124,10 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             effect_names: sample_effect_names(),
             held: std::collections::HashSet::new(),
             toggles_before: None,
+            relay: relay_view::RelayView::new(),
+            relay_open: false,
+            relay_select: None,
+            toasts: toasts::Toasts::default(),
             }
         });
         f(state)
@@ -289,6 +302,16 @@ impl Game<'_> {
                 let (x, y) = (Hud::pos(hud.fx, w, size[0]), Hud::pos(hud.fy, h, size[1]));
                 m.paint(c, x, y, &g);
             }
+            // Message pop-ups (they never take input).
+            {
+                let now_ms = relay::now_ms();
+                let viewing = if state.relay_open && open { relay::snapshot().viewing } else { None };
+                state.toasts.take(state.cfg.notifications, viewing.as_deref(), now_ms);
+                if !open {
+                    let key = keys::name(state.cfg.relay_key);
+                    state.toasts.draw(c, &key, now_ms);
+                }
+            }
             if open {
                 let events = std::mem::take(&mut state.events);
                 state.ui.clip_in = clip;
@@ -296,9 +319,16 @@ impl Game<'_> {
                 if !state.was_open {
                     state.menu.opened(state.ui.now);
                     state.editor.opened(state.ui.now);
+                    if state.relay_open {
+                        state.relay.opened(&mut state.ui, state.relay_select.take().as_deref());
+                    }
                     state.was_open = true;
                 }
-                if state.editing {
+                if state.relay_open {
+                    if state.relay.draw(&mut state.ui, c, &mut state.cfg, g.in_world) == relay_view::RelayAction::Close {
+                        action = menu::Action::Close;
+                    }
+                } else if state.editing {
                     action = state.editor.draw(&mut state.ui, c, &mut state.modules, &g, g.in_world);
                 } else {
                     let who = Some(state.who.as_str()).filter(|n| !n.is_empty());
@@ -310,6 +340,7 @@ impl Game<'_> {
             } else {
                 state.was_open = false;
                 state.events.clear();
+                state.relay_open = false;
             }
             let (items, samples, effects) = (&state.items, &state.sample_items, &state.effect_names);
             c.finish_with(batch, &mut |b, d| self.native_host_draw(b, d, scale, items, samples, effects));
@@ -347,7 +378,27 @@ impl Game<'_> {
                 s.events.clear();
                 s.was_open = false;
                 s.editing = true;
+                s.relay_open = false;
                 s.who = who;
+            });
+            return true;
+        }
+        // The Relay key opens the chat from the world.
+        if let WindowEvent::KeyboardInput { event: key, .. } = event
+            && key.state == ElementState::Pressed
+            && !key.repeat
+            && let PhysicalKey::Code(code) = key.physical_key
+            && self.screen == Screen::Playing
+            && self.title.is_none()
+            && keys::glfw(code) == Some(with_state(|s| s.cfg.relay_key))
+            && self.native_mod_screen_open(MOD_ID)
+        {
+            let latest = with_state(|s| s.toasts.latest_key());
+            with_state(|s| {
+                s.events.clear();
+                s.was_open = false;
+                s.relay_open = true;
+                s.relay_select = latest;
             });
             return true;
         }
@@ -608,7 +659,11 @@ impl State {
                 self.menu.opened(now);
                 self.menu.open_mod(id, now);
             }
-            menu::Action::OpenRelay | menu::Action::Close | menu::Action::None => {}
+            menu::Action::OpenRelay => {
+                self.relay_open = true;
+                self.relay.opened(&mut self.ui, None);
+            }
+            menu::Action::Close | menu::Action::None => {}
         }
     }
 
@@ -662,13 +717,23 @@ impl Game<'_> {
                     | if m.alt_key() { ui::MOD_ALT } else { 0 }
                     | if m.super_key() { ui::MOD_SUPER } else { 0 };
                 let close = with_state(|s| {
-                    let State { ui, menu, editor, editing, cfg, events, .. } = s;
+                    let State { ui, menu, editor, editing, cfg, events, relay, relay_open, .. } = s;
                     if pressed && glfw == ui::KEY_ESCAPE {
-                        return !if *editing { editor.escape(ui) } else { menu.escape(ui) };
+                        return !if *relay_open {
+                            relay.escape(ui)
+                        } else if *editing {
+                            editor.escape(ui)
+                        } else {
+                            menu.escape(ui)
+                        };
+                    }
+                    // The Relay key closes the chat again, unless something is being typed.
+                    if *relay_open && pressed && !key.repeat && glfw == cfg.relay_key && ui.focus.is_none() {
+                        return true;
                     }
                     // The menu key closes it, unless a field or a keybind is waiting for the key.
                     let listening = if *editing { false } else { menu.widgets.listening.is_some() };
-                    if pressed && !key.repeat && glfw == cfg.menu_key && ui.focus.is_none() && !listening {
+                    if pressed && !key.repeat && glfw == cfg.menu_key && ui.focus.is_none() && !listening && !*relay_open {
                         return true;
                     }
                     events.push(Event::Key { code: glfw, mods, pressed });
