@@ -64,6 +64,9 @@ patch(HUD, '    pub inline_profiles: Vec<serde_json::Value>,\n}\n',
       '    pub native: Vec<NativeUpload>,\n}\n')
 patch(HUD, '            inline_profiles: Vec::new(),\n        }\n    }\n',
       '            inline_profiles: Vec::new(),\n            native: Vec::new(),\n        }\n    }\n')
+# The one test that spells a batch out field by field.
+patch(HUD, '                inline_profiles: Vec::new(),\n            };\n',
+      '                inline_profiles: Vec::new(),\n                native: Vec::new(),\n            };\n')
 patch(HUD, '    pub zoom: f32,\n}\nimpl HudRenderer {\n',
       '    pub zoom: f32,\n    native: NativePages,\n}\nimpl HudRenderer {\n')
 # First in the literal: `layout` and `uniform` move into their own fields after it.
