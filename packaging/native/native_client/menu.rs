@@ -1366,7 +1366,7 @@ mod tests {
         let mut mods = Modules::new(None);
         let mut cfg = UiConfig::default();
         let mut menu = Menu::new();
-        menu.opened(ui.now);
+        menu.opened(ui.now - 1000.0);
         for tab in 0..TABS.len() {
             menu.open_tab(tab, ui.now);
             menu.draw(&mut ui, &mut c, &mut mods, &mut cfg, Some("Steve"), true);

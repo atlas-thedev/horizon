@@ -45,6 +45,11 @@ pub struct GameView {
     pub down: [bool; 9],
     pub playing: bool,
     pub hud_allowed: bool,
+    pub vitals: Vitals,
+    /// The world's time of day in ticks (0 - 23999), the game time and the dimension id.
+    pub day_time: i64,
+    pub game_time: i64,
+    pub dimension: String,
 }
 
 pub const CONTROLS: [&str; 9] = ["forward", "left", "back", "right", "jump", "sneak", "sprint", "attack", "use"];
@@ -83,6 +88,10 @@ impl GameView {
             mem_max: 4 << 30,
             playing: true,
             hud_allowed: true,
+            vitals: Vitals::sample(),
+            day_time: 6000,
+            game_time: 123_456,
+            dimension: "minecraft:overworld".to_owned(),
             ..GameView::default()
         }
     }
@@ -273,6 +282,10 @@ pub trait Behaviour: Send {
     }
     /// The module was switched on or off (`Module.onEnable` / `onDisable`).
     fn toggled(&mut self, _on: bool) {}
+    /// True when the module reads the player's health, effects or items (`Module.needs`).
+    fn needs_vitals(&self) -> bool {
+        false
+    }
 }
 
 /// A module's switch, settings and place, without its behaviour (so a
@@ -509,5 +522,133 @@ impl Module {
         if let Some(h) = self.state.hud.as_mut() {
             h.reset_position();
         }
+    }
+}
+
+/// One item stack as the HUD modules see it. `key` tells the host which stack to draw
+/// (`Canvas::host`), so the modules never hold the game's own type.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StackView {
+    pub id: String,
+    pub count: u32,
+    pub damage: u32,
+    pub max: u32,
+    pub key: u64,
+}
+
+impl StackView {
+    /// Remaining durability fraction (1 = new); 1 for things that do not wear.
+    pub fn durability(&self) -> f32 {
+        if self.max == 0 {
+            1.0
+        } else {
+            ((self.max.saturating_sub(self.damage)) as f32 / self.max as f32).clamp(0.0, 1.0)
+        }
+    }
+}
+
+/// An active potion effect. `id` is the bare vanilla id ("speed"), or "namespace:name" for modded ones.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EffectView {
+    pub id: String,
+    pub amp: i32,
+    pub ticks: i32,
+    pub ambient: bool,
+    pub infinite: bool,
+}
+
+/// What `Canvas::host` kinds mean.
+pub const HOST_ITEM: u32 = 1;
+pub const HOST_EFFECT: u32 = 2;
+/// Keys at and above this are the made-up stacks of previews.
+pub const SAMPLE_KEY: u64 = u64::MAX - 1024;
+
+/// What the status modules read: the player's health, effects and items.
+#[derive(Clone, Debug)]
+pub struct Vitals {
+    pub health: f32,
+    pub max_health: f32,
+    pub absorption: f32,
+    pub armor_value: i32,
+    pub food: i32,
+    pub saturation: f32,
+    pub effects: Vec<EffectView>,
+    /// head, chest, legs, feet
+    pub armor: [Option<StackView>; 4],
+    /// 0 - 8 hotbar, 9 - 35 main inventory
+    pub inv: Vec<Option<StackView>>,
+    pub hand: Option<StackView>,
+    pub offhand: Option<StackView>,
+    pub selected: usize,
+    pub target: Option<(String, f32, f32)>,
+}
+
+impl Default for Vitals {
+    fn default() -> Self {
+        Vitals {
+            health: 20.0,
+            max_health: 20.0,
+            absorption: 0.0,
+            armor_value: 0,
+            food: 20,
+            saturation: 5.0,
+            effects: Vec::new(),
+            armor: Default::default(),
+            inv: vec![None; 36],
+            hand: None,
+            offhand: None,
+            selected: 0,
+            target: None,
+        }
+    }
+}
+
+impl Vitals {
+    /// `Game.fillSample`: believable values for the menu's previews.
+    pub fn sample() -> Vitals {
+        let now = crate::native_ui::canvas::clock_ms();
+        let mut v = Vitals {
+            health: 17.0,
+            absorption: 4.0,
+            armor_value: 15,
+            food: 15,
+            saturation: 4.2,
+            ..Vitals::default()
+        };
+        let ids = ["speed", "strength", "regeneration", "night_vision", "fire_resistance"];
+        let amp = [1, 2, 0, 0, 0];
+        let ticks = [20 * 134, 20 * 61, 20 * 7 - (now / 50.0) as i32 % 100, 20 * 480, 20 * 193];
+        for i in 0..ids.len() {
+            v.effects.push(EffectView { id: ids[i].to_owned(), amp: amp[i], ticks: ticks[i], ambient: false, infinite: false });
+        }
+        let mut next = 0u64;
+        let mut stack = |id: &str, count: u32, damage: u32, max: u32| {
+            next += 1;
+            Some(StackView { id: id.to_owned(), count, damage, max, key: SAMPLE_KEY + next })
+        };
+        v.armor = [
+            stack("diamond_helmet", 1, 53, 363),
+            stack("diamond_chestplate", 1, 120, 528),
+            stack("iron_leggings", 1, 31, 225),
+            stack("netherite_boots", 1, 17, 481),
+        ];
+        let items = [
+            "diamond_sword", "bow", "golden_apple", "cooked_beef", "ender_pearl", "oak_planks", "cobblestone", "torch", "water_bucket",
+            "diamond_pickaxe", "arrow", "oak_log", "iron_ingot", "diamond", "bread", "grass_block", "tnt", "shield", "potion",
+            "splash_potion", "lingering_potion", "stone", "leather_chestplate",
+        ];
+        let counts = [1, 1, 6, 24, 12, 64, 48, 32, 1, 1, 128, 22, 31, 9, 16, 7, 8, 1, 1, 1, 1, 64, 1];
+        for (i, id) in items.iter().enumerate() {
+            let slot = if i < 9 { i } else { 9 + (i - 9) };
+            if slot >= v.inv.len() {
+                break;
+            }
+            let (damage, max) = if i == 0 { (120, 1561) } else if i == 9 { (300, 1561) } else { (0, 0) };
+            v.inv[slot] = stack(id, counts[i], damage, max);
+        }
+        v.hand = stack("diamond_sword", 1, 120, 1561);
+        v.offhand = stack("shield", 1, 12, 336);
+        v.target = Some(("Zombie".to_owned(), 13.0, 20.0));
+        v
     }
 }

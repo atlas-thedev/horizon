@@ -20,6 +20,7 @@ impl Modules {
     pub fn new(game_dir: Option<PathBuf>) -> Self {
         let mut all = Vec::new();
         all.extend(super::hud_modules::all());
+        all.extend(super::status_modules::all());
         let mut modules = Modules {
             all,
             file: game_dir.map(|d| d.join("config").join("native-modules.json")),
@@ -29,15 +30,22 @@ impl Modules {
         modules
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, id: &str) -> Option<&Module> {
         self.all.iter().find(|m| m.state.id == id)
     }
 
+    #[allow(dead_code)]
     pub fn get_mut(&mut self, id: &str) -> Option<&mut Module> {
         self.all.iter_mut().find(|m| m.state.id == id)
     }
 
     /// Something changed: written to disk shortly after.
+    /// True when an enabled module reads the player's health, effects or items.
+    pub fn needs_vitals(&self) -> bool {
+        self.all.iter().any(|m| m.state.enabled && m.behaviour.needs_vitals())
+    }
+
     pub fn changed(&mut self) {
         if self.dirty.is_none() {
             self.dirty = Some(Instant::now());

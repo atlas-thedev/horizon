@@ -16,12 +16,15 @@ mod module;
 mod modules;
 mod scroll;
 mod setting;
+mod status;
+mod status_modules;
 mod textfield;
 mod ui;
 mod uiconfig;
 mod widgets;
 
-use super::{Game, Screen};
+use super::{Game, ItemStack, Screen};
+use std::collections::HashMap;
 use horizon_client::hud::HudBatch;
 use horizon_client::native_ui::{self, Canvas};
 use hud_editor::HudEditor;
@@ -38,9 +41,6 @@ use winit::keyboard::PhysicalKey;
 
 /// The id the Native menu opens its own screen under (`native_mod_screen_open`).
 const MOD_ID: &str = "native-client";
-
-/// `UiConfig.scale`: the player's UI size on top of the window's.
-const CONFIG_SCALE: f32 = 1.0;
 
 struct State {
     canvas: Canvas,
@@ -61,6 +61,12 @@ struct State {
     editing: bool,
     /// The signed-in player's name, read when the screen opens.
     who: String,
+    /// The stacks the status modules show this frame (`StackView::key` is an index).
+    items: Vec<ItemStack>,
+    /// The made-up stacks of previews, by key.
+    sample_items: HashMap<u64, ItemStack>,
+    /// Effect ids by `status_modules::effect_key`, for the icons.
+    effect_names: HashMap<u64, String>,
 }
 
 thread_local! {
@@ -84,6 +90,9 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             editor: HudEditor::new(),
             editing: true,
             who: String::new(),
+            items: Vec::new(),
+            sample_items: sample_stacks(),
+            effect_names: sample_effect_names(),
         });
         f(state)
     })
@@ -147,7 +156,18 @@ impl Game<'_> {
         let in_world = player.is_some() && self.title.is_none();
         let (mem_used, mem_max) = horizon_client::debug_overlay::ProcessMemory::read()
             .map_or((0, 0), |m| (m.used, m.max));
+        state.items.clear();
+        let vitals = if in_world && state.modules.needs_vitals() {
+            self.native_vitals(&mut state.items, &mut state.effect_names)
+        } else {
+            module::Vitals::default()
+        };
+        let clock = self.native_clock();
         GameView {
+            vitals,
+            day_time: clock.as_ref().map_or(0, |c| c.day_time),
+            game_time: clock.as_ref().map_or(0, |c| c.game_time),
+            dimension: player.as_ref().map(|p| p.dimension.to_string()).unwrap_or_default(),
             in_world,
             sample: false,
             fps: self.fps.round() as i32,
@@ -235,7 +255,8 @@ impl Game<'_> {
                 state.was_open = false;
                 state.events.clear();
             }
-            c.finish(batch);
+            let (items, samples, effects) = (&state.items, &state.sample_items, &state.effect_names);
+            c.finish_with(batch, &mut |b, d| self.native_host_draw(b, d, scale, items, samples, effects));
             state.apply(&action);
             (action, copied)
         });
@@ -291,6 +312,125 @@ impl Game<'_> {
         }
         false
     }
+}
+
+impl Game<'_> {
+    /// `McBridge.vitals`: the player's health, effects and items for the status modules.
+    fn native_vitals(&self, items: &mut Vec<ItemStack>, effect_names: &mut HashMap<u64, String>) -> module::Vitals {
+        let mut v = module::Vitals::default();
+        if let Some(p) = &self.player {
+            v.health = p.health.health() as f32;
+            v.max_health = p.attribute("minecraft:max_health").unwrap_or(20.0) as f32;
+            v.absorption = p.health.absorption() as f32;
+            v.armor_value = p
+                .attribute("minecraft:armor")
+                .or_else(|_| p.attribute("armor"))
+                .unwrap_or(0.0) as i32;
+            v.food = p.health.food.food as i32;
+            v.saturation = p.health.food.saturation as f32;
+        }
+        for e in &self.potions.effects.list {
+            let id = e.id.trim_start_matches("minecraft:").to_owned();
+            effect_names.insert(status_modules::effect_key(&id), id.clone());
+            v.effects.push(module::EffectView {
+                id,
+                amp: e.amplifier,
+                ticks: e.duration.max(0),
+                ambient: e.ambient,
+                infinite: e.duration == -1,
+            });
+        }
+        for (i, stack) in self.armor.iter().enumerate() {
+            v.armor[i] = stack.as_ref().map(|s| self.native_stack(s, items));
+        }
+        for (i, stack) in self.inventory.iter().enumerate().take(36) {
+            v.inv[i] = stack.as_ref().map(|s| self.native_stack(s, items));
+        }
+        v.selected = self.selected;
+        v.hand = self.inventory.get(self.selected).and_then(Option::as_ref).map(|s| self.native_stack(s, items));
+        v.offhand = self.offhand.as_ref().map(|s| self.native_stack(s, items));
+        v
+    }
+
+    fn native_stack(&self, stack: &ItemStack, items: &mut Vec<ItemStack>) -> module::StackView {
+        let max = self.items().get(&stack.item).map_or(0, |i| i.max_damage);
+        items.push(stack.clone());
+        module::StackView {
+            id: stack.item.trim_start_matches("minecraft:").to_owned(),
+            count: stack.count,
+            damage: stack.damage,
+            max,
+            key: (items.len() - 1) as u64,
+        }
+    }
+
+    /// The game draws what the canvas asked it to (`Canvas::host`): an item icon or an effect icon,
+    /// at the canvas's place and size.
+    fn native_host_draw(
+        &self,
+        batch: &mut HudBatch,
+        d: &native_ui::canvas::HostDraw,
+        canvas_scale: f32,
+        items: &[ItemStack],
+        samples: &HashMap<u64, ItemStack>,
+        effects: &HashMap<u64, String>,
+    ) {
+        // Canvas units are logical pixels; the batch is in GUI units.
+        let k = canvas_scale / batch.scale;
+        let (gx, gy, size) = (d.x * k, d.y * k, d.size * k);
+        match d.kind {
+            module::HOST_ITEM => {
+                let stack = if d.key >= module::SAMPLE_KEY { samples.get(&d.key) } else { items.get(d.key as usize) };
+                let Some(stack) = stack else { return };
+                let start = batch.vertices.len();
+                self.draw_item_model(batch, stack, gx, gy);
+                batch.scale_since(start, gx, gy, size / 16.0, size / 16.0);
+            }
+            module::HOST_EFFECT => {
+                let Some(id) = effects.get(&d.key) else { return };
+                let draws = [super::hud_layout::GuiDraw::Sprite {
+                    sprite: std::borrow::Cow::Owned(horizon_client_core::potions::sprite(id)),
+                    x: gx.round() as i32,
+                    y: gy.round() as i32,
+                    w: size.round() as i32,
+                    h: size.round() as i32,
+                    region: None,
+                    color: super::hud_layout::WHITE,
+                    blend: super::hud_layout::Blend::Textured,
+                }];
+                super::hud_layout::paint(batch, &self.gui.atlas, &draws);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The made-up stacks of previews, by key (`Vitals::sample` hands out the keys).
+fn sample_stacks() -> HashMap<u64, ItemStack> {
+    let v = module::Vitals::sample();
+    let mut out = HashMap::new();
+    let all = v.armor.iter().chain(v.inv.iter()).chain([&v.hand, &v.offhand]).flatten();
+    for s in all {
+        out.insert(
+            s.key,
+            ItemStack {
+                item: std::sync::Arc::from(s.id.as_str()),
+                count: s.count,
+                damage: s.damage,
+                extra: None,
+            },
+        );
+    }
+    out
+}
+
+/// The effect ids of previews, by key.
+fn sample_effect_names() -> HashMap<u64, String> {
+    module::Vitals::sample()
+        .effects
+        .into_iter()
+        .map(|e| (status_modules::effect_key(&e.id), e.id))
+        .collect()
 }
 
 impl State {
