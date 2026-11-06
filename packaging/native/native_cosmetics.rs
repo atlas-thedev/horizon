@@ -61,8 +61,6 @@ impl Armor {
 #[derive(Debug)]
 pub struct Native {
     pub items: Vec<(Armor, Arc<Item>)>,
-    /// `CosmeticModel.coversHead`: a hood or helmet the head sits inside.
-    pub covers_head: bool,
 }
 
 #[derive(Debug)]
@@ -283,7 +281,9 @@ impl Model {
     }
 
     /// `CosmeticModel.coversHead`: a head root has a head-sized box the head's
-    /// centre (0, -4, 0) sits inside, at rest.
+    /// centre (0, -4, 0) sits inside, at rest. The Java mod hides the skin's hat
+    /// layer and the helmet under such a hood; the game does not do that yet.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn covers_head(&self) -> bool {
         self.roots
             .iter()
@@ -306,10 +306,7 @@ impl Model {
             .into_iter()
             .map(|(armor, roots)| (armor, Arc::new(self.item(id, &roots, texture))))
             .collect();
-        Native {
-            items,
-            covers_head: self.covers_head(),
-        }
+        Native { items }
     }
 
     fn item(&self, id: &str, roots: &[&NcmPart], texture: &Texture) -> Item {
