@@ -554,14 +554,14 @@ fn load(base: &str, cosmetic: &horizon_client::native_skins::CosmeticRef) -> Opt
 /// The cosmetic once its files are loaded; the first ask starts the download.
 fn get(base: &str, cosmetic: &horizon_client::native_skins::CosmeticRef) -> Option<Arc<Native>> {
     let key = (cosmetic.model.clone(), cosmetic.texture.clone(), cosmetic.side);
-    let mut library = library();
-    match library.get(&key) {
+    let mut cache = library();
+    match cache.get(&key) {
         Some(State::Ready(native)) => return Some(native.clone()),
         Some(State::Loading) => return None,
         Some(State::Failed(at)) if at.elapsed() < RETRY => return None,
         _ => {}
     }
-    library.insert(key.clone(), State::Loading);
+    cache.insert(key.clone(), State::Loading);
     let (base, cosmetic, done) = (base.to_owned(), cosmetic.clone(), key.clone());
     let spawned = std::thread::Builder::new()
         .name("Native cosmetic".into())
@@ -573,7 +573,7 @@ fn get(base: &str, cosmetic: &horizon_client::native_skins::CosmeticRef) -> Opti
             library().insert(done, state);
         });
     if spawned.is_err() {
-        library.insert(key, State::Failed(Instant::now()));
+        cache.insert(key, State::Failed(Instant::now()));
     }
     None
 }
