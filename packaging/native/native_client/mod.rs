@@ -228,7 +228,6 @@ impl Game<'_> {
                     let who = Some(state.who.as_str()).filter(|n| !n.is_empty());
                     action = state.menu.draw(&mut state.ui, c, &mut state.modules, &mut state.cfg, who, g.in_world);
                 }
-                state.apply(&action);
                 state.ui.tooltips(c);
                 state.ui.end();
                 copied = state.ui.clip_out.take();
@@ -237,6 +236,7 @@ impl Game<'_> {
                 state.events.clear();
             }
             c.finish(batch);
+            state.apply(&action);
             (action, copied)
         });
         if let Some(text) = copied {

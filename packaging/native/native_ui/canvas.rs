@@ -50,6 +50,19 @@ struct Batch {
     start: usize,
 }
 
+/// Something the game itself draws at a place on the canvas (an item icon, a
+/// potion icon): the canvas keeps its place in the draw order and hands it
+/// to the host in [`Canvas::finish_with`]. Positions are in the canvas's logical units.
+#[derive(Clone, Debug)]
+pub struct HostDraw {
+    pub kind: u32,
+    pub key: u64,
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+    pub argb: u32,
+}
+
 /// `Canvas.mulAlpha`.
 pub fn mul_alpha(argb: u32, a: f32) -> u32 {
     let al = ((argb >> 24) as f32 * a).round() as u32;
@@ -111,6 +124,7 @@ pub struct Canvas {
     stamped_generation: Option<u32>,
     logo: Option<Arc<Image>>,
     pages: Pages,
+    host: Vec<(usize, HostDraw)>,
 }
 
 /// The key the Native logo is stamped under.
@@ -134,6 +148,7 @@ impl Canvas {
             stamped_generation: None,
             logo,
             pages: Pages::default(),
+            host: Vec::new(),
         }
     }
 
@@ -146,6 +161,7 @@ impl Canvas {
         self.scale = scale;
         self.quads.clear();
         self.batches.clear();
+        self.host.clear();
         self.clip.clear();
         self.clip.push([0, 0, fb_w as i32, fb_h as i32]);
         self.alpha = 1.0;
@@ -673,10 +689,31 @@ impl Canvas {
         self.push(tex, Geo::Free(xy, uv), [color; 4]);
     }
 
+    /// A square the game draws itself (`kind` and `key` tell the host what) at its place in the
+    /// draw order. Dropped unless it lies fully inside the current clip.
+    pub fn host(&mut self, kind: u32, key: u64, x: f32, y: f32, size: f32, argb: u32) {
+        let b = *self.clip.last().unwrap_or(&[0, 0, 0, 0]);
+        let (x0, y0, x1, y1) = (self.px(x), self.px(y), self.px(x + size), self.px(y + size));
+        if x0 < b[0] || y0 < b[1] || x1 > b[2] || y1 > b[3] {
+            return;
+        }
+        let argb = if self.alpha < 1.0 { mul_alpha(argb, self.alpha) } else { argb };
+        if argb >> 24 == 0 {
+            return;
+        }
+        self.host.push((self.quads.len(), HostDraw { kind, key, x, y, size, argb }));
+    }
+
     /// Hands the frame to the HUD: the atlas's changed pixels and new images
     /// as page uploads, then every quad as vertices, batch by batch, each run
     /// marked with the page it samples.
     pub fn finish(&mut self, batch: &mut HudBatch) {
+        self.finish_with(batch, &mut |_, _| {});
+    }
+
+    /// [`Canvas::finish`], with the host asked to draw its own squares between the quads.
+    pub fn finish_with(&mut self, batch: &mut HudBatch, host: &mut dyn FnMut(&mut HudBatch, &HostDraw)) {
+        let mut markers = std::mem::take(&mut self.host).into_iter().peekable();
         let pages = &mut self.pages;
         pages.frame += 1;
         let size = self.atlas.size;
@@ -727,30 +764,49 @@ impl Canvas {
                     }
                 }
             };
-            let start = batch.vertices.len();
-            for q in &self.quads[b.start..end] {
-                let (p, uv) = match q.geo {
-                    Geo::Rect([x0, y0, x1, y1, u0, v0, u1, v1]) => (
-                        [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
-                        [[u0, v0], [u1, v0], [u1, v1], [u0, v1]],
-                    ),
-                    Geo::Free(xy, uv) => (
-                        [[xy[0], xy[1]], [xy[2], xy[3]], [xy[4], xy[5]], [xy[6], xy[7]]],
-                        [[uv[0], uv[1]], [uv[2], uv[3]], [uv[4], uv[5]], [uv[6], uv[7]]],
-                    ),
-                };
-                for i in [0, 1, 2, 0, 2, 3] {
-                    batch.vertices.push(HudVertex {
-                        pos: [p[i][0] * to_gui, p[i][1] * to_gui],
-                        uv: uv[i],
-                        color: vertex_color(q.col[i]),
-                        depth: 0.0,
-                        glint_uv: [0.0, 0.0],
-                        text: 0,
-                    });
+            let mut seg = b.start;
+            loop {
+                // The host's own squares go where they were asked for, between the quads.
+                while markers.peek().is_some_and(|(at, _)| *at <= seg) {
+                    if let Some((_, d)) = markers.next() {
+                        host(batch, &d);
+                    }
+                }
+                let seg_end = markers.peek().map_or(end, |(at, _)| (*at).min(end));
+                if seg_end > seg {
+                    let start = batch.vertices.len();
+                    for q in &self.quads[seg..seg_end] {
+                        let (p, uv) = match q.geo {
+                            Geo::Rect([x0, y0, x1, y1, u0, v0, u1, v1]) => (
+                                [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                                [[u0, v0], [u1, v0], [u1, v1], [u0, v1]],
+                            ),
+                            Geo::Free(xy, uv) => (
+                                [[xy[0], xy[1]], [xy[2], xy[3]], [xy[4], xy[5]], [xy[6], xy[7]]],
+                                [[uv[0], uv[1]], [uv[2], uv[3]], [uv[4], uv[5]], [uv[6], uv[7]]],
+                            ),
+                        };
+                        for i in [0, 1, 2, 0, 2, 3] {
+                            batch.vertices.push(HudVertex {
+                                pos: [p[i][0] * to_gui, p[i][1] * to_gui],
+                                uv: uv[i],
+                                color: vertex_color(q.col[i]),
+                                depth: 0.0,
+                                glint_uv: [0.0, 0.0],
+                                text: 0,
+                            });
+                        }
+                    }
+                    batch.blend_since(start, Blend::Native(page));
+                }
+                seg = seg_end;
+                if seg >= end {
+                    break;
                 }
             }
-            batch.blend_since(start, Blend::Native(page));
+        }
+        for (_, d) in markers {
+            host(batch, &d);
         }
         // Images nobody drew for a while give their page back.
         let frame = pages.frame;
