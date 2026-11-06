@@ -165,6 +165,11 @@ impl Directory {
         self.entries.is_empty()
     }
 
+    /// The URL every texture, model and strip hash is appended to ("" until the first sync).
+    pub fn texture_base(&self) -> &str {
+        &self.texture_base
+    }
+
     /// `?epoch=…&since=…`: what the server needs to send only what changed.
     fn query(&self) -> String {
         format!("?epoch={}&since={}", self.epoch, self.revision)
