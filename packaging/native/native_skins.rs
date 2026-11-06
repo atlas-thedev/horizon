@@ -703,17 +703,17 @@ pub fn animated_cape(
         "capes/native-{}",
         crate::skins::texture_hash(&animation.strip).unwrap_or_default()
     );
-    let mut strips = strips();
-    let ready = match strips.strips.get(&animation.strip) {
+    let mut cache = strips();
+    let ready = match cache.strips.get(&animation.strip) {
         Some(Strip::Ready(frames)) => Some(frames.len()),
         Some(Strip::Loading) => None,
         Some(Strip::Failed(at)) if at.elapsed() < STRIP_RETRY => None,
         _ => {
-            if strips.strips.len() >= MAX_STRIPS {
-                strips.strips.retain(|_, s| !matches!(s, Strip::Failed(_)));
+            if cache.strips.len() >= MAX_STRIPS {
+                cache.strips.retain(|_, s| !matches!(s, Strip::Failed(_)));
             }
-            if strips.strips.len() < MAX_STRIPS {
-                strips.strips.insert(animation.strip.clone(), Strip::Loading);
+            if cache.strips.len() < MAX_STRIPS {
+                cache.strips.insert(animation.strip.clone(), Strip::Loading);
                 let (url, frames) = (animation.strip.clone(), animation.frames);
                 let spawned = std::thread::Builder::new()
                     .name("Native cape".into())
@@ -725,22 +725,22 @@ pub fn animated_cape(
                         strips().strips.insert(url, state);
                     });
                 if spawned.is_err() {
-                    strips.strips.insert(animation.strip.clone(), Strip::Failed(Instant::now()));
+                    cache.strips.insert(animation.strip.clone(), Strip::Failed(Instant::now()));
                 }
             }
             None
         }
     }?;
     let frame = frame_at(animation, started().elapsed()) % ready;
-    let fresh = strips.shown.get(&location) != Some(&frame) || !present(&location);
+    let fresh = cache.shown.get(&location) != Some(&frame) || !present(&location);
     let upload = fresh
-        .then(|| match strips.strips.get(&animation.strip) {
+        .then(|| match cache.strips.get(&animation.strip) {
             Some(Strip::Ready(frames)) => frames.get(frame).cloned(),
             _ => None,
         })
         .flatten();
     if upload.is_some() {
-        strips.shown.insert(location.clone(), frame);
+        cache.shown.insert(location.clone(), frame);
     }
     Some((location, upload))
 }
