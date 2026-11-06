@@ -50,6 +50,8 @@ for f in (source / 'assets').iterdir():
     else:
         shutil.copyfile(f, target / 'assets' / f.name)
 insert_after(RENDER / 'lib.rs', 'pub mod font;\n', 'pub mod native_ui;\n')
+CLIENT_LIB = root / 'crates/horizon-client/src/client_lib.rs'
+insert_after(CLIENT_LIB, 'pub mod discord_presence;\n', 'pub use horizon_client_render::native_ui;\n')
 
 # Native texture pages in the HUD pass.
 shutil.copyfile(native / 'packaging/native/native_pages.rs', RENDER / 'native_pages.rs')
