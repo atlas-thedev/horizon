@@ -325,7 +325,7 @@ fn verify(used: &str, api: &str) {
 #[derive(Debug, Clone, PartialEq)]
 pub enum HttpError {
     Unauthorized,
-    Status(u16),
+    Status(u16, Option<String>),
     TooLarge,
     Other(String),
 }
@@ -334,7 +334,8 @@ impl std::fmt::Display for HttpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HttpError::Unauthorized => write!(f, "401"),
-            HttpError::Status(c) => write!(f, "HTTP {c}"),
+            HttpError::Status(c, Some(m)) => write!(f, "{m} (HTTP {c})"),
+            HttpError::Status(c, None) => write!(f, "HTTP {c}"),
             HttpError::TooLarge => write!(f, "too large"),
             HttpError::Other(e) => write!(f, "{e}"),
         }
@@ -361,9 +362,20 @@ fn finish(result: Result<ureq::Response, ureq::Error>, limit: u64) -> Result<Vec
             if body.len() as u64 > limit { Err(HttpError::TooLarge) } else { Ok(body) }
         }
         Err(ureq::Error::Status(401, _)) => Err(HttpError::Unauthorized),
-        Err(ureq::Error::Status(code, _)) => Err(HttpError::Status(code)),
+        Err(ureq::Error::Status(code, response)) => Err(HttpError::Status(code, api_message(code, response))),
         Err(e) => Err(HttpError::Other(e.to_string())),
     }
+}
+
+/// The server's own error text (`{"error": "Already friends."}`) of a 4xx reply.
+fn api_message(code: u16, response: ureq::Response) -> Option<String> {
+    if !(400..500).contains(&code) {
+        return None;
+    }
+    let mut body = Vec::new();
+    response.into_reader().take(16 * 1024).read_to_end(&mut body).ok()?;
+    let value: Value = serde_json::from_slice(&body).ok()?;
+    value.get("error").and_then(Value::as_str).map(str::to_owned)
 }
 
 fn with_auth(request: ureq::Request, ticket: Option<&str>) -> ureq::Request {
@@ -402,7 +414,7 @@ pub fn open_stream(url: &str, ticket: Option<&str>) -> Result<Box<dyn Read + Sen
     match request.call() {
         Ok(response) => Ok(Box::new(response.into_reader())),
         Err(ureq::Error::Status(401, _)) => Err(HttpError::Unauthorized),
-        Err(ureq::Error::Status(code, _)) => Err(HttpError::Status(code)),
+        Err(ureq::Error::Status(code, _)) => Err(HttpError::Status(code, None)),
         Err(e) => Err(HttpError::Other(e.to_string())),
     }
 }

@@ -10,7 +10,10 @@
 
 mod extra_modules;
 mod gameplay_modules;
+mod avatars;
 mod boxes;
+mod chat_media;
+mod gif;
 mod hud_editor;
 mod hud_modules;
 mod keys;
@@ -20,6 +23,7 @@ mod module;
 mod modules;
 mod net;
 mod preview3d;
+mod relay;
 mod previews;
 mod screenshots;
 mod scroll;
@@ -91,6 +95,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
         let mut slot = cell.borrow_mut();
         let state = slot.get_or_insert_with(|| {
             net::start(game_dir());
+            relay::start();
             State {
             canvas: native_ui::canvas(),
             modules: Modules::new(game_dir()),

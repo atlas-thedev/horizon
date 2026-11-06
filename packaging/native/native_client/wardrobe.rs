@@ -380,7 +380,7 @@ fn post(body: Value, swap: Option<&'static str>) {
                     l.error = None;
                 } else {
                     l.error = Some(
-                        if e == HttpError::Status(403) { "Add it to your locker in the launcher first." } else { "Could not change your look. Try again." }
+                        if matches!(e, HttpError::Status(403, _)) { "Add it to your locker in the launcher first." } else { "Could not change your look. Try again." }
                             .to_owned(),
                     );
                 }

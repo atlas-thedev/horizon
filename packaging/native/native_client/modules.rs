@@ -177,9 +177,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("native-modules-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut m = Modules::new(Some(dir.clone()));
-        // The Java mod's defaults: FPS, Keystrokes and the watermark on.
+        // The Java mod's defaults: FPS, Keystrokes, Lag Free and the watermark on.
         let on: Vec<_> = m.all.iter().filter(|m| m.state.enabled).map(|m| m.state.id).collect();
-        assert_eq!(on, vec!["fps", "keystrokes", "watermark"]);
+        assert_eq!(on, vec!["fps", "keystrokes", "bgfps", "watermark"]);
         let fps = m.get_mut("fps").unwrap();
         fps.state.enabled = false;
         fps.state.hud.as_mut().unwrap().fx = 0.75;

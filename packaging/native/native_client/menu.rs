@@ -174,15 +174,7 @@ impl Menu {
             self.confirm_reset = false;
             return true;
         }
-        if self.tab ==            TAB_COSMETICS | TAB_SHOTS | TAB_MUSIC => {
-                header(c, TABS[self.tab], mx, py, hh);
-                if self.tab == TAB_COSMETICS {
-                    let store = "Get more in the Native Store";
-                    let sw = c.text_width(font::MEDIUM, 11.5, store);
-                    c.icon(theme::I_STORE, 14.0, mx + mw - 20.0 - sw - 12.0, py + hh / 2.0, theme::TEXT_MUTED);
-                    let lh = c.line_height(font::MEDIUM, 11.5);
-                    c.text(font::MEDIUM, 11.5, store, mx + mw - 20.0 - sw, py + (hh - lh) / 2.0, theme::TEXT_MUTED);
-                }&& self.shots.escape() {
+        if self.tab == TAB_SHOTS && self.shots.escape() {
             return true;
         }
         if self.selected.is_some() {
@@ -321,6 +313,13 @@ impl Menu {
             }
             TAB_COSMETICS | TAB_SHOTS | TAB_MUSIC => {
                 header(c, TABS[self.tab], mx, py, hh);
+                if self.tab == TAB_COSMETICS {
+                    let store = "Get more in the Native Store";
+                    let sw = c.text_width(font::MEDIUM, 11.5, store);
+                    c.icon(theme::I_STORE, 14.0, mx + mw - 20.0 - sw - 12.0, py + hh / 2.0, theme::TEXT_MUTED);
+                    let lh = c.line_height(font::MEDIUM, 11.5);
+                    c.text(font::MEDIUM, 11.5, store, mx + mw - 20.0 - sw, py + (hh - lh) / 2.0, theme::TEXT_MUTED);
+                }
                 c.push_alpha(pe);
                 let a = self.other_tab(ui, c, bx, by + (1.0 - pe) * 10.0, bw, bh);
                 if a != Action::None {
