@@ -8,6 +8,7 @@
 //! reads the game's own state directly; its own state lives on the game's
 //! thread.
 
+mod hud_editor;
 mod hud_modules;
 mod keys;
 mod menu;
@@ -23,6 +24,7 @@ mod widgets;
 use super::{Game, Screen};
 use horizon_client::hud::HudBatch;
 use horizon_client::native_ui::{self, Canvas};
+use hud_editor::HudEditor;
 use menu::Menu;
 use module::{GameView, Hud};
 use modules::Modules;
@@ -54,6 +56,11 @@ struct State {
     /// Input events since the last frame, for the Native UI.
     events: Vec<Event>,
     was_open: bool,
+    editor: HudEditor,
+    /// True while the HUD editor (with the hub) is up; else the menu.
+    editing: bool,
+    /// The signed-in player's name, read when the screen opens.
+    who: String,
 }
 
 thread_local! {
@@ -74,6 +81,9 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             cfg: UiConfig::load(game_dir().as_deref()),
             events: Vec::new(),
             was_open: false,
+            editor: HudEditor::new(),
+            editing: true,
+            who: String::new(),
         });
         f(state)
     })
@@ -209,11 +219,16 @@ impl Game<'_> {
                 state.ui.begin(&events, scale);
                 if !state.was_open {
                     state.menu.opened(state.ui.now);
+                    state.editor.opened(state.ui.now);
                     state.was_open = true;
                 }
-                let who = self.player_name();
-                let who = Some(who.as_str()).filter(|n| !n.is_empty());
-                action = state.menu.draw(&mut state.ui, c, &mut state.modules, &mut state.cfg, who, g.in_world);
+                if state.editing {
+                    action = state.editor.draw(&mut state.ui, c, &mut state.modules, &g, g.in_world);
+                } else {
+                    let who = Some(state.who.as_str()).filter(|n| !n.is_empty());
+                    action = state.menu.draw(&mut state.ui, c, &mut state.modules, &mut state.cfg, who, g.in_world);
+                }
+                state.apply(&action);
                 state.ui.tooltips(c);
                 state.ui.end();
                 copied = state.ui.clip_out.take();
@@ -227,9 +242,8 @@ impl Game<'_> {
         if let Some(text) = copied {
             self.clipboard.set(&text);
         }
-        match action {
-            menu::Action::Close => self.native_mod_screen_close(MOD_ID),
-            menu::Action::EditHud | menu::Action::None => {}
+        if action == menu::Action::Close {
+            self.native_mod_screen_close(MOD_ID);
         }
     }
 
@@ -249,9 +263,13 @@ impl Game<'_> {
             && keys::glfw(code) == Some(with_state(|s| s.cfg.menu_key))
             && self.native_mod_screen_open(MOD_ID)
         {
+            // The key opens the HUD editor with the hub in the middle.
+            let who = self.options.player_name();
             with_state(|s| {
                 s.events.clear();
                 s.was_open = false;
+                s.editing = true;
+                s.who = who;
             });
             return true;
         }
@@ -276,6 +294,28 @@ impl Game<'_> {
 }
 
 impl State {
+    /// What a view asked for: switch between the editor and the menu, jump to a tab or a module.
+    fn apply(&mut self, action: &menu::Action) {
+        let now = self.ui.now;
+        match action {
+            menu::Action::EditHud => {
+                self.editing = true;
+                self.editor.opened(now);
+            }
+            menu::Action::OpenMenu(tab) => {
+                self.editing = false;
+                self.menu.opened(now);
+                self.menu.open_tab(*tab, now);
+            }
+            menu::Action::OpenMod(id) => {
+                self.editing = false;
+                self.menu.opened(now);
+                self.menu.open_mod(id, now);
+            }
+            menu::Action::OpenRelay | menu::Action::Close | menu::Action::None => {}
+        }
+    }
+
     /// A paste shortcut is waiting in the input queue.
     fn wants_paste(&self) -> bool {
         self.events.iter().any(|e| {
@@ -326,12 +366,13 @@ impl Game<'_> {
                     | if m.alt_key() { ui::MOD_ALT } else { 0 }
                     | if m.super_key() { ui::MOD_SUPER } else { 0 };
                 let close = with_state(|s| {
-                    let State { ui, menu, cfg, events, .. } = s;
+                    let State { ui, menu, editor, editing, cfg, events, .. } = s;
                     if pressed && glfw == ui::KEY_ESCAPE {
-                        return !menu.escape(ui);
+                        return !if *editing { editor.escape(ui) } else { menu.escape(ui) };
                     }
                     // The menu key closes it, unless a field or a keybind is waiting for the key.
-                    if pressed && !key.repeat && glfw == cfg.menu_key && ui.focus.is_none() && menu.widgets.listening.is_none() {
+                    let listening = if *editing { false } else { menu.widgets.listening.is_some() };
+                    if pressed && !key.repeat && glfw == cfg.menu_key && ui.focus.is_none() && !listening {
                         return true;
                     }
                     events.push(Event::Key { code: glfw, mods, pressed });

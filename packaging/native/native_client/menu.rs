@@ -35,11 +35,16 @@ const OFF: u32 = 0xFFEF4444;
 const LOGO_KEY: u64 = 0x4D45_4E55_4C4F_474F;
 
 /// What the menu asks the game to do.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     None,
     Close,
     EditHud,
+    /// Open the menu on a tab.
+    OpenMenu(usize),
+    /// Open a module's own page in the menu.
+    OpenMod(String),
+    OpenRelay,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -358,7 +363,7 @@ impl Menu {
     }
 
     /// `ModuleSearch.matches`.
-    fn query_matches(m: &Module, q: &str) -> bool {
+    pub fn query_matches(m: &Module, q: &str) -> bool {
         let q = normalize(q);
         if q.is_empty() {
             return true;
@@ -1057,7 +1062,7 @@ enum Group {
 }
 
 /// `ModuleKeybinds.conflict` for the toggle key of module `mi`.
-fn conflict(mods: &Modules, mi: usize) -> Option<String> {
+pub fn conflict(mods: &Modules, mi: usize) -> Option<String> {
     let b = &mods.all[mi].state.toggle_key;
     if b.is_default() {
         return None;
@@ -1100,7 +1105,7 @@ fn set_hud_scale(m: &mut Module, v: f32) {
     }
 }
 
-fn normalize(q: &str) -> String {
+pub fn normalize(q: &str) -> String {
     q.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
