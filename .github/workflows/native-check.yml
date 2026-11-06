@@ -51,8 +51,11 @@ jobs:
         run: |
           python native/tools/native/rebrand.py src
           base64 -d native/packaging/native/icon64.png.b64 > src/crates/horizon-theme/icons/horizon-64.png
-          cp native/packaging/native/title_edition.rs src/crates/horizon-client-render/src/title_edition.rs
           python native/tools/native/boot_screen.py src native
+          python native/tools/native/native_api.py src native
+          python native/tools/native/native_skins.py src native
+          python native/tools/native/native_marks.py src native
+          python native/tools/native/native_cosmetics.py src native
           python -m pip install --quiet pillow
           python native/tools/native/make_vanilla_icon.py src/packaging/icons/horizon.ico src/crates/horizon-theme/icons/horizon-64.png
       - uses: dtolnay/rust-toolchain@stable
@@ -70,3 +73,10 @@ jobs:
         env:
           RUSTFLAGS: -C target-feature=+crt-static
         run: cargo test --locked -p horizon-client --lib ui_theme
+      - name: Native skins tests
+        working-directory: src
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          cargo test --locked -p horizon-client-lib -p horizon-client-render --lib native_
+          cargo test --locked -p horizon-client --lib native_cosmetics

@@ -19,6 +19,15 @@ What this fork changes (and nothing else):
   with `packaging/native/boot_paint.rs` and `packaging/native/native_boot.rs`. The launcher still passes
   the size, fullscreen and reduced-motion choices of its own settings. Each change names the exact upstream
   text it replaces, and the build fails when upstream changed it;
+- every Native player's skin and cape shows in game, as with the Java Native Client mod: the skin directory
+  (`/v1/skins/directory`, then the `/v1/skins/stream` events) is ported to Rust in
+  `packaging/native/native_skins.rs` and fed into the game's own skin lookup by `tools/native/native_skins.py`.
+  Same identity rule as the mod: premium UUIDs only take a look linked to exactly that account, offline players
+  match by name. Animated capes play frame by frame in the cape's skin slot;
+- the Native logo (or the Native+ mark) in front of Native players' names on name tags and in the tab list, from
+  the mod's own logo bitmaps (`packaging/native/native_marks.rs`, `tools/native/native_marks.py`);
+- Native 3D cosmetics: the mod's NCM models become the game's own cosmetic items and draw beside Horizon's
+  (`packaging/native/native_cosmetics.rs`, `tools/native/native_cosmetics.py`);
 - `.github/workflows/native-build.yml` builds the newest upstream Nightly with those changes and publishes
   the client as the release `native-<date>-<commit>`; `.github/workflows/native-check.yml` compiles the same
   changes on every pull request.
