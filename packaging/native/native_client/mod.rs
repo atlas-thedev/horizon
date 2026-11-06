@@ -9,19 +9,33 @@
 //! thread.
 
 mod hud_modules;
+mod keys;
+mod menu;
 mod module;
 mod modules;
+mod scroll;
 mod setting;
+mod textfield;
+mod ui;
+mod uiconfig;
+mod widgets;
 
 use super::{Game, Screen};
 use horizon_client::hud::HudBatch;
 use horizon_client::native_ui::{self, Canvas};
+use menu::Menu;
 use module::{GameView, Hud};
 use modules::Modules;
+use ui::{Event, Ui};
+use uiconfig::UiConfig;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::keyboard::PhysicalKey;
+
+/// The id the Native menu opens its own screen under (`native_mod_screen_open`).
+const MOD_ID: &str = "native-client";
 
 /// `UiConfig.scale`: the player's UI size on top of the window's.
 const CONFIG_SCALE: f32 = 1.0;
@@ -34,6 +48,12 @@ struct State {
     /// The last position and when, for the speed read-out.
     moved: Option<([f64; 3], Instant)>,
     speed: f32,
+    ui: Ui,
+    menu: Menu,
+    cfg: UiConfig,
+    /// Input events since the last frame, for the Native UI.
+    events: Vec<Event>,
+    was_open: bool,
 }
 
 thread_local! {
@@ -49,6 +69,11 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             clicks: [VecDeque::new(), VecDeque::new()],
             moved: None,
             speed: 0.0,
+            ui: Ui::default(),
+            menu: Menu::new(),
+            cfg: UiConfig::load(game_dir().as_deref()),
+            events: Vec::new(),
+            was_open: false,
         });
         f(state)
     })
@@ -132,7 +157,7 @@ impl Game<'_> {
             down,
             playing: in_world && self.screen == Screen::Playing,
             hud_allowed: in_world
-                && matches!(self.screen, Screen::Playing | Screen::Chat)
+                && matches!(self.screen, Screen::Playing | Screen::Chat | Screen::Mod)
                 && !self.ui.hide_gui
                 && !self.debug,
         }
@@ -140,18 +165,30 @@ impl Game<'_> {
 
     /// Once a frame, over the game's HUD and screens: the Native UI.
     pub(super) fn native_ui_frame(&mut self, batch: &mut HudBatch) {
-        with_state(|state| {
+        use horizon_client::clipboard::Clipboard;
+        let open = self.native_mod_screen() == Some(MOD_ID);
+        // The clipboard is read only when a paste shortcut came in.
+        let clip = if open && with_state(|s| s.wants_paste()) {
+            self.clipboard.get()
+        } else {
+            String::new()
+        };
+        let (action, copied) = with_state(|state| {
             let g = self.native_view(state);
             let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
-            let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * CONFIG_SCALE;
+            let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
             for m in &mut state.modules.all {
                 if m.state.enabled {
                     m.behaviour.frame(&m.state, &g);
                 }
             }
             state.modules.tick();
-            if !g.hud_allowed {
-                return;
+            let mut action = menu::Action::None;
+            let mut copied = None;
+            if !g.hud_allowed && !open {
+                state.events.clear();
+                state.was_open = false;
+                return (action, copied);
             }
             let c = &mut state.canvas;
             c.begin(fb[0], fb[1], scale);
@@ -166,13 +203,58 @@ impl Game<'_> {
                 let (x, y) = (Hud::pos(hud.fx, w, size[0]), Hud::pos(hud.fy, h, size[1]));
                 m.paint(c, x, y, &g);
             }
+            if open {
+                let events = std::mem::take(&mut state.events);
+                state.ui.clip_in = clip;
+                state.ui.begin(&events, scale);
+                if !state.was_open {
+                    state.menu.opened(state.ui.now);
+                    state.was_open = true;
+                }
+                let who = self.player_name();
+                let who = Some(who.as_str()).filter(|n| !n.is_empty());
+                action = state.menu.draw(&mut state.ui, c, &mut state.modules, &mut state.cfg, who, g.in_world);
+                state.ui.tooltips(c);
+                state.ui.end();
+                copied = state.ui.clip_out.take();
+            } else {
+                state.was_open = false;
+                state.events.clear();
+            }
             c.finish(batch);
+            (action, copied)
         });
+        if let Some(text) = copied {
+            self.clipboard.set(&text);
+        }
+        match action {
+            menu::Action::Close => self.native_mod_screen_close(MOD_ID),
+            menu::Action::EditHud | menu::Action::None => {}
+        }
     }
 
     /// Every window event, before the game handles it. True when the Native
     /// UI took it (the game then never sees it).
     pub(super) fn native_window_event(&mut self, event: &WindowEvent) -> bool {
+        if self.native_mod_screen() == Some(MOD_ID) {
+            return self.native_menu_event(event);
+        }
+        // The menu key opens the menu from the world.
+        if let WindowEvent::KeyboardInput { event: key, .. } = event
+            && key.state == ElementState::Pressed
+            && !key.repeat
+            && let PhysicalKey::Code(code) = key.physical_key
+            && self.screen == Screen::Playing
+            && self.title.is_none()
+            && keys::glfw(code) == Some(with_state(|s| s.cfg.menu_key))
+            && self.native_mod_screen_open(MOD_ID)
+        {
+            with_state(|s| {
+                s.events.clear();
+                s.was_open = false;
+            });
+            return true;
+        }
         if let WindowEvent::MouseInput {
             state: ElementState::Pressed,
             button,
@@ -190,6 +272,83 @@ impl Game<'_> {
             }
         }
         false
+    }
+}
+
+impl State {
+    /// A paste shortcut is waiting in the input queue.
+    fn wants_paste(&self) -> bool {
+        self.events.iter().any(|e| {
+            matches!(e, Event::Key { code: 86, mods, pressed: true } if mods & (ui::MOD_CONTROL | ui::MOD_SUPER) != 0)
+                || matches!(e, Event::Key { code: 260, mods, pressed: true } if mods & ui::MOD_SHIFT != 0)
+        })
+    }
+}
+
+impl Game<'_> {
+    /// Window events while the Native menu is open: the menu takes the mouse and
+    /// the keyboard. True when it took the event.
+    fn native_menu_event(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                with_state(|s| s.events.push(Event::Move { x: position.x, y: position.y }));
+                true
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let button = match button {
+                    MouseButton::Left => 0,
+                    MouseButton::Right => 1,
+                    _ => return true,
+                };
+                let pressed = *state == ElementState::Pressed;
+                with_state(|s| s.events.push(Event::Button { button, pressed }));
+                true
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let y = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => f64::from(*y),
+                    MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
+                };
+                with_state(|s| s.events.push(Event::Scroll { y }));
+                true
+            }
+            WindowEvent::KeyboardInput { event: key, .. } => {
+                let PhysicalKey::Code(code) = key.physical_key else {
+                    return true;
+                };
+                let Some(glfw) = keys::glfw(code) else {
+                    return true;
+                };
+                let pressed = key.state == ElementState::Pressed;
+                let m = self.modifiers;
+                let mods = if m.shift_key() { ui::MOD_SHIFT } else { 0 }
+                    | if m.control_key() { ui::MOD_CONTROL } else { 0 }
+                    | if m.alt_key() { ui::MOD_ALT } else { 0 }
+                    | if m.super_key() { ui::MOD_SUPER } else { 0 };
+                let close = with_state(|s| {
+                    let State { ui, menu, cfg, events, .. } = s;
+                    if pressed && glfw == ui::KEY_ESCAPE {
+                        return !menu.escape(ui);
+                    }
+                    // The menu key closes it, unless a field or a keybind is waiting for the key.
+                    if pressed && !key.repeat && glfw == cfg.menu_key && ui.focus.is_none() && menu.widgets.listening.is_none() {
+                        return true;
+                    }
+                    events.push(Event::Key { code: glfw, mods, pressed });
+                    if pressed && mods & (ui::MOD_CONTROL | ui::MOD_SUPER) == 0 {
+                        if let Some(text) = &key.text {
+                            events.extend(text.chars().map(Event::Char));
+                        }
+                    }
+                    false
+                });
+                if close {
+                    self.native_mod_screen_close(MOD_ID);
+                }
+                true
+            }
+            _ => false,
+        }
     }
 }
 

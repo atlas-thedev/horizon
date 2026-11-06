@@ -72,6 +72,12 @@ pub struct Ui {
     pub focus_claimed: bool,
     held_keys: u32,
     pending_tooltip: Option<String>,
+    /// `Ui.now`: milliseconds on the canvas's clock, refreshed each frame.
+    pub now: f64,
+    /// The system clipboard's text, read when a paste shortcut came in this frame.
+    pub clip_in: String,
+    /// Text to put on the system clipboard after this frame.
+    pub clip_out: Option<String>,
 }
 
 impl Default for Ui {
@@ -99,6 +105,9 @@ impl Default for Ui {
             focus_claimed: false,
             held_keys: 0,
             pending_tooltip: None,
+            now: 0.0,
+            clip_in: String::new(),
+            clip_out: None,
         }
     }
 }
@@ -109,6 +118,7 @@ impl Ui {
         let now = Instant::now();
         self.dt = self.last.map_or(0.016, |l| now.duration_since(l).as_secs_f32().min(0.1));
         self.last = Some(now);
+        self.now = horizon_client::native_ui::canvas::clock_ms();
         self.pressed = false;
         self.released = false;
         self.right_pressed = false;

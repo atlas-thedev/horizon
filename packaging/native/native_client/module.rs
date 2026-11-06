@@ -267,6 +267,12 @@ pub trait Behaviour: Send {
     }
     /// Called every frame while enabled.
     fn frame(&mut self, _m: &ModuleState, _g: &GameView) {}
+    /// A setting that does nothing right now (given the others) and is left out of the menu.
+    fn hidden(&self, _m: &ModuleState, _id: &str) -> bool {
+        false
+    }
+    /// The module was switched on or off (`Module.onEnable` / `onDisable`).
+    fn toggled(&mut self, _on: bool) {}
 }
 
 /// A module's switch, settings and place, without its behaviour (so a
@@ -448,6 +454,60 @@ impl Module {
                 hud.text(c, s, &line.value, tx, ty, col);
             }
             ty += lh + 2.0 * s;
+        }
+    }
+}
+
+impl Module {
+    /// `Module.setEnabled`.
+    pub fn set_enabled(&mut self, on: bool) {
+        if self.state.enabled != on {
+            self.state.enabled = on;
+            self.behaviour.toggled(on);
+        }
+    }
+
+    pub fn is_hud(&self) -> bool {
+        self.state.hud.is_some()
+    }
+
+    /// True when the module page shows a live preview beside its settings.
+    pub fn has_preview(&self) -> bool {
+        self.state.category != SETTINGS
+    }
+
+    /// `Module.shownSettings`: the module's own settings that currently do something.
+    pub fn shown_settings(&self) -> Vec<usize> {
+        self.state
+            .settings
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.fixed && !self.behaviour.hidden(&self.state, s.id))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// `HudModule.shownAppearance`: the shared look settings that currently do something.
+    pub fn shown_appearance(&self) -> Vec<usize> {
+        let Some(hud) = self.state.hud.as_ref() else {
+            return Vec::new();
+        };
+        let card = hud.style() == STYLE_CARD;
+        hud.appearance
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.fixed && s.id != SCALE && !(s.id == OPACITY && !card))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// `Module.resetSettings`.
+    pub fn reset_settings(&mut self) {
+        for s in self.state.all_settings_mut() {
+            s.reset();
+        }
+        if let Some(h) = self.state.hud.as_mut() {
+            h.reset_position();
         }
     }
 }
