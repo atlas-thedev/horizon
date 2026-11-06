@@ -1,0 +1,10 @@
+Native Module Icons — original artwork for Native Client
+
+The 23 module icons and their font/SVG source were drawn specifically for Native
+Client. No Lucide, Feather, or other third-party icon glyphs or paths were used.
+
+These assets are dedicated to the public domain under CC0 1.0 Universal, matching
+this repository's LICENSE. See https://creativecommons.org/publicdomain/zero/1.0/.
+
+Editable artwork and deterministic build: scripts/native-module-icons.py
+Codepoint and module mapping: native-modules.json
