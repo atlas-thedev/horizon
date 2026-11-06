@@ -40,16 +40,39 @@ shutil.copyfile(native / 'packaging/native/native_skins.rs', CLIENT / 'native_sk
 patch(CLIENT / 'client_lib.rs', 'pub mod discord_presence;\n',
       'pub mod discord_presence;\npub mod native_skins;\n')
 
+REMOTE = CLIENT / 'game/remote.rs'
 ANCHOR = '        let mut resolved: Vec<(u128, String)> = Vec::new();\n'
-patch(CLIENT / 'game/remote.rs', ANCHOR,
+patch(REMOTE, ANCHOR,
       '        // Native Client: every Native player\'s skin and cape (native_skins.rs).\n'
-      '        if let Some(r) = self.remote.as_ref() {\n'
-      '            let mut players: Vec<(u128, String)> =\n'
-      '                r.tab_players.values().map(|p| (p.uuid, p.name.clone())).collect();\n'
-      '            if !r.profile_name.is_empty() && !players.iter().any(|(u, _)| *u == local) {\n'
-      '                players.push((local, r.profile_name.clone()));\n'
+      '        let native_animated = match self.remote.as_ref() {\n'
+      '            Some(r) => {\n'
+      '                let mut players: Vec<(u128, String)> =\n'
+      '                    r.tab_players.values().map(|p| (p.uuid, p.name.clone())).collect();\n'
+      '                if !r.profile_name.is_empty() && !players.iter().any(|(u, _)| *u == local) {\n'
+      '                    players.push((local, r.profile_name.clone()));\n'
+      '                }\n'
+      '                horizon_client::native_skins::apply(&mut entries, players)\n'
       '            }\n'
-      '            horizon_client::native_skins::apply(&mut entries, players);\n'
-      '        }\n' + ANCHOR)
+      '            None => Vec::new(),\n'
+      '        };\n' + ANCHOR)
+
+# Animated capes: the current frame goes into the cape's own skin slot, uploaded only when it changes.
+CAPES = '        // PlayerInfo.getSkin: the downloaded skin and its model, else the\n'
+patch(REMOTE, CAPES,
+      '        // Native Client: animated capes, where the still cape (their first frame) resolved.\n'
+      '        for (uuid, animation) in &native_animated {\n'
+      '            if !capes.contains_key(uuid) {\n'
+      '                continue;\n'
+      '            }\n'
+      '            let shown = horizon_client::native_skins::animated_cape(animation, |l| {\n'
+      '                self.skin_slots.contains(l) && self.gui.atlas.sprites.contains_key(l)\n'
+      '            });\n'
+      '            if let Some((location, upload)) = shown {\n'
+      '                if let Some(rgba) = upload {\n'
+      '                    self.store_skin(location.clone(), rgba);\n'
+      '                }\n'
+      '                capes.insert(*uuid, location);\n'
+      '            }\n'
+      '        }\n' + CAPES)
 
 print('native_skins: Native skins and capes applied')

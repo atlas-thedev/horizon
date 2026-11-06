@@ -574,9 +574,15 @@ fn run(api: &str) {
 /// their own (an offline-mode server) gets an entry. Native textures are not
 /// signed by Mojang, so a changed entry is marked trusted, as the Java mod
 /// marks them `SIGNED`: vanilla would otherwise show other players Steve/Alex.
-pub fn apply(entries: &mut Vec<(u128, Textures)>, players: impl IntoIterator<Item = (u128, String)>) {
+///
+/// Returns the players whose Native cape is animated (full strip URLs), for
+/// [`animated_cape`].
+pub fn apply(
+    entries: &mut Vec<(u128, Textures)>,
+    players: impl IntoIterator<Item = (u128, String)>,
+) -> Vec<(u128, Animation)> {
     let self_name = crate::discord_presence::native_account();
-    apply_to(&directory(), self_name.as_deref(), entries, players);
+    apply_to(&directory(), self_name.as_deref(), entries, players)
 }
 
 fn apply_to(
@@ -584,9 +590,10 @@ fn apply_to(
     self_name: Option<&str>,
     entries: &mut Vec<(u128, Textures)>,
     players: impl IntoIterator<Item = (u128, String)>,
-) {
+) -> Vec<(u128, Animation)> {
+    let mut animated = Vec::new();
     if directory.is_empty() {
-        return;
+        return animated;
     }
     for (uuid, name) in players {
         let slot = entries.iter().position(|(u, _)| *u == uuid);
@@ -610,9 +617,132 @@ fn apply_to(
             textures.cape = None;
         } else if let Some(cape) = look.cape {
             textures.cape = Some(cape);
+            if let Some(animation) = look.animation {
+                animated.push((uuid, animation));
+            }
         }
         textures.signed = true;
     }
+    animated
+}
+
+/// An animated cape's frames, each laid out as `skins::process_cape` gives a
+/// still cape (64x64 RGBA, the picture in the top half).
+enum Strip {
+    Loading,
+    Ready(Vec<Vec<u8>>),
+    Failed(Instant),
+}
+
+const STRIP_RETRY: Duration = Duration::from_secs(120);
+const MAX_STRIPS: usize = 64;
+
+struct Strips {
+    strips: HashMap<String, Strip>,
+    /// The frame each cape slot holds now, so a frame is uploaded only when it changes.
+    shown: HashMap<String, usize>,
+}
+
+fn strips() -> std::sync::MutexGuard<'static, Strips> {
+    static STRIPS: OnceLock<std::sync::Mutex<Strips>> = OnceLock::new();
+    STRIPS
+        .get_or_init(|| {
+            std::sync::Mutex::new(Strips {
+                strips: HashMap::new(),
+                shown: HashMap::new(),
+            })
+        })
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Splits a strip of `frames` pictures stacked top to bottom into capes.
+pub fn split_strip(width: u32, height: u32, rgba: &[u8], frames: u32) -> Option<Vec<Vec<u8>>> {
+    let (w, frames) = (width as usize, frames.max(1) as usize);
+    let frame_h = height as usize / frames;
+    if w == 0 || frame_h == 0 || rgba.len() < w * height as usize * 4 {
+        return None;
+    }
+    (0..frames)
+        .map(|i| {
+            let start = i * frame_h * w * 4;
+            let slice = &rgba[start..start + frame_h * w * 4];
+            crate::skins::process_cape(width, frame_h as u32, slice)
+        })
+        .collect()
+}
+
+fn fetch_strip(url: &str, frames: u32) -> Option<Vec<Vec<u8>>> {
+    let response = agent(Duration::from_secs(20)).get(url).call().ok()?;
+    let mut body = Vec::new();
+    response.into_reader().take(MAX_JSON).read_to_end(&mut body).ok()?;
+    let (w, h, rgba) = crate::hud::decode_bytes(&body).ok()?;
+    split_strip(w, h, &rgba, frames)
+}
+
+/// The frame an animation shows `elapsed` after the game started.
+pub fn frame_at(animation: &Animation, elapsed: Duration) -> usize {
+    let frames = animation.frames.max(1) as u128;
+    (elapsed.as_millis() * animation.fps as u128 / 1000 % frames) as usize
+}
+
+fn started() -> Instant {
+    static START: OnceLock<Instant> = OnceLock::new();
+    *START.get_or_init(Instant::now)
+}
+
+/// The atlas location of an animated cape and, when the slot needs new
+/// pixels (a new frame, or `present` says the slot was lost), the frame to
+/// upload with `store_skin`. `None` until the strip is downloaded: the cape's
+/// first frame (its still cape) shows meanwhile.
+pub fn animated_cape(
+    animation: &Animation,
+    present: impl Fn(&str) -> bool,
+) -> Option<(String, Option<Vec<u8>>)> {
+    let location = format!(
+        "capes/native-{}",
+        crate::skins::texture_hash(&animation.strip).unwrap_or_default()
+    );
+    let mut strips = strips();
+    let ready = match strips.strips.get(&animation.strip) {
+        Some(Strip::Ready(frames)) => Some(frames.len()),
+        Some(Strip::Loading) => None,
+        Some(Strip::Failed(at)) if at.elapsed() < STRIP_RETRY => None,
+        _ => {
+            if strips.strips.len() >= MAX_STRIPS {
+                strips.strips.retain(|_, s| !matches!(s, Strip::Failed(_)));
+            }
+            if strips.strips.len() < MAX_STRIPS {
+                strips.strips.insert(animation.strip.clone(), Strip::Loading);
+                let (url, frames) = (animation.strip.clone(), animation.frames);
+                let spawned = std::thread::Builder::new()
+                    .name("Native cape".into())
+                    .spawn(move || {
+                        let state = match fetch_strip(&url, frames) {
+                            Some(frames) if !frames.is_empty() => Strip::Ready(frames),
+                            _ => Strip::Failed(Instant::now()),
+                        };
+                        strips().strips.insert(url, state);
+                    });
+                if spawned.is_err() {
+                    strips.strips.insert(animation.strip.clone(), Strip::Failed(Instant::now()));
+                }
+            }
+            None
+        }
+    }?;
+    let frame = frame_at(animation, started().elapsed()) % ready;
+    let fresh = strips.shown.get(&location) != Some(&frame) || !present(&location);
+    let upload = fresh
+        .then(|| match strips.strips.get(&animation.strip) {
+            Some(Strip::Ready(frames)) => frames.get(frame).cloned(),
+            _ => None,
+        })
+        .flatten();
+    if upload.is_some() {
+        strips.shown.insert(location.clone(), frame);
+    }
+    Some((location, upload))
 }
 
 #[cfg(test)]
@@ -745,6 +875,26 @@ mod tests {
         assert!(!allowed("http://api.playnative.net"));
         assert!(!allowed("https://playnative.net.evil.com"));
         assert!(!allowed("https://user@api.playnative.net"));
+    }
+
+    #[test]
+    fn a_strip_splits_into_capes_and_frames_follow_the_clock() {
+        // Two 64x32 frames: the first red, the second blue.
+        let mut rgba = Vec::new();
+        for frame in 0..2 {
+            for _ in 0..64 * 32 {
+                rgba.extend_from_slice(if frame == 0 { &[255, 0, 0, 255] } else { &[0, 0, 255, 255] });
+            }
+        }
+        let frames = split_strip(64, 64, &rgba, 2).unwrap();
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].len(), 64 * 64 * 4);
+        assert_eq!(&frames[0][..4], &[255, 0, 0, 255]);
+        assert_eq!(&frames[1][..4], &[0, 0, 255, 255]);
+        let animation = Animation { strip: String::new(), frames: 4, fps: 10 };
+        assert_eq!(frame_at(&animation, Duration::from_millis(0)), 0);
+        assert_eq!(frame_at(&animation, Duration::from_millis(250)), 2);
+        assert_eq!(frame_at(&animation, Duration::from_millis(450)), 0);
     }
 
     #[test]
