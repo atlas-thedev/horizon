@@ -17,6 +17,17 @@ pub const SWATCHES: [u32; 9] = [
 pub const ROW: f32 = 40.0;
 const PIX_CELL: f32 = 13.0;
 
+/// The dropdown that is unfolded under its row, by setting id.
+static OPEN_DEVICE: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+
+fn open_device() -> Option<&'static str> {
+    *OPEN_DEVICE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn set_open_device(id: Option<&'static str>) {
+    *OPEN_DEVICE.lock().unwrap_or_else(|e| e.into_inner()) = id;
+}
+
 /// Widget state that outlives a frame.
 #[derive(Default)]
 pub struct Widgets {
@@ -99,6 +110,10 @@ impl Setting {
 impl Widgets {
     /// Esc while a keybind listens: cancels it. True when consumed.
     pub fn escape(&mut self) -> bool {
+        if open_device().is_some() {
+            set_open_device(None);
+            return true;
+        }
         self.listening.take().is_some()
     }
 
@@ -261,6 +276,7 @@ impl Widgets {
         match &s.kind {
             Kind::Binding { .. } => ROW + 36.0,
             Kind::Pixels { size, .. } => ROW + PIX_CELL * *size as f32 + 18.0,
+            Kind::Device { options, .. } if open_device() == Some(s.id) => ROW + 30.0 * (1 + options().len()) as f32 + 8.0,
             _ => ROW,
         }
     }
@@ -403,6 +419,61 @@ impl Widgets {
         changed
     }
 
+    /// The dropdown of a [`Kind::Device`]: the current choice on the right, the list unfolded under it.
+    /// Returns whether the choice changed and the left edge of the control.
+    #[allow(clippy::too_many_arguments)]
+    fn device_row(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, s: &mut Setting, label_w: f32) -> (bool, f32) {
+        let Kind::Device { value, options, empty_label } = s.kind.clone() else {
+            return (false, x + w);
+        };
+        let key = s.id;
+        let bw = (w - label_w - 40.0).clamp(120.0, 240.0);
+        let bh = 28.0;
+        let (bx, by) = (x + w - bw, y + (ROW - bh) / 2.0);
+        let open = open_device() == Some(key);
+        let list = options();
+        let current = if value.is_empty() { empty_label.to_owned() } else { value.clone() };
+        let missing = !value.is_empty() && !list.contains(&value);
+        let over = ui.hover(c, bx, by, bw, bh);
+        c.round(bx, by, bw, bh, 8.0, if over || open { 0x24FFFFFF } else { 0x14FFFFFF });
+        c.outline(bx, by, bw, bh, 8.0, 1.0, if open { 0x40FFFFFF } else { theme::HAIRLINE });
+        let shown = if missing { format!("{current} (unplugged)") } else { current };
+        let shown = c.ellipsize(font::SEMIBOLD, 11.5, &shown, bw - 34.0);
+        let lh = c.line_height(font::SEMIBOLD, 11.5);
+        c.text(font::SEMIBOLD, 11.5, &shown, bx + 10.0, by + (bh - lh) / 2.0, if missing { theme::DANGER } else { theme::TEXT_STRONG });
+        c.icon(if open { theme::I_CHEVRON_UP } else { theme::I_CHEVRON_DOWN }, 12.0, bx + bw - 14.0, by + bh / 2.0, theme::TEXT_MUTED);
+        if ui.clicked(c, id, bx, by, bw, bh) {
+            set_open_device(if open { None } else { Some(key) });
+        }
+        if open {
+            let mut ly = y + ROW;
+            let entries = std::iter::once(String::new()).chain(list.iter().cloned());
+            for (i, name) in entries.enumerate() {
+                let shown = if name.is_empty() { empty_label.to_owned() } else { name.clone() };
+                let sel = value == name;
+                let hover = ui.hover(c, x, ly, w, 28.0);
+                if hover || sel {
+                    c.round(x, ly, w, 28.0, 7.0, if sel { 0x1F22C55E } else { 0x14FFFFFF });
+                }
+                if sel {
+                    c.icon(theme::I_CHECK, 12.0, x + 14.0, ly + 14.0, theme::ONLINE);
+                }
+                let t = c.ellipsize(font::MEDIUM, 12.0, &shown, w - 40.0);
+                let th = c.line_height(font::MEDIUM, 12.0);
+                c.text(font::MEDIUM, 12.0, &t, x + 28.0, ly + (28.0 - th) / 2.0, if sel { theme::TEXT_STRONG } else { theme::TEXT });
+                if ui.clicked(c, &format!("{id}#{i}"), x, ly, w, 28.0) {
+                    if let Kind::Device { value, .. } = &mut s.kind {
+                        *value = name;
+                    }
+                    set_open_device(None);
+                    return (true, x + w);
+                }
+                ly += 30.0;
+            }
+        }
+        (false, bx)
+    }
+
     /// One labelled setting row (label left, control right). `hint` is the
     /// conflict warning of a toggle binding. True when the value changed.
     pub fn row(&mut self, ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, s: &mut Setting, warning: Option<&str>) -> bool {
@@ -419,6 +490,7 @@ impl Widgets {
             Kind::Binding { .. } => w - 160.0 - 40.0,
             Kind::Key { .. } => w - 110.0 - 40.0,
             Kind::Text { .. } => w * 0.42,
+            Kind::Device { .. } => w * 0.38,
             Kind::Pixels { .. } => w,
         };
         let label = if label_w > label_max {
@@ -431,6 +503,11 @@ impl Widgets {
         c.text(font::MEDIUM, fs, &label, x, y + (h - lh) / 2.0, theme::TEXT);
         match s.kind.clone() {
             Kind::Pixels { .. } => changed = self.pixels_row(ui, c, id, x, y, w, s),
+            Kind::Device { .. } => {
+                let (ch, cx) = Self::device_row(ui, c, id, x, y, w, s, label_w);
+                changed = ch;
+                control_x = cx;
+            }
             Kind::Bool { value, .. } => {
                 control_x = x + w - 34.0;
                 if ui.toggle(c, id, x + w - 34.0, y + (h - 20.0) / 2.0, value) {

@@ -46,6 +46,10 @@ pub struct GameView {
     pub playing: bool,
     pub hud_allowed: bool,
     pub vitals: Vitals,
+    /// Distance to the entity under the crosshair, in blocks.
+    pub reach: Option<f64>,
+    /// Items on cooldown (bare id) and how much of it is left (1 to 0).
+    pub cooldowns: Vec<(String, f32)>,
     /// The world's time of day in ticks (0 - 23999), the game time and the dimension id.
     pub day_time: i64,
     pub game_time: i64,
@@ -651,4 +655,27 @@ impl Vitals {
         v.target = Some(("Zombie".to_owned(), 13.0, 20.0));
         v
     }
+}
+
+/// Draw an item by its id (counters, cooldowns): `key` comes from [`item_key`].
+pub const HOST_ITEM_ID: u32 = 3;
+
+fn item_ids() -> &'static std::sync::Mutex<std::collections::HashMap<u64, String>> {
+    static IDS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u64, String>>> = std::sync::OnceLock::new();
+    IDS.get_or_init(Default::default)
+}
+
+/// A key for an item id: the module asks the canvas to draw it (`HOST_ITEM_ID`), the host looks the id up again.
+pub fn item_key(id: &str) -> u64 {
+    let key = id.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
+    let mut ids = item_ids().lock().unwrap_or_else(|e| e.into_inner());
+    if ids.len() < 4096 {
+        ids.entry(key).or_insert_with(|| id.to_owned());
+    }
+    key
+}
+
+/// The item id a key stands for.
+pub fn item_for_key(key: u64) -> Option<String> {
+    item_ids().lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned()
 }

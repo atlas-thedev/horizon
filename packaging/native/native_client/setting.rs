@@ -17,6 +17,8 @@ pub enum Kind {
     Key { value: i32, def: i32 },
     /// A small pixel drawing (the custom crosshair) and the player's saved drawings.
     Pixels { size: usize, grid: Vec<bool>, def: Vec<bool>, saved: Vec<Vec<bool>>, mirror: bool },
+    /// A choice from a live list (microphones, speakers, the counted item). "" is `empty_label`.
+    Device { value: String, options: fn() -> Vec<String>, empty_label: &'static str },
     /// `ModuleBinding`: a module's toggle chord, a GLFW key and SHIFT 1 / CONTROL 2 / ALT 4; unbound by default.
     Binding { key: i32, modifiers: i32 },
 }
@@ -55,6 +57,10 @@ impl Setting {
     }
     pub fn pixels(id: &'static str, label: &'static str, size: usize, def: Vec<bool>) -> Self {
         Self::new(id, label, Kind::Pixels { size, grid: def.clone(), def, saved: Vec::new(), mirror: true })
+    }
+    /// A choice from a live list, shown as a dropdown.
+    pub fn device(id: &'static str, label: &'static str, options: fn() -> Vec<String>, empty_label: &'static str) -> Self {
+        Self::new(id, label, Kind::Device { value: String::new(), options, empty_label })
     }
     /// A module's toggle keybind, unbound.
     pub fn binding() -> Self {
@@ -177,6 +183,7 @@ impl Setting {
             Kind::Choice { value, def, .. } => *value = *def,
             Kind::Key { value, def } => *value = *def,
             Kind::Pixels { grid, def, .. } => *grid = def.clone(),
+            Kind::Device { value, .. } => value.clear(),
             Kind::Binding { key, modifiers } => (*key, *modifiers) = (-1, 0),
         }
     }
@@ -191,6 +198,7 @@ impl Setting {
             Kind::Choice { value, def, .. } => value == def,
             Kind::Key { value, def } => value == def,
             Kind::Pixels { grid, def, .. } => grid == def,
+            Kind::Device { value, .. } => value.is_empty(),
             Kind::Binding { key, .. } => *key == -1,
         }
     }
@@ -212,6 +220,7 @@ impl Setting {
             Kind::Color { value, .. } => Value::String(format!("#{value:08X}")),
             Kind::Choice { value, options, .. } => Value::String(options[*value].to_owned()),
             Kind::Key { value, .. } => serde_json::json!(value),
+            Kind::Device { value, .. } => Value::String(value.clone()),
             Kind::Pixels { grid, saved, .. } => serde_json::json!({
                 "grid": Self::bits(grid),
                 "saved": saved.iter().map(|g| Self::bits(g)).collect::<Vec<_>>(),
@@ -258,6 +267,11 @@ impl Setting {
             Kind::Key { value, .. } => {
                 if let Some(v) = e.as_i64() {
                     *value = v as i32;
+                }
+            }
+            Kind::Device { value, .. } => {
+                if let Some(s) = e.as_str() {
+                    *value = s.to_owned();
                 }
             }
             Kind::Pixels { size, grid, saved, .. } => {

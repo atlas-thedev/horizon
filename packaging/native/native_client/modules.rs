@@ -21,6 +21,7 @@ impl Modules {
         let mut all = Vec::new();
         all.extend(super::hud_modules::all());
         all.extend(super::status_modules::all());
+        all.extend(super::extra_modules::all());
         let mut modules = Modules {
             all,
             file: game_dir.map(|d| d.join("config").join("native-modules.json")),
@@ -41,6 +42,10 @@ impl Modules {
     }
 
     /// Something changed: written to disk shortly after.
+    pub fn enabled(&self, id: &str) -> bool {
+        self.all.iter().any(|m| m.state.id == id && m.state.enabled)
+    }
+
     /// True when an enabled module reads the player's health, effects or items.
     pub fn needs_vitals(&self) -> bool {
         self.all.iter().any(|m| m.state.enabled && m.behaviour.needs_vitals())

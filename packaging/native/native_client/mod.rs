@@ -8,6 +8,7 @@
 //! reads the game's own state directly; its own state lives on the game's
 //! thread.
 
+mod extra_modules;
 mod hud_editor;
 mod hud_modules;
 mod keys;
@@ -165,6 +166,8 @@ impl Game<'_> {
         let clock = self.native_clock();
         GameView {
             vitals,
+            reach: if in_world { self.native_reach() } else { None },
+            cooldowns: if in_world && state.modules.enabled("cooldowns") { self.native_cooldowns() } else { Vec::new() },
             day_time: clock.as_ref().map_or(0, |c| c.day_time),
             game_time: clock.as_ref().map_or(0, |c| c.game_time),
             dimension: player.as_ref().map(|p| p.dimension.to_string()).unwrap_or_default(),
@@ -213,6 +216,7 @@ impl Game<'_> {
                 }
             }
             state.modules.tick();
+            extra_modules::tick(g.in_world);
             let mut action = menu::Action::None;
             let mut copied = None;
             if !g.hud_allowed && !open {
@@ -364,6 +368,44 @@ impl Game<'_> {
         }
     }
 
+    /// The distance to the entity under the crosshair (`McBridge.reach`).
+    fn native_reach(&self) -> Option<f64> {
+        [
+            self.painting_hit().map(|h| h.1),
+            self.frame_hit().map(|h| h.1),
+            self.armor_stand_hit().map(|h| h.1),
+            self.cushion_hit().map(|h| h.1),
+            self.boat_hit().map(|h| h.1),
+            self.cart_hit().map(|h| h.1),
+            self.interaction_hit().map(|h| h.1),
+            self.dragon_hit().map(|h| f64::from(h.1)),
+            self.mob_hit().map(|h| h.1),
+            self.redirectable_hit().map(|h| h.1),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|d| self.before_block(*d))
+        .reduce(f64::min)
+    }
+
+    /// The items on cooldown and how much of it is left (`McBridge.cooldowns`).
+    fn native_cooldowns(&self) -> Vec<(String, f32)> {
+        let partial = self.clock.fraction() as f32;
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for stack in self.inventory.iter().flatten().chain(self.offhand.iter()) {
+            let info = self.items().get(&stack.item);
+            let group = horizon_client::cooldowns::group(stack, info.and_then(|i| i.use_cooldown.as_ref()));
+            if seen.insert(group.clone()) {
+                let left = self.cooldowns.percent(&group, partial);
+                if left > 0.0 && out.len() < 8 {
+                    out.push((stack.item.trim_start_matches("minecraft:").to_owned(), left));
+                }
+            }
+        }
+        out
+    }
+
     /// The game draws what the canvas asked it to (`Canvas::host`): an item icon or an effect icon,
     /// at the canvas's place and size.
     fn native_host_draw(
@@ -384,6 +426,13 @@ impl Game<'_> {
                 let Some(stack) = stack else { return };
                 let start = batch.vertices.len();
                 self.draw_item_model(batch, stack, gx, gy);
+                batch.scale_since(start, gx, gy, size / 16.0, size / 16.0);
+            }
+            module::HOST_ITEM_ID => {
+                let Some(id) = module::item_for_key(d.key) else { return };
+                let stack = ItemStack { item: std::sync::Arc::from(id.as_str()), count: 1, damage: 0, extra: None };
+                let start = batch.vertices.len();
+                self.draw_item_model(batch, &stack, gx, gy);
                 batch.scale_since(start, gx, gy, size / 16.0, size / 16.0);
             }
             module::HOST_EFFECT => {
