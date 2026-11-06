@@ -119,7 +119,7 @@ fn key_label(name: &str) -> Option<String> {
 
 impl Game<'_> {
     /// `Game.update`: what the modules read this frame.
-    fn native_view(&self, state: &mut State) -> GameView {
+    fn native_view(&mut self, state: &mut State) -> GameView {
         let player = self.native_player();
         let now = Instant::now();
         for q in &mut state.clicks {
@@ -320,9 +320,9 @@ impl Game<'_> {
 
 impl Game<'_> {
     /// `McBridge.vitals`: the player's health, effects and items for the status modules.
-    fn native_vitals(&self, items: &mut Vec<ItemStack>, effect_names: &mut HashMap<u64, String>) -> module::Vitals {
+    fn native_vitals(&mut self, items: &mut Vec<ItemStack>, effect_names: &mut HashMap<u64, String>) -> module::Vitals {
         let mut v = module::Vitals::default();
-        if let Some(p) = &self.player {
+        if let Some(p) = &mut self.player {
             v.health = p.health.health() as f32;
             v.max_health = p.attribute("minecraft:max_health").unwrap_or(20.0) as f32;
             v.absorption = p.health.absorption() as f32;
