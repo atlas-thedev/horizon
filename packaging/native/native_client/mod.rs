@@ -91,6 +91,8 @@ struct State {
     items: Vec<ItemStack>,
     /// The made-up stacks of previews, by key.
     sample_items: HashMap<u64, ItemStack>,
+    /// Max durability per preview stack key, for title-screen previews.
+    sample_max: HashMap<u64, u32>,
     /// Effect ids by `status_modules::effect_key`, for the icons.
     effect_names: HashMap<u64, String>,
     /// GLFW codes of the keys and mouse buttons held, as the window events told.
@@ -147,6 +149,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             who: String::new(),
             items: Vec::new(),
             sample_items: sample_stacks(),
+            sample_max: sample_max_damage(),
             effect_names: sample_effect_names(),
             held: std::collections::HashSet::new(),
             toggles_before: None,
@@ -294,7 +297,14 @@ impl Game<'_> {
     /// screens): the HUD modules stay off, as the game's own HUD does.
     fn native_world_loading(&self) -> bool {
         self.integrated_starting.is_some()
-            || self.remote.as_ref().is_some_and(|r| r.level_load.is_active() || r.reconfiguring.is_some())
+            || self.pending_entry.is_some()
+            || self.pack_reload.is_some()
+            || self.server_packs.prompt.is_some()
+            || self.code_of_conduct.is_some()
+            || self.dialog_open()
+            || self.link_prompt.is_some()
+            || self.command_prompt.is_some()
+            || self.remote.as_ref().is_some_and(|r| !r.joined || r.level_load.is_active() || r.reconfiguring.is_some())
     }
 
     /// Once a frame, over the game's HUD and screens: the Native UI.
@@ -381,14 +391,16 @@ impl Game<'_> {
                 }
             }
             // `HudOverlay.draw`.
-            for m in &mut state.modules.all {
-                if !m.state.enabled || m.state.hud.is_none() || !m.behaviour.visible(&m.state, &g) {
-                    continue;
+            if g.hud_allowed {
+                for m in &mut state.modules.all {
+                    if !m.state.enabled || m.state.hud.is_none() || !m.behaviour.visible(&m.state, &g) {
+                        continue;
+                    }
+                    let size = m.measure(c, &g);
+                    let Some(hud) = m.state.hud.as_ref() else { continue };
+                    let (x, y) = (Hud::pos(hud.fx, w, size[0]), Hud::pos(hud.fy, h, size[1]));
+                    m.paint(c, x, y, &g);
                 }
-                let size = m.measure(c, &g);
-                let Some(hud) = m.state.hud.as_ref() else { continue };
-                let (x, y) = (Hud::pos(hud.fx, w, size[0]), Hud::pos(hud.fy, h, size[1]));
-                m.paint(c, x, y, &g);
             }
             // Message pop-ups (they never take input).
             {
@@ -589,8 +601,17 @@ impl Game<'_> {
     }
 
     fn native_stack(&self, stack: &ItemStack, items: &mut Vec<ItemStack>) -> module::StackView {
-        let max = self.items().get(&stack.item).map_or(0, |i| i.max_damage);
-        items.push(stack.clone());
+        let full = full_id(&stack.item);
+        let max = self
+            .items()
+            .get(full.as_str())
+            .or_else(|| self.items().get(&stack.item))
+            .map_or(0, |i| i.max_damage);
+        let mut s = stack.clone();
+        if !stack.item.contains(':') {
+            s.item = std::sync::Arc::from(full.as_str());
+        }
+        items.push(s);
         module::StackView {
             id: stack.item.trim_start_matches("minecraft:").to_owned(),
             count: stack.count,
@@ -719,6 +740,18 @@ fn sample_stacks() -> HashMap<u64, ItemStack> {
         );
     }
     out
+}
+
+/// Max durability of each preview stack by key, for title-screen previews.
+fn sample_max_damage() -> HashMap<u64, u32> {
+    let v = module::Vitals::sample();
+    v.armor
+        .iter()
+        .chain(v.inv.iter())
+        .chain([&v.hand, &v.offhand])
+        .flatten()
+        .map(|s| (s.key, s.max))
+        .collect()
 }
 
 /// The effect ids of previews, by key.
@@ -1001,7 +1034,13 @@ pub(super) fn native_title_active(title: &horizon_client::title::Title) -> bool 
 
 /// Draws the Native title (and Relay or the Native menu over it, opened from there), or the Native server list,
 /// into `batch`.
-pub(super) fn native_title_frame(batch: &mut HudBatch, title: &horizon_client::title::Title, player: &str) {
+pub(super) fn native_title_frame(
+    batch: &mut HudBatch,
+    title: &horizon_client::title::Title,
+    player: &str,
+    atlas: &horizon_client::hud::HudAtlas,
+    item_renderer: Option<&horizon_client::item_render::ItemRenderer>,
+) {
     let allows_multiplayer = title.allows_multiplayer;
     let servers = servers_view::info(title);
     with_state(|state| {
@@ -1095,11 +1134,133 @@ pub(super) fn native_title_frame(batch: &mut HudBatch, title: &horizon_client::t
         }
         state.ui.tooltips(c);
         state.ui.end();
-        c.finish(batch);
+        let (samples, sample_max, effects) = (&state.sample_items, &state.sample_max, &state.effect_names);
+        c.finish_with(batch, &mut |b, d| {
+            title_host_draw(b, d, scale, atlas, item_renderer, samples, sample_max, effects);
+        });
         if let Some(action) = deferred {
             state.apply(&action);
         }
     });
+}
+
+struct TitleItemEnv<'a>(&'a horizon_client::item_render::ItemRenderer);
+
+impl horizon_client_core::item_models::ItemEnv for TitleItemEnv<'_> {
+    fn grass_color(&self, temperature: f64, downfall: f64) -> i32 {
+        self.0.grass_color(temperature, downfall)
+    }
+}
+
+fn draw_title_item(
+    batch: &mut HudBatch,
+    atlas: &horizon_client::hud::HudAtlas,
+    item_renderer: Option<&horizon_client::item_render::ItemRenderer>,
+    stack: &ItemStack,
+    x: f32,
+    y: f32,
+) {
+    if let Some(renderer) = item_renderer {
+        let state = renderer.resolve(
+            &horizon_client::item_render::stack_view(stack),
+            horizon_client_core::item_models::DisplayContext::Gui,
+            None,
+            None,
+            0,
+            &TitleItemEnv(renderer),
+        );
+        if !state.is_empty() {
+            horizon_client::item_render::gui::draw(
+                &state,
+                renderer,
+                &atlas.sprites,
+                &horizon_client::item_render::NoHost,
+                batch,
+                x,
+                y,
+                0.0,
+                0.5,
+                0.75,
+            );
+            return;
+        }
+    }
+    let bare = stack.item.trim_start_matches("minecraft:");
+    for candidate in [format!("item/{bare}"), format!("block/{bare}"), format!("block/{bare}_top")] {
+        if atlas.sprites.contains_key(candidate.as_str()) {
+            batch.sprite_scaled(atlas, &candidate, x, y, 16.0, 16.0, u32::MAX);
+            return;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn title_host_draw(
+    batch: &mut HudBatch,
+    d: &native_ui::canvas::HostDraw,
+    canvas_scale: f32,
+    atlas: &horizon_client::hud::HudAtlas,
+    item_renderer: Option<&horizon_client::item_render::ItemRenderer>,
+    samples: &HashMap<u64, ItemStack>,
+    sample_max: &HashMap<u64, u32>,
+    effects: &HashMap<u64, String>,
+) {
+    let k = canvas_scale / batch.scale;
+    let (gx, gy, size) = (d.x * k, d.y * k, d.size * k);
+    match d.kind & 0xFF {
+        module::HOST_SLOT => {
+            let Some(stack) = samples.get(&d.key) else { return };
+            let start = batch.vertices.len();
+            draw_title_item(batch, atlas, item_renderer, stack, gx, gy);
+            let max_damage = sample_max.get(&d.key).copied().unwrap_or(0) as i32;
+            let bar = if d.kind & module::SLOT_BAR != 0 {
+                horizon_client::hud_overlays::damage_bar(stack.damage as i32, max_damage)
+            } else {
+                None
+            };
+            let decorations = horizon_client::hud_overlays::ItemDecorations {
+                count: if d.kind & module::SLOT_COUNT != 0 { stack.count } else { 1 },
+                count_text: None,
+                bar,
+                cooldown: 0.0,
+            };
+            let mut draws = vec![super::hud_layout::GuiDraw::Push(vec![
+                super::hud_layout::PoseOp::Translate(gx, gy),
+            ])];
+            draws.extend(horizon_client::hud_overlays::item_decorations(0, 0, &decorations, &atlas.font));
+            draws.push(super::hud_layout::GuiDraw::Pop);
+            super::hud_layout::paint(batch, atlas, &draws);
+            batch.scale_since(start, gx, gy, size / 16.0, size / 16.0);
+        }
+        module::HOST_ITEM => {
+            let Some(stack) = samples.get(&d.key) else { return };
+            let start = batch.vertices.len();
+            draw_title_item(batch, atlas, item_renderer, stack, gx, gy);
+            batch.scale_since(start, gx, gy, size / 16.0, size / 16.0);
+        }
+        module::HOST_ITEM_ID => {
+            let Some(id) = module::item_for_key(d.key) else { return };
+            let stack = ItemStack { item: std::sync::Arc::from(full_id(&id).as_str()), count: 1, damage: 0, extra: None };
+            let start = batch.vertices.len();
+            draw_title_item(batch, atlas, item_renderer, &stack, gx, gy);
+            batch.scale_since(start, gx, gy, size / 16.0, size / 16.0);
+        }
+        module::HOST_EFFECT => {
+            let Some(id) = effects.get(&d.key) else { return };
+            let draws = [super::hud_layout::GuiDraw::Sprite {
+                sprite: std::borrow::Cow::Owned(horizon_client_core::potions::sprite(id)),
+                x: gx.round() as i32,
+                y: gy.round() as i32,
+                w: size.round() as i32,
+                h: size.round() as i32,
+                region: None,
+                color: super::hud_layout::WHITE,
+                blend: super::hud_layout::Blend::Textured,
+            }];
+            super::hud_layout::paint(batch, atlas, &draws);
+        }
+        _ => {}
+    }
 }
 
 /// What the Native title asked of the game, for the host to do (it needs the event loop).

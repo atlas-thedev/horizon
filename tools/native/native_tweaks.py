@@ -46,6 +46,18 @@ patch(RENDER / 'gfx.rs',
       '        if self.fullbright || crate::native_ui::tweaks::fullbright() {\n'
       '            pixels.fill(255);\n')
 
+# Entity models posed on the CPU where Intel's Gen9 graphics draw GPU-posed ones with holes (tweaks.rs).
+patch(RENDER / 'gfx.rs',
+      '        let entity_skin = entity_skin::EntitySkin::new(\n'
+      '            &device,\n'
+      '            animate::SpriteAnimator::compute(&adapter, &device),\n'
+      '        );\n',
+      '        let entity_skin = entity_skin::EntitySkin::new(\n'
+      '            &device,\n'
+      '            animate::SpriteAnimator::compute(&adapter, &device)\n'
+      '                && !crate::native_ui::tweaks::skip_gpu_skinning(&adapter.get_info()),\n'
+      '        );\n')
+
 # No Hurt Cam: the damage tilt of the camera.
 patch(RENDER / 'camera.rs',
       'pub fn bob_hurt(state: &BobState, damage_tilt_strength: f64, pose: &mut Mat4) {\n',

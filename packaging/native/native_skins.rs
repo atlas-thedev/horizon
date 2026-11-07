@@ -657,7 +657,8 @@ fn apply_to(
 /// still cape (64x64 RGBA, the picture in the top half).
 enum Strip {
     Loading,
-    Ready(Vec<Vec<u8>>),
+    /// Each frame as a skin slot holds it, and (for a strip larger than 64x32 a frame) the full-size frames.
+    Ready(Vec<Vec<u8>>, Option<HdFrames>),
     Failed(Instant),
 }
 
@@ -699,12 +700,28 @@ pub fn split_strip(width: u32, height: u32, rgba: &[u8], frames: u32) -> Option<
         .collect()
 }
 
-fn fetch_strip(url: &str, frames: u32) -> Option<Vec<Vec<u8>>> {
+/// An animated cape's full-size frames: width, frame height and each frame's pixels (HD capes, see
+/// `skins::set_hd_cape`). Strips over 64 MB are left to their 64x32 frames.
+type HdFrames = (u32, u32, Vec<std::sync::Arc<Vec<u8>>>);
+
+fn hd_frames(width: u32, height: u32, rgba: &[u8], frames: u32) -> Option<HdFrames> {
+    let frame_h = height / frames.max(1);
+    if (width <= 64 && frame_h <= 32) || frame_h == 0 || u64::from(width) * u64::from(height) * 4 > 64 << 20 {
+        return None;
+    }
+    let size = (width * frame_h * 4) as usize;
+    let list = (0..frames.max(1) as usize)
+        .map(|i| rgba.get(i * size..(i + 1) * size).map(|s| std::sync::Arc::new(s.to_vec())))
+        .collect::<Option<Vec<_>>>()?;
+    Some((width, frame_h, list))
+}
+
+fn fetch_strip(url: &str, frames: u32) -> Option<(Vec<Vec<u8>>, Option<HdFrames>)> {
     let response = agent(Duration::from_secs(20)).get(url).call().ok()?;
     let mut body = Vec::new();
     response.into_reader().take(MAX_JSON).read_to_end(&mut body).ok()?;
     let (w, h, rgba) = crate::hud::decode_bytes(&body).ok()?;
-    split_strip(w, h, &rgba, frames)
+    Some((split_strip(w, h, &rgba, frames)?, hd_frames(w, h, &rgba, frames)))
 }
 
 /// The frame an animation shows `elapsed` after the game started.
@@ -732,7 +749,7 @@ pub fn animated_cape(
     );
     let mut cache = strips();
     let ready = match cache.strips.get(&animation.strip) {
-        Some(Strip::Ready(frames)) => Some(frames.len()),
+        Some(Strip::Ready(frames, _)) => Some(frames.len()),
         Some(Strip::Loading) => None,
         Some(Strip::Failed(at)) if at.elapsed() < STRIP_RETRY => None,
         _ => {
@@ -746,7 +763,7 @@ pub fn animated_cape(
                     .name("Native cape".into())
                     .spawn(move || {
                         let state = match fetch_strip(&url, frames) {
-                            Some(frames) if !frames.is_empty() => Strip::Ready(frames),
+                            Some((frames, hd)) if !frames.is_empty() => Strip::Ready(frames, hd),
                             _ => Strip::Failed(Instant::now()),
                         };
                         strips().strips.insert(url, state);
@@ -762,7 +779,15 @@ pub fn animated_cape(
     let fresh = cache.shown.get(&location) != Some(&frame) || !present(&location);
     let upload = fresh
         .then(|| match cache.strips.get(&animation.strip) {
-            Some(Strip::Ready(frames)) => frames.get(frame).cloned(),
+            Some(Strip::Ready(frames, hd)) => {
+                // the full-size frame goes with it, for the atlas's Native area (HD capes)
+                if let Some((w, h, hd)) = hd
+                    && let Some(px) = hd.get(frame)
+                {
+                    crate::skins::set_hd_cape(&location, *w, *h, px);
+                }
+                frames.get(frame).cloned()
+            }
             _ => None,
         })
         .flatten();

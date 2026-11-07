@@ -99,11 +99,6 @@ fn with_hud(mut m: Module, f: impl FnOnce(&mut Hud)) -> Module {
     m
 }
 
-/// An item's icon from the game's textures.
-fn item(c: &mut Canvas, sl: &StackView, x: f32, y: f32, size: f32, tint: u32) {
-    c.host(HOST_ITEM, sl.key, x, y, size, tint);
-}
-
 /// An item drawn the way a vanilla inventory slot draws it: the game's item model, its count in the game's font
 /// and its durability bar, all by the game itself (resource packs and server items included).
 fn slot_item(c: &mut Canvas, sl: &StackView, x: f32, y: f32, size: f32, count: bool, bar: bool) {
@@ -404,8 +399,9 @@ impl Boxed for Armor {
             (visible as f32 * item_size + (visible - 1) as f32 * spacing + pad * 2.0, slot_h + pad * 2.0)
         };
         if draw {
+            const EMPTY_ITEMS: [&str; 4] = ["leather_helmet", "leather_chestplate", "leather_leggings", "leather_boots"];
             let (mut ox, mut oy) = (0.0, 0.0);
-            for sl in &g.vitals.armor {
+            for (i, sl) in g.vitals.armor.iter().enumerate() {
                 if sl.is_none() && !show_empty {
                     continue;
                 }
@@ -414,8 +410,7 @@ impl Boxed for Armor {
                 if let Some(sl) = sl {
                     slot_item(c, sl, ix, iy, item_size, false, durability);
                 } else {
-                    // Empty slot placeholder.
-                    c.round(ix + item_size * 0.1, iy + item_size * 0.1, item_size * 0.8, item_size * 0.8, 3.0 * s, 0x14FFFFFF);
+                    c.host(HOST_ITEM_ID, item_key(EMPTY_ITEMS[i]), ix, iy, item_size, 0x88FFFFFF);
                 }
                 if vertical {
                     oy += slot_h + spacing;

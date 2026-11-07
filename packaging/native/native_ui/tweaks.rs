@@ -385,3 +385,37 @@ mod tests {
         assert_eq!(hitbox(0xFFFFFFFF), 0xFFFFFFFF);
     }
 }
+
+/// Whether entity models are posed on the CPU instead of the GPU. Intel's Gen9 graphics (HD / UHD 5xx-6xx, Iris
+/// 5xx-6xx) draw GPU-posed models with holes and comb-like stripes on Vulkan (players, horses: horizon-rust/horizon
+/// #10533), so there the models take the path GPUs without compute shaders take. `NATIVE_GPU_SKINNING=1` keeps the
+/// GPU path anywhere, `=0` turns it off anywhere.
+pub fn skip_gpu_skinning(info: &wgpu::AdapterInfo) -> bool {
+    match std::env::var("NATIVE_GPU_SKINNING").ok().as_deref() {
+        Some("1") => return false,
+        Some("0") => return true,
+        _ => {}
+    }
+    intel_gen9(&info.name) && info.backend == wgpu::Backend::Vulkan
+}
+
+fn intel_gen9(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.contains("intel")
+        && ["hd graphics 5", "hd graphics 6", "uhd graphics 6", "iris(r) graphics 5", "iris(r) graphics 6", "iris graphics 5", "iris graphics 6", "iris(r) plus graphics 6", "iris plus graphics 6"]
+            .iter()
+            .any(|g| n.contains(g))
+}
+
+#[cfg(test)]
+mod gpu_skinning_tests {
+    #[test]
+    fn intel_gen9_is_recognised() {
+        assert!(super::intel_gen9("Intel(R) HD Graphics 620"));
+        assert!(super::intel_gen9("Intel(R) UHD Graphics 630"));
+        assert!(super::intel_gen9("Intel(R) HD Graphics 520"));
+        assert!(!super::intel_gen9("Intel(R) Iris(R) Xe Graphics"));
+        assert!(!super::intel_gen9("Intel(R) UHD Graphics 770"));
+        assert!(!super::intel_gen9("NVIDIA GeForce RTX 3060"));
+    }
+}

@@ -793,6 +793,8 @@ struct Placed {
     locations: Vec<String>,
     rect: [u32; 4],
     drawn: Instant,
+    /// For pictures that change in place (an animated HD cape's frames): the version uploaded last.
+    stamp: u64,
 }
 
 #[derive(Default)]
@@ -857,8 +859,32 @@ impl Packer {
             }
         };
         let rect = [spot[0], spot[1], w, h];
-        self.placed.push(Placed { key: key.to_owned(), locations: vec![location.to_owned()], rect, drawn: now });
+        self.placed.push(Placed { key: key.to_owned(), locations: vec![location.to_owned()], rect, drawn: now, stamp: 0 });
         Some(Placement { rect, upload: true, evicted })
+    }
+
+    /// [`Packer::place`] for a picture that changes in place (`stamp` is its version, an animated cape's frame): the
+    /// same room while its size stays, uploaded again whenever the version moves on.
+    fn place_stamped(&mut self, key: &str, location: &str, w: u32, h: u32, now: Instant, stamp: u64) -> Option<Placement> {
+        if let Some(i) = self.placed.iter().position(|p| p.key == key) {
+            let p = &mut self.placed[i];
+            if p.rect[2] == w && p.rect[3] == h {
+                let upload = p.stamp != stamp;
+                p.stamp = stamp;
+                p.drawn = now;
+                if !p.locations.iter().any(|l| l == location) {
+                    p.locations.push(location.to_owned());
+                }
+                return Some(Placement { rect: p.rect, upload, evicted: Vec::new() });
+            }
+            // a new size: its old room stays unused until the area starts over
+            self.placed.remove(i);
+        }
+        let placed = self.place(key, location, w, h, now)?;
+        if let Some(p) = self.placed.iter_mut().find(|p| p.key == key) {
+            p.stamp = stamp;
+        }
+        Some(placed)
     }
 }
 
@@ -916,6 +942,45 @@ impl Game<'_> {
             for y in 0..h as usize {
                 let start = y * t.width as usize * 4;
                 rgba.extend_from_slice(&t.rgba[start..start + w as usize * 4]);
+            }
+            self.map_patches.push(horizon_client::font::Patch { x: ax + rect[0], y: ay + rect[1], width: w, height: h, rgba });
+        }
+        let mut sprite = area;
+        sprite.u0 = (ax + rect[0]) as f32 / aw;
+        sprite.v0 = (ay + rect[1]) as f32 / ah;
+        sprite.u1 = (ax + rect[0] + w) as f32 / aw;
+        sprite.v1 = (ay + rect[1] + h) as f32 / ah;
+        self.gui.atlas.sprites.insert(location.to_owned(), sprite);
+    }
+
+    /// An HD cape (`skins::hd_cape`): its full picture into the Native area at its own size, and its sprite pointed
+    /// there instead of the 64x32 copy in its skin slot (that copy stays the fallback when the area has no room). The
+    /// cape's UVs are fractions of its sprite, so the model draws it unchanged, only sharp.
+    pub(super) fn store_native_hd_cape(&mut self, location: &str) {
+        let Some(hd) = horizon_client::skins::hd_cape(location) else { return };
+        let (w, h) = (hd.width.clamp(1, AREA), hd.height.clamp(1, AREA));
+        let placed = {
+            let mut p = packer();
+            if p.revision != self.gui.atlas.revision {
+                *p = Packer { revision: self.gui.atlas.revision, ..Packer::default() };
+            }
+            p.place_stamped(&format!("cape:{location}"), location, w, h, Instant::now(), hd.generation)
+        };
+        let Some(placed) = placed else { return };
+        for old in placed.evicted {
+            if old != location {
+                self.gui.atlas.sprites.remove(&old);
+            }
+        }
+        let Some(area) = self.gui.atlas.sprites.get("native/cosmetics").copied() else { return };
+        let (aw, ah) = (self.gui.atlas.width as f32, self.gui.atlas.height as f32);
+        let (ax, ay) = ((area.u0 * aw).round() as u32, (area.v0 * ah).round() as u32);
+        let rect = placed.rect;
+        if placed.upload {
+            let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+            for y in 0..h as usize {
+                let start = y * hd.width as usize * 4;
+                rgba.extend_from_slice(&hd.rgba[start..start + w as usize * 4]);
             }
             self.map_patches.push(horizon_client::font::Patch { x: ax + rect[0], y: ay + rect[1], width: w, height: h, rgba });
         }

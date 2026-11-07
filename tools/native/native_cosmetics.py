@@ -88,6 +88,39 @@ patch(COSMETICS,
       '                self.skin_downloads.borrow_mut().drawn(&b.location);\n'
       '                super::native_cosmetics::drawn(&b.location);\n')
 
+# HD capes (native_hd_capes.rs): the full picture of a cape larger than 64x32 is kept beside the skin slot's 64x32
+# copy and drawn from the atlas's Native area at its own size.
+shutil.copyfile(native / 'packaging/native/native_hd_capes.rs', RENDER / 'native_hd_capes.rs')
+SKINS = RENDER / 'skins.rs'
+text = SKINS.read_text(encoding='utf-8')
+if 'include!("native_hd_capes.rs");' not in text:
+    SKINS.write_text(text.rstrip('\n') + '\n\ninclude!("native_hd_capes.rs");\n', encoding='utf-8')
+patch(SKINS, '                Kind::Cape => process_cape(w, h, &rgba),\n',
+      '                Kind::Cape => {\n'
+      '                    set_hd_cape(&format!("capes/{digest}"), w, h, &rgba);\n'
+      '                    process_cape(w, h, &rgba)\n'
+      '                }\n')
+patch(SKINS, '            let (w, h, rgba) = crate::hud::decode_bytes(&std::fs::read(&file).ok()?).ok()?;\n'
+             '            process(w, h, &rgba)\n',
+      '            let (w, h, rgba) = crate::hud::decode_bytes(&std::fs::read(&file).ok()?).ok()?;\n'
+      '            if location.starts_with("capes/") {\n'
+      '                set_hd_cape(location, w, h, &rgba);\n'
+      '            }\n'
+      '            process(w, h, &rgba)\n')
+patch(CLIENT / 'game/remote.rs',
+      '        if location.starts_with("capes/") {\n'
+      '            rect.v1 = (rect.v0 + rect.v1) / 2.0;\n'
+      '        }\n'
+      '        self.gui.atlas.sprites.insert(location, rect);\n',
+      '        if location.starts_with("capes/") {\n'
+      '            rect.v1 = (rect.v0 + rect.v1) / 2.0;\n'
+      '        }\n'
+      '        let cape = location.starts_with("capes/");\n'
+      '        self.gui.atlas.sprites.insert(location.clone(), rect);\n'
+      '        if cape {\n'
+      '            self.store_native_hd_cape(&location);\n'
+      '        }\n')
+
 # Under a hood (native_skins.rs `hooded`) the helmet and the head item are not drawn either.
 ARMOR_STANDS = CLIENT / 'game/armor_stands.rs'
 patch(ARMOR_STANDS,

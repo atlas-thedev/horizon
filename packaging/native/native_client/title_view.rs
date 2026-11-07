@@ -99,8 +99,9 @@ impl TitleView {
     /// menu too when they open from the title), darker towards the top and bottom edges where the text sits.
     pub fn background(&self, c: &mut Canvas) {
         let (w, h) = (c.width(), c.height());
-        c.gradient_v(0.0, 0.0, w, 120.0, 0x66000000, 0x00000000);
-        c.gradient_v(0.0, h * 0.55, w, h * 0.45, 0x00000000, 0x99000000);
+        c.fill(0.0, 0.0, w, h, 0x45000000);
+        c.gradient_v(0.0, 0.0, w, 120.0, 0x7A000000, 0x00000000);
+        c.gradient_v(0.0, h * 0.55, w, h * 0.45, 0x00000000, 0xA6000000);
     }
 
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, info: &TitleInfo) -> Option<TitleAct> {
