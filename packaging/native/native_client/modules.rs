@@ -180,9 +180,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("native-modules-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut m = Modules::new(Some(dir.clone()));
-        // The Java mod's defaults: FPS, Keystrokes, Scoreboard, Boss Bar, Lag Free, the watermark and Discord RPC on.
+        // The Java mod's defaults: FPS, Keystrokes, Scoreboard, Boss Bar, Lag Free, the watermark, Now Playing and Discord RPC on.
         let on: Vec<_> = m.all.iter().filter(|m| m.state.enabled).map(|m| m.state.id).collect();
-        assert_eq!(on, vec!["fps", "keystrokes", "scoreboard", "bossbar", "bgfps", "watermark", "discord-rpc"]);
+        assert_eq!(on, vec!["fps", "keystrokes", "scoreboard", "bossbar", "bgfps", "watermark", "now-playing", "discord-rpc"]);
         let fps = m.get_mut("fps").unwrap();
         fps.state.enabled = false;
         fps.state.hud.as_mut().unwrap().fx = 0.75;

@@ -5,7 +5,7 @@
 //! controls as the rest of the menu.
 
 use super::menu::empty;
-use super::music::{self, Repeat, Track};
+use super::music::{self, Track};
 use super::scroll::Scroll;
 use super::setting::Setting;
 use super::textfield::TextField;
@@ -498,8 +498,4 @@ pub fn sound_bars(c: &mut Canvas, levels: &[f32], x: f32, y: f32, w: f32, h: f32
         let bh = (h * v).max(bw);
         c.round(x + i as f32 * (bw + gap), y + h - bh, bw, bh, (bw / 2.0).min(1.5), theme::alpha(0xFFFFFFFF, alpha * (0.45 + 0.55 * v)));
     }
-}
-
-pub fn repeat_of(cfg: &UiConfig) -> Repeat {
-    Repeat::from_index(cfg.music_repeat)
 }
