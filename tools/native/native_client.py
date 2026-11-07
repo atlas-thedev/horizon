@@ -39,6 +39,15 @@ if target.exists():
     shutil.rmtree(target)
 shutil.copytree(native / 'packaging/native/native_client', target)
 
+# Native Music decodes songs with symphonia and plays them through cpal. The lock file learns the new
+# packages when the build resolves them, so the builds run without --locked.
+patch(root / 'crates/horizon-client/Cargo.toml',
+      'log = "0.4"\n',
+      'log = "0.4"\n'
+      '# Native Music: the songs\n'
+      'symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "vorbis", "wav", "pcm"] }\n'
+      'cpal = "0.16"\n')
+
 GAME = CLIENT / 'game.rs'
 patch(GAME, 'mod cosmetics;\n', 'mod cosmetics;\nmod native_client;\n')
 # Over the HUD, the screens and the toasts; under the debug overlay, as in the Java mod.

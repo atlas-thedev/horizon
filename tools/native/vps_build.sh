@@ -68,7 +68,7 @@ cd src
 export RUSTFLAGS="-C target-feature=+crt-static"
 export HORIZON_VERSION="nightly-$DATE"
 export HORIZON_NIGHTLY="$DATE $SHORT"
-nice -n 15 cargo build --release --locked -j "$JOBS" --target "$TARGET" \
+nice -n 15 cargo build --release -j "$JOBS" --target "$TARGET" \
   -p horizon-client -p horizon-client-lib --bin horizon-client
 
 EXE="target/$TARGET/release/horizon-client.exe"

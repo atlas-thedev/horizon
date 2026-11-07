@@ -7,6 +7,7 @@ use super::module::{GameView, Module};
 use super::modules::Modules;
 use super::locker::Locker;
 use super::screenshots::Screenshots;
+use super::music_view::MusicView;
 use super::scroll::Scroll;
 use super::setting::{Kind, Setting};
 use super::textfield::TextField;
@@ -77,6 +78,7 @@ pub struct Menu {
     backdrop: Option<Arc<Image>>,
     confirm_reset: bool,
     shots: Screenshots,
+    music: MusicView,
     locker: Locker,
     who: String,
     /// The instance folder (screenshots live under it).
@@ -132,10 +134,11 @@ impl Menu {
             backdrop: Image::decode(assets::HUD_BACKGROUND),
             confirm_reset: false,
             shots: Screenshots::new(),
+            music: MusicView::new(),
             locker: Locker::new(),
             who: String::new(),
             game_dir: None,
-            s_title: Setting::bool("title", "Native title screen", true),
+            s_title: Setting::bool("pause", "Native pause menu", true),
             s_notify: Setting::bool("notify", "Message notifications in game", true),
             s_activity: Setting::bool("activity", "Show friends what I'm playing", true),
             s_scale: Setting::num("scale", "UI size", 1.0, 0.75, 1.5, 0.05, "x"),
@@ -175,6 +178,9 @@ impl Menu {
             return true;
         }
         if self.tab == TAB_SHOTS && self.shots.escape() {
+            return true;
+        }
+        if self.tab == TAB_MUSIC && self.music.escape(ui) {
             return true;
         }
         if self.selected.is_some() {
@@ -321,7 +327,7 @@ impl Menu {
                     c.text(font::MEDIUM, 11.5, store, mx + mw - 20.0 - sw, py + (hh - lh) / 2.0, theme::TEXT_MUTED);
                 }
                 c.push_alpha(pe);
-                let a = self.other_tab(ui, c, bx, by + (1.0 - pe) * 10.0, bw, bh);
+                let a = self.other_tab(ui, c, cfg, bx, by + (1.0 - pe) * 10.0, bw, bh);
                 if a != Action::None {
                     action = a;
                 }
@@ -342,7 +348,11 @@ impl Menu {
     }
 
     /// The tabs another part of the port draws (cosmetics, screenshots, music).
-    fn other_tab(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) -> Action {
+    fn other_tab(&mut self, ui: &mut Ui, c: &mut Canvas, cfg: &mut UiConfig, x: f32, y: f32, w: f32, h: f32) -> Action {
+        if self.tab == TAB_MUSIC {
+            self.music.draw(ui, c, cfg, x, y, w, h);
+            return Action::None;
+        }
         if self.tab == TAB_SHOTS {
             self.shots.draw(ui, c, self.game_dir.as_deref(), x, y, w, h);
             return Action::None;
@@ -852,7 +862,7 @@ impl Menu {
     #[allow(clippy::too_many_arguments)]
     fn settings(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &mut UiConfig, who: Option<&str>, x: f32, y: f32, w: f32, h: f32) -> Action {
         let mut action = Action::None;
-        self.s_title.set_bool(cfg.custom_title);
+        self.s_title.set_bool(cfg.custom_pause);
         self.s_notify.set_bool(cfg.notifications);
         self.s_activity.set_bool(cfg.share_activity);
         // While the slider is held (and on the frame it is let go) the slider owns the value.
@@ -902,8 +912,8 @@ impl Menu {
 
         // Write back.
         let mut save = false;
-        if self.s_title.as_bool() != cfg.custom_title {
-            cfg.custom_title = self.s_title.as_bool();
+        if self.s_title.as_bool() != cfg.custom_pause {
+            cfg.custom_pause = self.s_title.as_bool();
             save = true;
         }
         if self.s_notify.as_bool() != cfg.notifications {

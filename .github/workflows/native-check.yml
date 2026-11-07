@@ -70,16 +70,16 @@ jobs:
         working-directory: src
         env:
           RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo check --locked -p horizon-client -p horizon-client-lib
+        run: cargo check -p horizon-client -p horizon-client-lib
       - name: The boot screen's own tests
         working-directory: src
         env:
           RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo test --locked -p horizon-client --lib ui_theme
+        run: cargo test -p horizon-client --lib ui_theme
       - name: Native skins tests
         working-directory: src
         env:
           RUSTFLAGS: -C target-feature=+crt-static
         run: |
-          cargo test --locked -p horizon-client-lib -p horizon-client-render --lib native_
-          cargo test --locked -p horizon-client --lib native_
+          cargo test -p horizon-client-lib -p horizon-client-render --lib native_
+          cargo test -p horizon-client --lib native_

@@ -21,6 +21,9 @@ mod hud_modules;
 mod keys;
 mod locker;
 mod menu;
+mod music;
+mod music_modules;
+mod music_view;
 mod module;
 mod modules;
 mod net;
@@ -112,6 +115,8 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
         let state = slot.get_or_insert_with(|| {
             net::start(game_dir());
             relay::start();
+            music::init(game_dir().as_deref());
+            music::start();
             State {
             canvas: native_ui::canvas(),
             modules: Modules::new(game_dir()),
@@ -148,6 +153,23 @@ fn game_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("NATIVE_GAME_DIR")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
+}
+
+/// The Music page's keys: play / pause, next, previous. True when `key` is one of them.
+fn music_key(cfg: &UiConfig, key: i32) -> bool {
+    if key < 0 {
+        return false;
+    }
+    if key == cfg.music_play_key {
+        music::toggle();
+    } else if key == cfg.music_next_key {
+        music::next();
+    } else if key == cfg.music_prev_key {
+        music::previous();
+    } else {
+        return false;
+    }
+    true
 }
 
 /// `Keys.name`, from a binding's key name (`key.keyboard.w` -> `W`).
@@ -268,6 +290,12 @@ impl Game<'_> {
                 }
             }
             state.modules.tick();
+            music::configure(
+                state.cfg.music_volume,
+                state.cfg.music_shuffle,
+                music::Repeat::from_index(state.cfg.music_repeat),
+                1.0,
+            );
             let discord_off = state.modules.get("discord-rpc").is_some_and(|m| !m.state.enabled);
             native_ui::tweaks::set(|t| t.discord_off = discord_off);
             let custom_pause = state.cfg.custom_pause;
@@ -415,6 +443,17 @@ impl Game<'_> {
                 s.relay_open = false;
                 s.who = who;
             });
+            return true;
+        }
+        // The Music page's play / next / previous keys, while playing.
+        if let WindowEvent::KeyboardInput { event: key, .. } = event
+            && key.state == ElementState::Pressed
+            && !key.repeat
+            && let PhysicalKey::Code(code) = key.physical_key
+            && self.screen == Screen::Playing
+            && let Some(glfw) = keys::glfw(code)
+            && with_state(|s| music_key(&s.cfg, glfw))
+        {
             return true;
         }
         // The Relay key opens the chat from the world.

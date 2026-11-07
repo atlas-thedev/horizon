@@ -112,7 +112,7 @@ jobs:
           RUSTFLAGS: -C target-feature=+crt-static
           HORIZON_VERSION: nightly-${{ steps.up.outputs.date }}
           HORIZON_NIGHTLY: ${{ steps.up.outputs.date }} ${{ steps.up.outputs.short }}
-        run: cargo build --release --locked -p horizon-client -p horizon-client-lib --bin horizon-client
+        run: cargo build --release -p horizon-client -p horizon-client-lib --bin horizon-client
       - name: Check it starts and has no foreign DLLs
         if: steps.need.outputs.build == 'true'
         working-directory: src
