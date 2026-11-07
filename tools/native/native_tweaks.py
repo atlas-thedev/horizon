@@ -183,4 +183,23 @@ patch(DRAGON,
       '            ),\n'
       '        );\n')
 
+# Discord RPC: the module switches the game's Rich Presence off, and words what a server shows as.
+patch(CLIENT / 'game/discord.rs',
+      '        if !self.settings.extras.discord_presence {\n',
+      '        if !self.settings.extras.discord_presence || horizon_client::native_ui::tweaks::get().discord_off {\n')
+patch(CLIENT / 'discord_presence.rs',
+      '    let mut a = json!({"details": details, "assets": assets});\n',
+      '    let mut a = json!({"details": details, "assets": assets});\n'
+      '    if let Status::World { play: Play::Multiplayer, .. } = status\n'
+      '        && let Some(phrase) = crate::native_ui::tweaks::discord_phrase()\n'
+      '    {\n'
+      '        a["details"] = phrase.into();\n'
+      '    }\n')
+
+# Custom pause menu: Native draws it, so the game's own is left out while it is on.
+patch(CLIENT / 'game.rs',
+      '            Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),\n',
+      '            Screen::Paused if self.pause_menu && horizon_client::native_ui::tweaks::get().custom_pause => {}\n'
+      '            Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),\n')
+
 print('native_tweaks: Native Client engine hooks applied')

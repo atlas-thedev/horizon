@@ -25,6 +25,7 @@ impl Modules {
         all.extend(super::gameplay_modules::all());
         all.extend(super::gameplay_modules::late());
         all.extend(super::overlay_modules::all());
+        all.extend(super::discord_module::all());
         // The order the Java mod registers them in: it is the order of the menu's grid.
         const ORDER: [&str; 44] = [
             "fps", "cps", "keystrokes", "coords", "direction", "clock", "memory", "ping", "server", "speed", "scoreboard", "bossbar",
@@ -178,9 +179,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("native-modules-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut m = Modules::new(Some(dir.clone()));
-        // The Java mod's defaults: FPS, Keystrokes, Lag Free and the watermark on.
+        // The Java mod's defaults: FPS, Keystrokes, Scoreboard, Boss Bar, Lag Free, the watermark and Discord RPC on.
         let on: Vec<_> = m.all.iter().filter(|m| m.state.enabled).map(|m| m.state.id).collect();
-        assert_eq!(on, vec!["fps", "keystrokes", "bgfps", "watermark"]);
+        assert_eq!(on, vec!["fps", "keystrokes", "scoreboard", "bossbar", "bgfps", "watermark", "discord-rpc"]);
         let fps = m.get_mut("fps").unwrap();
         fps.state.enabled = false;
         fps.state.hud.as_mut().unwrap().fx = 0.75;

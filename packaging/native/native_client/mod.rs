@@ -8,6 +8,7 @@
 //! reads the game's own state directly; its own state lives on the game's
 //! thread.
 
+mod discord_module;
 mod extra_modules;
 mod gameplay_modules;
 mod avatars;
@@ -23,6 +24,7 @@ mod menu;
 mod module;
 mod modules;
 mod net;
+mod pause_view;
 mod overlay_modules;
 mod preview3d;
 mod relay;
@@ -92,6 +94,8 @@ struct State {
     toggles_before: Option<(bool, bool)>,
     /// The Relay chat, and whether it is what the Native screen shows.
     relay: relay_view::RelayView,
+    pause: pause_view::PauseView,
+    pause_was: bool,
     relay_open: bool,
     /// The chat to open the Relay screen on (from a toast).
     relay_select: Option<String>,
@@ -128,6 +132,8 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             held: std::collections::HashSet::new(),
             toggles_before: None,
             relay: relay_view::RelayView::new(),
+            pause: pause_view::PauseView,
+            pause_was: false,
             relay_open: false,
             relay_select: None,
             toasts: toasts::Toasts::default(),
@@ -244,13 +250,15 @@ impl Game<'_> {
     pub(super) fn native_ui_frame(&mut self, batch: &mut HudBatch) {
         use horizon_client::clipboard::Clipboard;
         let open = self.native_mod_screen() == Some(MOD_ID);
+        let paused = self.native_pause_active();
+        let pause_info = if paused { Some(self.native_pause_info()) } else { None };
         // The clipboard is read only when a paste shortcut came in.
         let clip = if open && with_state(|s| s.wants_paste()) {
             self.clipboard.get()
         } else {
             String::new()
         };
-        let (action, copied) = with_state(|state| {
+        let (action, copied, pause_action) = with_state(|state| {
             let g = self.native_view(state);
             let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
             let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
@@ -260,6 +268,10 @@ impl Game<'_> {
                 }
             }
             state.modules.tick();
+            let discord_off = state.modules.get("discord-rpc").is_some_and(|m| !m.state.enabled);
+            native_ui::tweaks::set(|t| t.discord_off = discord_off);
+            let custom_pause = state.cfg.custom_pause;
+            native_ui::tweaks::set(|t| t.custom_pause = custom_pause);
             extra_modules::tick(g.in_world);
             // Toggle Sprint hands the game's own toggle options its choice, and puts them back when it is off.
             let tw = native_ui::tweaks::get();
@@ -278,10 +290,12 @@ impl Game<'_> {
             }
             let mut action = menu::Action::None;
             let mut copied = None;
-            if !g.hud_allowed && !open {
+            let mut pause_action = pause_view::PauseAction::None;
+            if !g.hud_allowed && !open && !paused {
                 state.events.clear();
                 state.was_open = false;
-                return (action, copied);
+                state.pause_was = false;
+                return (action, copied, pause_action);
             }
             let c = &mut state.canvas;
             c.begin(fb[0], fb[1], scale);
@@ -315,7 +329,20 @@ impl Game<'_> {
                     state.toasts.draw(c, &key, now_ms);
                 }
             }
-            if open {
+            if !paused {
+                state.pause_was = false;
+            }
+            if let (true, Some(info)) = (paused, pause_info.as_ref()) {
+                let events = std::mem::take(&mut state.events);
+                state.ui.begin(&events, scale);
+                if !state.pause_was {
+                    state.pause.opened(&mut state.ui);
+                    state.pause_was = true;
+                }
+                pause_action = state.pause.draw(&mut state.ui, c, info);
+                state.ui.tooltips(c);
+                state.ui.end();
+            } else if open {
                 let events = std::mem::take(&mut state.events);
                 state.ui.clip_in = clip;
                 state.ui.begin(&events, scale);
@@ -348,8 +375,9 @@ impl Game<'_> {
             let (items, samples, effects) = (&state.items, &state.sample_items, &state.effect_names);
             c.finish_with(batch, &mut |b, d| self.native_host_draw(b, d, scale, items, samples, effects));
             state.apply(&action);
-            (action, copied)
+            (action, copied, pause_action)
         });
+        self.native_pause_do(pause_action);
         if let Some(text) = copied {
             self.clipboard.set(&text);
         }
@@ -364,6 +392,9 @@ impl Game<'_> {
         self.native_track_input(event);
         if self.native_mod_screen() == Some(MOD_ID) {
             return self.native_menu_event(event);
+        }
+        if self.native_pause_active() {
+            return self.native_pause_event(event);
         }
         // The menu key opens the menu from the world.
         if let WindowEvent::KeyboardInput { event: key, .. } = event
@@ -751,6 +782,102 @@ impl Game<'_> {
                     self.native_mod_screen_close(MOD_ID);
                 }
                 true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Game<'_> {
+    /// The pause menu is up and Native draws it (Custom pause menu).
+    fn native_pause_active(&self) -> bool {
+        self.screen == Screen::Paused && self.pause_menu && with_state(|s| s.cfg.custom_pause)
+    }
+
+    fn native_pause_info(&self) -> pause_view::PauseInfo {
+        let single = !self.external_server();
+        pause_view::PauseInfo {
+            title: self.translate("menu.game", "Game Menu"),
+            back: self.translate("menu.returnToGame", "Back to Game"),
+            advancements: self.translate("gui.advancements", "Advancements"),
+            stats: self.translate("gui.stats", "Statistics"),
+            options: self.translate("menu.options", "Options..."),
+            world: self.translate("options.worldOptions.button", "World Options..."),
+            leave: if single {
+                self.translate("menu.returnToMenu", "Save and Quit to Title")
+            } else {
+                self.translate("menu.disconnect", "Disconnect")
+            },
+            single,
+            unread: relay::unread_total(),
+        }
+    }
+
+    /// What a click on the pause menu asked for: the game's own button of the same name, or Native's screens.
+    fn native_pause_do(&mut self, action: pause_view::PauseAction) {
+        use pause_view::PauseAction as P;
+        let id = match action {
+            P::None => return,
+            P::Resume => 0,
+            P::Advancements => 4,
+            P::Stats => 3,
+            P::Options => 1,
+            P::WorldOptions => 9,
+            P::Leave => 2,
+            P::Relay | P::Menu | P::Cosmetics => {
+                // The pause menu gives way to the Native screen (closing it returns to the game).
+                self.pause_focus = None;
+                self.screen = Screen::Playing;
+                if self.native_mod_screen_open(MOD_ID) {
+                    let who = self.options.player_name();
+                    with_state(|s| {
+                        s.events.clear();
+                        s.was_open = true;
+                        s.who = who;
+                        match action {
+                            P::Relay => {
+                                s.relay_select = None;
+                                s.apply(&menu::Action::OpenRelay);
+                            }
+                            P::Menu => {
+                                s.relay_open = false;
+                                s.apply(&menu::Action::OpenMenu(0));
+                            }
+                            _ => {
+                                s.relay_open = false;
+                                s.apply(&menu::Action::OpenMenu(1));
+                            }
+                        }
+                    });
+                } else {
+                    self.screen = Screen::Paused;
+                }
+                return;
+            }
+        };
+        let _ = self.execute_pause_action(id);
+    }
+
+    /// Window events while Native's pause menu is up: it takes the mouse; the keys stay the game's (Esc resumes).
+    fn native_pause_event(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                with_state(|s| s.events.push(Event::Move { x: position.x, y: position.y }));
+                true
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let button = match button {
+                    MouseButton::Left => 0,
+                    MouseButton::Right => 1,
+                    _ => return true,
+                };
+                let pressed = *state == ElementState::Pressed;
+                with_state(|s| s.events.push(Event::Button { button, pressed }));
+                true
+            }
+            WindowEvent::MouseWheel { .. } => true,
+            WindowEvent::KeyboardInput { event: key, .. } => {
+                !matches!(key.physical_key, PhysicalKey::Code(winit::keyboard::KeyCode::Escape))
             }
             _ => false,
         }

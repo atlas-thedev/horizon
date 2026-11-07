@@ -52,6 +52,10 @@ pub struct Tweaks {
     /// Scoreboard and Boss Bar in the Native look: the game's own are left out.
     pub hide_sidebar: bool,
     pub hide_bossbars: bool,
+    /// Discord RPC is switched off: the game shows no Rich Presence.
+    pub discord_off: bool,
+    /// Native draws the pause menu: the game's own is left out.
+    pub custom_pause: bool,
     /// Where the game's own sidebar / boss bars go: a shift in GUI px, then a scale.
     pub sidebar_move: Option<[f32; 3]>,
     pub boss_move: Option<[f32; 3]>,
@@ -86,6 +90,8 @@ static TWEAKS: Mutex<Tweaks> = Mutex::new(Tweaks {
     background_fps: None,
     hide_sidebar: false,
     hide_bossbars: false,
+    discord_off: false,
+    custom_pause: false,
     sidebar_move: None,
     boss_move: None,
 });
@@ -172,6 +178,17 @@ pub fn critical(enchanted: bool) -> Option<[f32; 3]> {
         ((argb >> 8) & 255) as f32 / 255.0,
         (argb & 255) as f32 / 255.0,
     ])
+}
+
+static PHRASE: Mutex<Option<String>> = Mutex::new(None);
+
+/// Discord RPC: the words to show instead of "Multiplayer" while on a server.
+pub fn set_discord_phrase(phrase: Option<String>) {
+    *PHRASE.lock().unwrap_or_else(|e| e.into_inner()) = phrase;
+}
+
+pub fn discord_phrase() -> Option<String> {
+    PHRASE.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 // ── what the game shows on the HUD, for the modules that redraw or move it ──
