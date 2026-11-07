@@ -56,6 +56,8 @@ pub struct Tweaks {
     pub discord_off: bool,
     /// Native draws the pause menu: the game's own is left out.
     pub custom_pause: bool,
+    /// Freelook wants the camera behind the player while it looks around ("Third person while looking around").
+    pub freelook_third: bool,
     /// Where the game's own sidebar / boss bars go: a shift in GUI px, then a scale.
     pub sidebar_move: Option<[f32; 3]>,
     pub boss_move: Option<[f32; 3]>,
@@ -92,6 +94,7 @@ static TWEAKS: Mutex<Tweaks> = Mutex::new(Tweaks {
     hide_bossbars: false,
     discord_off: false,
     custom_pause: false,
+    freelook_third: false,
     sidebar_move: None,
     boss_move: None,
 });

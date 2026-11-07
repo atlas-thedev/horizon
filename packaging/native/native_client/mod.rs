@@ -97,6 +97,8 @@ struct State {
     /// The game's own toggle-sprint and toggle-sneak options before Toggle Sprint took them over.
     /// The game's own toggle-sprint and toggle-sneak options before Toggle Sprint took them over.
     toggles_before: Option<(bool, bool)>,
+    /// Freelook put the camera behind the player (it goes back to first person when Freelook ends).
+    freelook_switched: bool,
     /// The Relay chat, and whether it is what the Native screen shows.
     relay: relay_view::RelayView,
     pause: pause_view::PauseView,
@@ -144,6 +146,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             effect_names: sample_effect_names(),
             held: std::collections::HashSet::new(),
             toggles_before: None,
+            freelook_switched: false,
             relay: relay_view::RelayView::new(),
             pause: pause_view::PauseView,
             pause_was: false,
@@ -327,6 +330,20 @@ impl Game<'_> {
             if let Some((sprint, crouch)) = state.toggles_before {
                 self.settings.toggle_sprint = tw.toggle_sprint || sprint;
                 self.settings.toggle_crouch = tw.toggle_sneak || crouch;
+            }
+            // Freelook: behind the player while it looks around, and back to first person after, but only when the view
+            // is still the one Freelook chose (a camera picked with F5 meanwhile stays).
+            {
+                use super::perspective::CameraType;
+                if tw.freelook_third && !state.freelook_switched && self.camera_type == CameraType::FirstPerson {
+                    self.camera_type = CameraType::ThirdPersonBack;
+                    state.freelook_switched = true;
+                } else if !tw.freelook_third && state.freelook_switched {
+                    if self.camera_type == CameraType::ThirdPersonBack {
+                        self.camera_type = CameraType::FirstPerson;
+                    }
+                    state.freelook_switched = false;
+                }
             }
             let mut action = menu::Action::None;
             let mut copied = None;

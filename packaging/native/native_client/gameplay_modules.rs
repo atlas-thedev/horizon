@@ -761,13 +761,19 @@ impl Behaviour for Freelook {
                 self.returning = false;
             }
         }
+        // Behind the player while looking around; the game puts it back (unless F5 picked another view meanwhile).
+        let third = self.active && m.bool("third");
+        tweaks::set(|t| t.freelook_third = third);
     }
     fn toggled(&mut self, on: bool) {
         if !on {
             self.active = false;
             self.returning = false;
             self.toggled = false;
-            tweaks::set(|t| t.freelook = None);
+            tweaks::set(|t| {
+                t.freelook = None;
+                t.freelook_third = false;
+            });
         }
     }
 }
