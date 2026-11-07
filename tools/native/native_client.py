@@ -165,18 +165,17 @@ patch(CLIENT / 'multiplayer.rs', '\ntype Pings = Arc<Mutex<HashMap<String, Ping>
 patch(CLIENT / 'multiplayer.rs', '\ntype Icons = Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>>;\n',
       '\npub type Icons = Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>>;\n')
 
-# The Windows executable says it is Native Client (Task Manager, the firewall prompt) and carries the Native icon,
-# also from the Linux cross build, where winresource does not run (native_exe.rs).
+# The Windows executable says it is Native Client (Task Manager, the firewall prompt): its version strings, in the
+# resource upstream's build.rs already compiles with the icon (also on the Linux cross build) (native_exe.rs).
 shutil.copyfile(native / 'packaging/native/native_exe.rs', CLIENT / '../native_exe.rs')
-patch(CLIENT / '../build.rs', '    println!("cargo:rerun-if-changed={ico}");\n',
-      '    println!("cargo:rerun-if-changed={ico}");\n'
-      '    native_exe_resources(&ico, &out_dir);\n')
-patch(CLIENT / '../build.rs', '        resource.set_icon(&ico);\n',
-      '        resource.set_icon(&ico);\n'
+patch(CLIENT / '../build.rs', '        resource.set_icon(&resource_icon);\n',
+      '        resource.set_icon(&resource_icon);\n'
       '        for (k, v) in NATIVE_EXE_STRINGS {\n'
       '            resource.set(k, v);\n'
       '        }\n')
-with open(CLIENT / '../build.rs', 'a', encoding='utf-8') as build:
-    build.write('\ninclude!("native_exe.rs");\n')
+build_rs = (CLIENT / '../build.rs')
+if 'include!("native_exe.rs");' not in build_rs.read_text(encoding='utf-8'):
+    with open(build_rs, 'a', encoding='utf-8') as build:
+        build.write('\ninclude!("native_exe.rs");\n')
 
 print('native_client: Native modules applied')
