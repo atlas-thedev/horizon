@@ -1146,7 +1146,7 @@ pub(super) fn native_title_frame(
 
 struct TitleItemEnv<'a>(&'a horizon_client::item_render::ItemRenderer);
 
-impl horizon_client_core::item_models::ItemEnv for TitleItemEnv<'_> {
+impl horizon_assets::item_model::ItemEnv for TitleItemEnv<'_> {
     fn grass_color(&self, temperature: f64, downfall: f64) -> i32 {
         self.0.grass_color(temperature, downfall)
     }
@@ -1163,7 +1163,7 @@ fn draw_title_item(
     if let Some(renderer) = item_renderer {
         let state = renderer.resolve(
             &horizon_client::item_render::stack_view(stack),
-            horizon_client_core::item_models::DisplayContext::Gui,
+            horizon_assets::item_model::DisplayContext::Gui,
             None,
             None,
             0,
