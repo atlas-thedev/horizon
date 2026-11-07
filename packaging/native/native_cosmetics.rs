@@ -399,8 +399,8 @@ impl Model {
             }
         }
         let vertices = count(&root) + limbs.iter().map(|(_, l)| count(l)).sum::<usize>();
-        Item {
-            id: format!(
+        Item::native(
+            format!(
                 "native:{id}{}{}",
                 format!(
                     "{}{}",
@@ -410,15 +410,14 @@ impl Model {
                 if layer.glow { GLOW } else { "" }
             ),
             // Never covered by the game's own rule: NCM parts carry their armour rules.
-            slot: Slot::Shoulder,
-            bone: main,
+            Slot::Shoulder,
+            main,
             root,
-            texture: texture.clone(),
+            texture.clone(),
             animations,
             vertices,
             limbs,
-            tag: None,
-        }
+        )
     }
 }
 

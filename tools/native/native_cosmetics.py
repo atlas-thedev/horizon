@@ -37,6 +37,51 @@ if not (CLIENT / 'native_skins.rs').exists():
 shutil.copyfile(native / 'packaging/native/native_cosmetics.rs', CLIENT / 'game/native_cosmetics.rs')
 patch(CLIENT / 'game.rs', 'mod cosmetics;\n', 'mod cosmetics;\nmod native_cosmetics;\n')
 
+# Items made in code (an NCM model) rather than read from a file: `Item` keeps private fields (its animated parts),
+# so it gets a constructor that finds them, and its top, as `parse` does.
+patch(root / 'crates/horizon-cosmetics/src/item.rs',
+      '\nimpl Item {\n    /// Reads and checks an item file.\n',
+      '\nimpl Item {\n'
+      '    /// Native Client: an item built from an NCM model (game/native_cosmetics.rs), its animated parts and its\n'
+      '    /// top found as `parse` finds them.\n'
+      '    #[allow(clippy::too_many_arguments)]\n'
+      '    pub fn native(\n'
+      '        id: String,\n'
+      '        slot: Slot,\n'
+      '        bone: Bone,\n'
+      '        root: Part,\n'
+      '        texture: Texture,\n'
+      '        animations: Vec<Animation>,\n'
+      '        vertices: usize,\n'
+      '        limbs: Vec<(Bone, Part)>,\n'
+      '    ) -> Item {\n'
+      '        let animated = {\n'
+      '            let mut roots = vec![&root];\n'
+      '            roots.extend(limbs.iter().map(|(_, l)| l));\n'
+      '            animated(&roots, &animations)\n'
+      '        };\n'
+      '        let item = Item {\n'
+      '            id,\n'
+      '            slot,\n'
+      '            bone,\n'
+      '            root,\n'
+      '            texture,\n'
+      '            animations,\n'
+      '            vertices,\n'
+      '            limbs,\n'
+      '            tag: None,\n'
+      '            top: 0.0,\n'
+      '            emote: None,\n'
+      '            companion: None,\n'
+      '            trail: None,\n'
+      '            aura: None,\n'
+      '            animated,\n'
+      '        };\n'
+      '        let top = item.extent().top;\n'
+      '        Item { top, ..item }\n'
+      '    }\n\n'
+      '    /// Reads and checks an item file.\n')
+
 COSMETICS = CLIENT / 'game/cosmetics.rs'
 # What the avatar wears: Horizon's items (and an emote's props), then Native's.
 patch(COSMETICS,
