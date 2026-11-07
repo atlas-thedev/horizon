@@ -37,6 +37,7 @@ mod relay_view;
 mod previews;
 mod screenshots;
 mod scroll;
+mod servers_view;
 mod setting;
 mod status;
 mod status_modules;
@@ -110,6 +111,9 @@ struct State {
     title_overlay: u8,
     title_was: bool,
     title_pending: Option<title_view::TitleAct>,
+    /// The Native multiplayer screen, and whether the game's own was asked for (until the title shows again).
+    servers: servers_view::ServersView,
+    servers_classic: bool,
     /// The chat to open the Relay screen on (from a toast).
     relay_select: Option<String>,
     toasts: toasts::Toasts,
@@ -155,6 +159,8 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             title_overlay: 0,
             title_was: false,
             title_pending: None,
+            servers: servers_view::ServersView::default(),
+            servers_classic: false,
             relay_select: None,
             toasts: toasts::Toasts::default(),
             }
@@ -956,11 +962,24 @@ impl Game<'_> {
 
 /// The title's own page (not a world list or the options) is the Native one, when it is switched on.
 pub(super) fn native_title_active(title: &horizon_client::title::Title) -> bool {
-    matches!(title.mode, horizon_client::title::Mode::Main) && with_state(|s| s.cfg.custom_title)
+    use horizon_client::title::Mode;
+    with_state(|s| match &title.mode {
+        Mode::Main => {
+            s.servers_classic = false;
+            s.servers.closed();
+            s.cfg.custom_title
+        }
+        // The server list itself (Add, Edit, Direct Connection and Delete stay the game's screens).
+        Mode::Multiplayer(horizon_client::multiplayer::Screen::List { .. }) => s.cfg.custom_servers && !s.servers_classic,
+        _ => false,
+    })
 }
 
-/// Draws the Native title (and Relay or the Native menu over it, opened from there) into `batch`.
-pub(super) fn native_title_frame(batch: &mut HudBatch, allows_multiplayer: bool, player: &str) {
+/// Draws the Native title (and Relay or the Native menu over it, opened from there), or the Native server list,
+/// into `batch`.
+pub(super) fn native_title_frame(batch: &mut HudBatch, title: &horizon_client::title::Title, player: &str) {
+    let allows_multiplayer = title.allows_multiplayer;
+    let servers = servers_view::info(title);
     with_state(|state| {
         let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
         let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
@@ -974,7 +993,18 @@ pub(super) fn native_title_frame(batch: &mut HudBatch, allows_multiplayer: bool,
         }
         let mut deferred = None;
         let info = title_view::TitleInfo { allows_multiplayer, game_dir: game_dir(), player: player.to_owned() };
-        match state.title_overlay {
+        let overlay = if servers.is_some() { 4 } else { state.title_overlay };
+        match overlay {
+            4 => {
+                let escape = state.ui.keys.iter().any(|(k, _)| *k == ui::KEY_ESCAPE);
+                let mut act = servers.as_ref().and_then(|list| state.servers.draw(&mut state.ui, c, list));
+                if escape && act.is_none() {
+                    act = state.servers.escape(&mut state.ui);
+                }
+                if act.is_some() {
+                    state.title_pending = act;
+                }
+            }
             1 => {
                 state.title.background(c);
                 let who = Some(player).filter(|n| !n.is_empty());
@@ -1079,6 +1109,43 @@ pub(super) fn native_title_apply(title: &mut horizon_client::title::Title, act: 
         TitleAct::Options => Some(Action::Options),
         TitleAct::Quit => Some(Action::Quit),
         TitleAct::Join(address) => Some(Action::Connect { address, lan: false }),
+        TitleAct::ServerButton { id, index } => {
+            use horizon_client::multiplayer::{Outcome, Screen};
+            let saves = title.saves.clone();
+            let outcome = match &mut title.mode {
+                Mode::Multiplayer(screen) => {
+                    if let Screen::List { selected, .. } = screen
+                        && index.is_some()
+                    {
+                        *selected = index;
+                    }
+                    screen.click(Some(id), 0.0, 0.0, (0.0, 0.0), &saves)
+                }
+                _ => return None,
+            };
+            match outcome {
+                Outcome::Back => {
+                    title.mode = Mode::Main;
+                    None
+                }
+                Outcome::Connect { address, lan } => Some(Action::Connect { address, lan }),
+                Outcome::None => None,
+            }
+        }
+        TitleAct::ServerMove { index, up } => {
+            let saves = title.saves.clone();
+            if let Mode::Multiplayer(screen) = &mut title.mode {
+                if let horizon_client::multiplayer::Screen::List { selected, .. } = screen {
+                    *selected = Some(index);
+                }
+                screen.arrow(up, true, (0.0, 0.0), &saves);
+            }
+            None
+        }
+        TitleAct::ServersClassic => {
+            with_state(|s| s.servers_classic = true);
+            None
+        }
         TitleAct::NativeMods | TitleAct::Relay | TitleAct::Classic => None,
     }
 }

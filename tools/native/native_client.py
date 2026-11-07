@@ -73,8 +73,10 @@ patch(MENU,
       '            if super::native_client::native_title_active(title) {\n'
       '                let who = self.options.as_ref().map_or_else(|| "Player".into(), |o| o.player_name());\n'
       '                let logo_width = batch.width.ceil();\n'
-      '                horizon_client::title::draw_logo(&gui.atlas, batch, logo_width);\n'
-      '                super::native_client::native_title_frame(batch, title.allows_multiplayer, &who);\n'
+      '                if matches!(title.mode, horizon_client::title::Mode::Main) {\n'
+      '                    horizon_client::title::draw_logo(&gui.atlas, batch, logo_width);\n'
+      '                }\n'
+      '                super::native_client::native_title_frame(batch, title, &who);\n'
       '            } else {\n'
       '                title.draw_with_items(\n'
       '                    &gui.atlas,\n'
@@ -116,8 +118,10 @@ patch(GAME,
       '                if native_client::native_title_active(title) {\n'
       '                    let who = self.options.player_name();\n'
       '                    let logo_width = batch.width.ceil();\n'
-      '                    horizon_client::title::draw_logo(&self.gui.atlas, &mut batch, logo_width);\n'
-      '                    native_client::native_title_frame(&mut batch, title.allows_multiplayer, &who);\n'
+      '                    if matches!(title.mode, horizon_client::title::Mode::Main) {\n'
+      '                        horizon_client::title::draw_logo(&self.gui.atlas, &mut batch, logo_width);\n'
+      '                    }\n'
+      '                    native_client::native_title_frame(&mut batch, title, &who);\n'
       '                } else {\n'
       '                    title.draw_with_items(\n'
       '                        &self.gui.atlas,\n'
@@ -139,7 +143,9 @@ patch(GAME,
       '        {\n'
       '            let _ = self.title_action(event_loop, action);\n'
       '        }\n'
-      '        if self.title.as_ref().is_some_and(native_client::native_title_active)\n'
+      '        // Options opened from the title is a screen over it: its input goes to the options, as vanilla.\n'
+      '        if self.screen != Screen::Options\n'
+      '            && self.title.as_ref().is_some_and(native_client::native_title_active)\n'
       '            && native_client::native_title_event(&event, self.modifiers)\n'
       '        {\n'
       '            return;\n'
@@ -151,5 +157,26 @@ patch(GAME,
 # The Native title leaves the game's panorama and Minecraft logo as they are: the logo is drawn by the game.
 patch(CLIENT / 'title.rs', '\nfn draw_logo(atlas: &HudAtlas, batch: &mut HudBatch, w: f32) {\n',
       '\npub fn draw_logo(atlas: &HudAtlas, batch: &mut HudBatch, w: f32) {\n')
+# The Native server list pings the servers Native features the way the game pings its own list.
+patch(CLIENT / 'multiplayer.rs', '\nfn ping_all(servers: &[ServerEntry], pings: &Pings, icons: &Icons, file: &Path) {\n',
+      '\npub fn ping_all(servers: &[ServerEntry], pings: &Pings, icons: &Icons, file: &Path) {\n')
+patch(CLIENT / 'multiplayer.rs', '\ntype Pings = Arc<Mutex<HashMap<String, Ping>>>;\n',
+      '\npub type Pings = Arc<Mutex<HashMap<String, Ping>>>;\n')
+patch(CLIENT / 'multiplayer.rs', '\ntype Icons = Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>>;\n',
+      '\npub type Icons = Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>>;\n')
+
+# The Windows executable says it is Native Client (Task Manager, the firewall prompt) and carries the Native icon,
+# also from the Linux cross build, where winresource does not run (native_exe.rs).
+shutil.copyfile(native / 'packaging/native/native_exe.rs', CLIENT / '../native_exe.rs')
+patch(CLIENT / '../build.rs', '    println!("cargo:rerun-if-changed={ico}");\n',
+      '    println!("cargo:rerun-if-changed={ico}");\n'
+      '    native_exe_resources(&ico, &out_dir);\n')
+patch(CLIENT / '../build.rs', '        resource.set_icon(&ico);\n',
+      '        resource.set_icon(&ico);\n'
+      '        for (k, v) in NATIVE_EXE_STRINGS {\n'
+      '            resource.set(k, v);\n'
+      '        }\n')
+with open(CLIENT / '../build.rs', 'a', encoding='utf-8') as build:
+    build.write('\ninclude!("native_exe.rs");\n')
 
 print('native_client: Native modules applied')

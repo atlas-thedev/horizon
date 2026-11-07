@@ -113,6 +113,12 @@ pub fn gamma(base: f32) -> f32 {
     get().gamma.unwrap_or(base)
 }
 
+/// Fullbright at full strength: every light level drawn at full brightness, as Java's gamma 16 shows it.
+pub fn fullbright() -> bool {
+    get().gamma.is_some_and(|g| g >= 16.0)
+}
+
+
 pub fn fire_lower(base: f32) -> f32 {
     get().fire_lower.unwrap_or(base)
 }

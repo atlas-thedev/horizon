@@ -35,10 +35,16 @@ def patch(path, old, new):
 if not (RENDER / 'native_ui/tweaks.rs').is_file():
     raise SystemExit('native_tweaks: run native_ui.py first.')
 
-# Fullbright: the brightness slider's value.
-patch(RENDER / 'settings.rs',
-      '            gamma: f.double("gamma") as f32,\n',
-      '            gamma: crate::native_ui::tweaks::gamma(f.double("gamma") as f32),\n')
+# Fullbright: the module's brightness over the slider's, read every frame (never saved to options.txt); at full
+# strength every light level is drawn at full brightness (Java's gamma 16).
+patch(RENDER / 'gfx.rs',
+      '            (self.gamma - frame.darkness.0).max(0.0),\n',
+      '            (crate::native_ui::tweaks::gamma(self.gamma) - frame.darkness.0).max(0.0),\n')
+patch(RENDER / 'gfx.rs',
+      '        if self.fullbright {\n'
+      '            pixels.fill(255);\n',
+      '        if self.fullbright || crate::native_ui::tweaks::fullbright() {\n'
+      '            pixels.fill(255);\n')
 
 # No Hurt Cam: the damage tilt of the camera.
 patch(RENDER / 'camera.rs',

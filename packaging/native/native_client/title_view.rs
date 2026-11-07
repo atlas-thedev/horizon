@@ -30,6 +30,12 @@ pub enum TitleAct {
     Classic,
     /// An ad's server.
     Join(String),
+    /// One of the game's multiplayer list buttons (`multiplayer::Screen::click`), with the saved server selected.
+    ServerButton { id: u8, index: Option<usize> },
+    /// Move a saved server up or down the list.
+    ServerMove { index: usize, up: bool },
+    /// The game's own multiplayer screen, until the title shows again.
+    ServersClassic,
 }
 
 /// What the title needs to know of the game.
