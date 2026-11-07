@@ -104,6 +104,13 @@ fn item(c: &mut Canvas, sl: &StackView, x: f32, y: f32, size: f32, tint: u32) {
     c.host(HOST_ITEM, sl.key, x, y, size, tint);
 }
 
+/// An item drawn the way a vanilla inventory slot draws it: the game's item model, its count in the game's font
+/// and its durability bar, all by the game itself (resource packs and server items included).
+fn slot_item(c: &mut Canvas, sl: &StackView, x: f32, y: f32, size: f32, count: bool, bar: bool) {
+    let flags = if count { SLOT_COUNT } else { 0 } | if bar { SLOT_BAR } else { 0 };
+    c.host(HOST_SLOT | flags, sl.key, x, y, size, 0xFFFFFFFF);
+}
+
 // ── potion effects ───────────────────────────────────────────────────────
 
 fn effects() -> Module {
@@ -382,9 +389,9 @@ impl Boxed for Armor {
         let pad = self.pad(m);
         let item_size = 16.0 * s;
         let spacing = 4.0 * s;
-        let bar_h = 3.0 * s; // 2px bar + 1px gap
         let durability = m.bool("durability");
-        let slot_h = if durability { item_size + bar_h } else { item_size };
+        // The durability bar sits on the item, as in a vanilla slot.
+        let slot_h = item_size;
         let show_empty = m.bool("empty");
         let visible = g.vitals.armor.iter().filter(|a| a.is_some() || show_empty).count();
         if visible == 0 {
@@ -405,14 +412,7 @@ impl Boxed for Armor {
                 let ix = if vertical { x + pad } else { x + pad + ox };
                 let iy = if vertical { y + pad + oy } else { y + pad };
                 if let Some(sl) = sl {
-                    item(c, sl, ix, iy, item_size, 0xFFFFFFFF);
-                    if durability && sl.max > 0 && sl.damage > 0 {
-                        let pct = sl.durability();
-                        let (bx, by, bw) = (ix + 2.0 * s, iy + item_size + s, 13.0 * s);
-                        let bh = (2.0 * s).max(1.0);
-                        c.fill(bx, by, bw, bh, 0xFF000000);
-                        c.fill(bx, by, (bw * pct).round().max(1.0), bh, status::wear(pct));
-                    }
+                    slot_item(c, sl, ix, iy, item_size, false, durability);
                 } else {
                     // Empty slot placeholder.
                     c.round(ix + item_size * 0.1, iy + item_size * 0.1, item_size * 0.8, item_size * 0.8, 3.0 * s, 0x14FFFFFF);
@@ -484,8 +484,7 @@ impl Inventory {
         let across = lines as f32 * step - gap + if hotbar { sep - gap } else { 0.0 };
         let (w, h) = (if vertical { across } else { along } + 2.0 * pad, if vertical { along } else { across } + 2.0 * pad);
         if draw {
-            let (cr, fs) = (4.0 * s, 10.0 * s);
-            let flh = c.line_height(font::BOLD, fs);
+            let cr = 4.0 * s;
             let (background, slots) = (m.bool("background"), m.bool("slots"));
             if hotbar {
                 if !vertical {
@@ -514,21 +513,8 @@ impl Inventory {
                     }
                     let Some(sl) = sl else { continue };
                     let (ix, iy) = (sx + (cell - ic) / 2.0, sy + (cell - ic) / 2.0);
-                    item(c, sl, ix, iy, ic, 0xFFFFFFFF);
-                    if m.bool("bars") && sl.max > 0 && sl.damage > 0 {
-                        let pct = sl.durability();
-                        let (bx, by, bw) = (sx + 2.5 * s, sy + cell - 3.0 * s, cell - 5.0 * s);
-                        let bh = (2.0 * s).max(1.5);
-                        c.fill(bx, by, bw, bh, 0xCC000000);
-                        c.fill(bx, by, (bw * pct).round().max(1.0), bh, status::wear(pct));
-                    }
-                    if m.bool("counts") && sl.count > 1 {
-                        let t = sl.count.to_string();
-                        let tw = c.text_width(font::BOLD, fs, &t);
-                        let (tx, ty) = (sx + cell - tw - 1.5 * s, sy + cell - flh + s);
-                        c.text(font::BOLD, fs, &t, tx + 1.0, ty + 1.0, 0xDD000000);
-                        c.text(font::BOLD, fs, &t, tx, ty, 0xFFFFFFFF);
-                    }
+                    // The game draws the slot as its inventory does: item, count and bar.
+                    slot_item(c, sl, ix, iy, ic, m.bool("counts"), m.bool("bars"));
                 }
             }
         }

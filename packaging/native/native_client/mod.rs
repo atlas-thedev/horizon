@@ -285,8 +285,16 @@ impl Game<'_> {
             hud_allowed: in_world
                 && matches!(self.screen, Screen::Playing | Screen::Chat | Screen::Mod)
                 && !self.ui.hide_gui
-                && !self.debug,
+                && !self.debug
+                && !self.native_world_loading(),
         }
+    }
+
+    /// A world is being made or its terrain is coming in (the level loading, reconfiguring and world creation
+    /// screens): the HUD modules stay off, as the game's own HUD does.
+    fn native_world_loading(&self) -> bool {
+        self.integrated_starting.is_some()
+            || self.remote.as_ref().is_some_and(|r| r.level_load.is_active() || r.reconfiguring.is_some())
     }
 
     /// Once a frame, over the game's HUD and screens: the Native UI.
@@ -644,7 +652,23 @@ impl Game<'_> {
         // Canvas units are logical pixels; the batch is in GUI units.
         let k = canvas_scale / batch.scale;
         let (gx, gy, size) = (d.x * k, d.y * k, d.size * k);
-        match d.kind {
+        match d.kind & 0xFF {
+            module::HOST_SLOT => {
+                let stack = if d.key >= module::SAMPLE_KEY { samples.get(&d.key) } else { items.get(d.key as usize) };
+                let Some(stack) = stack else { return };
+                let start = batch.vertices.len();
+                self.draw_item_model(batch, stack, gx, gy);
+                // GuiGraphicsExtractor.itemDecorations: the count in the game's font and the damage bar.
+                let mut shown = stack.clone();
+                if d.kind & module::SLOT_COUNT == 0 {
+                    shown.count = 1;
+                }
+                if d.kind & module::SLOT_BAR == 0 {
+                    shown.damage = 0;
+                }
+                self.draw_item_decorations(batch, &shown, gx, gy, None);
+                batch.scale_since(start, gx, gy, size / 16.0, size / 16.0);
+            }
             module::HOST_ITEM => {
                 let stack = if d.key >= module::SAMPLE_KEY { samples.get(&d.key) } else { items.get(d.key as usize) };
                 let Some(stack) = stack else { return };
@@ -654,7 +678,7 @@ impl Game<'_> {
             }
             module::HOST_ITEM_ID => {
                 let Some(id) = module::item_for_key(d.key) else { return };
-                let stack = ItemStack { item: std::sync::Arc::from(id.as_str()), count: 1, damage: 0, extra: None };
+                let stack = ItemStack { item: std::sync::Arc::from(full_id(&id).as_str()), count: 1, damage: 0, extra: None };
                 let start = batch.vertices.len();
                 self.draw_item_model(batch, &stack, gx, gy);
                 batch.scale_since(start, gx, gy, size / 16.0, size / 16.0);
@@ -687,7 +711,7 @@ fn sample_stacks() -> HashMap<u64, ItemStack> {
         out.insert(
             s.key,
             ItemStack {
-                item: std::sync::Arc::from(s.id.as_str()),
+                item: std::sync::Arc::from(full_id(&s.id).as_str()),
                 count: s.count,
                 damage: s.damage,
                 extra: None,
@@ -1236,4 +1260,10 @@ mod tests {
         g.yaw = -90.0;
         assert_eq!(g.facing(), "E");
     }
+}
+
+/// An item id as the game's registry has it: the modules keep ids without `minecraft:` (as the Java mod does),
+/// and the game's item renderer finds nothing for a bare `diamond_sword`, so previews drew no items.
+fn full_id(id: &str) -> String {
+    if id.contains(':') { id.to_owned() } else { format!("minecraft:{id}") }
 }

@@ -613,6 +613,11 @@ pub struct EffectView {
 /// What `Canvas::host` kinds mean.
 pub const HOST_ITEM: u32 = 1;
 pub const HOST_EFFECT: u32 = 2;
+/// An item as a vanilla inventory slot draws it: the game's item model, then its own count and durability bar
+/// (`GuiGraphicsExtractor.itemDecorations`). The low byte is the kind; bit 8 shows the count, bit 9 the bar.
+pub const HOST_SLOT: u32 = 4;
+pub const SLOT_COUNT: u32 = 1 << 8;
+pub const SLOT_BAR: u32 = 1 << 9;
 /// Keys at and above this are the made-up stacks of previews.
 pub const SAMPLE_KEY: u64 = u64::MAX - 1024;
 
