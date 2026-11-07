@@ -38,27 +38,28 @@ shutil.copyfile(native / 'packaging/native/native_cosmetics.rs', CLIENT / 'game/
 patch(CLIENT / 'game.rs', 'mod cosmetics;\n', 'mod cosmetics;\nmod native_cosmetics;\n')
 
 COSMETICS = CLIENT / 'game/cosmetics.rs'
-# What the avatar wears: Horizon's items, then Native's.
+# What the avatar wears: Horizon's items (and an emote's props), then Native's.
 patch(COSMETICS,
-      '        let worn = self.worn(m, own)?;\n'
-      '        if horizon_client::mobs::trader::is_invisible(m) {\n',
-      '        let native = self.native_cosmetics_worn(m, own);\n'
-      '        let worn = match self.worn(m, own) {\n'
-      '            Some(worn) => worn,\n'
-      '            None if !native.is_empty() => Arc::from(Vec::new()),\n'
-      '            None => return None,\n'
-      '        };\n'
-      '        if horizon_client::mobs::trader::is_invisible(m) {\n')
-patch(COSMETICS, '        for item in worn.iter() {\n',
-      '        for item in worn.iter().chain(native.iter()) {\n'
+      '        let worn = self.worn(m, own);\n',
+      '        let worn = self.worn(m, own);\n'
+      '        let native = self.native_cosmetics_worn(m, own);\n')
+patch(COSMETICS,
+      '        if worn.is_none() && emote.is_none() || horizon_client::mobs::trader::is_invisible(m) {\n',
+      '        if worn.is_none() && native.is_empty() && emote.is_none() || horizon_client::mobs::trader::is_invisible(m) {\n')
+patch(COSMETICS,
+      '        let worn_items = worn.iter().flat_map(|w| w.iter()).map(|i| (i, None));\n',
+      '        let worn_items = worn.iter().flat_map(|w| w.iter()).chain(native.iter()).map(|i| (i, None));\n')
+patch(COSMETICS,
+      '        for (item, emoting) in worn_items.chain(emote_items) {\n'
+      '            if emoting.is_none() && !bodies {\n',
+      '        for (item, emoting) in worn_items.chain(emote_items) {\n'
       '            // A blinking part is off for part of its cycle (the Java mod skips it).\n'
       '            if !super::native_cosmetics::shown(item, ticks) {\n'
       '                continue;\n'
       '            }\n'
-      '            let light = super::native_cosmetics::light_of(item, light);\n')
-# Native items are not Horizon's "others' cosmetics", which show only to a Horizon owner.
-patch(COSMETICS, '            if !bodies || covered(m, item.slot) {\n',
-      '            if (!bodies && !item.id.starts_with("native:")) || covered(m, item.slot) {\n')
+      '            let light = super::native_cosmetics::light_of(item, light);\n'
+      '            // Native items are not Horizon\'s "others\' cosmetics", which show only to a Horizon owner.\n'
+      '            if emoting.is_none() && !bodies && !item.id.starts_with("native:") {\n')
 
 # Native cosmetics keep their texture's resolution: one 2048×2048 area of the atlas, each texture packed at its own size.
 RENDER = root / 'crates/horizon-client-render/src'
@@ -79,14 +80,14 @@ patch(COSMETICS,
       '                    self.store_skin(location, slot_image(&item));\n'
       '                }\n')
 patch(COSMETICS,
-      '                item.texture.width as f32 / 64.0,\n'
-      '                item.texture.height as f32 / 64.0,\n',
-      '                item.texture.width as f32 / super::native_cosmetics::slot_width(item),\n'
-      '                item.texture.height as f32 / super::native_cosmetics::slot_height(item),\n')
+      '            item.texture.width as f32 / 64.0,\n'
+      '            item.texture.height as f32 / 64.0,\n',
+      '            item.texture.width as f32 / super::native_cosmetics::slot_width(item),\n'
+      '            item.texture.height as f32 / super::native_cosmetics::slot_height(item),\n')
 patch(COSMETICS,
-      '                self.skin_downloads.borrow_mut().drawn(&b.location);\n',
-      '                self.skin_downloads.borrow_mut().drawn(&b.location);\n'
-      '                super::native_cosmetics::drawn(&b.location);\n')
+      '            self.skin_downloads.borrow_mut().drawn(&b.location);\n',
+      '            self.skin_downloads.borrow_mut().drawn(&b.location);\n'
+      '            super::native_cosmetics::drawn(&b.location);\n')
 
 # HD capes (native_hd_capes.rs): the full picture of a cape larger than 64x32 is kept beside the skin slot's 64x32
 # copy and drawn from the atlas's Native area at its own size.
