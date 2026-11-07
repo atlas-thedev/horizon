@@ -47,7 +47,8 @@ echo "nightly: $NAME -> $TAG"
 if [ ! -d src/.git ]; then
   git clone -q --filter=blob:none "https://github.com/$UPSTREAM.git" src
 fi
-git -C src fetch -q --tags
+# --force: upstream moves its nightly tags (nightly, nightly-<date>) to each new build
+git -C src fetch -q --tags --force
 git -C src checkout -q -f "nightly-source/$DATE-$SHORT" 2> /dev/null || git -C src checkout -q -f "$SHORT"
 git -C src clean -qfd crates packaging tools
 
