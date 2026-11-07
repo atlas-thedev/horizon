@@ -772,6 +772,30 @@ pub fn animated_cape(
     Some((location, upload))
 }
 
+// ── hoods ────────────────────────────────────────────────────────────────
+
+/// Players (by mob id) whose worn Native cosmetic covers the head (a hood, helmet or mask): the skin's hat layer
+/// and the helmet are not drawn under it, as in the Java mod (`HeadCover`). The game's cosmetics code sets it each
+/// time it works out what a player wears; the model and armour code read it.
+static HOODED: RwLock<Vec<u32>> = RwLock::new(Vec::new());
+
+pub fn set_hooded(id: u32, on: bool) {
+    let known = HOODED.read().unwrap_or_else(|e| e.into_inner()).contains(&id);
+    if known == on {
+        return;
+    }
+    let mut list = HOODED.write().unwrap_or_else(|e| e.into_inner());
+    list.retain(|i| *i != id);
+    if on {
+        list.push(id);
+    }
+}
+
+pub fn hooded(id: u32) -> bool {
+    let list = HOODED.read().unwrap_or_else(|e| e.into_inner());
+    !list.is_empty() && list.contains(&id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

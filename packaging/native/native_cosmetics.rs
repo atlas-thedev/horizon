@@ -57,10 +57,42 @@ impl Armor {
     }
 }
 
-/// A Native cosmetic ready to draw: one game item per armour rule.
+impl Armor {
+    fn bit(self) -> u8 {
+        match self {
+            Armor::None => 0,
+            Armor::Head => 1,
+            Armor::Chest => 2,
+            Armor::Legs => 4,
+            Armor::Feet => 8,
+        }
+    }
+}
+
+/// When an item shows: it depends on the armour slots in `mask`, and shows while exactly `state` of them are worn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rule {
+    mask: u8,
+    state: u8,
+}
+
+impl Rule {
+    /// Whether the item shows on `m`, by the armour it wears.
+    pub fn applies(self, m: &Mob) -> bool {
+        let worn = [Armor::Head, Armor::Chest, Armor::Legs, Armor::Feet]
+            .into_iter()
+            .filter(|a| a.worn(m))
+            .fold(0, |bits, a| bits | a.bit());
+        worn & self.mask == self.state
+    }
+}
+
+/// A Native cosmetic ready to draw: the game's items, each for one combination of worn armour.
 #[derive(Debug)]
 pub struct Native {
-    pub items: Vec<(Armor, Arc<Item>)>,
+    pub items: Vec<(Rule, Arc<Item>)>,
+    /// `CosmeticModel.coversHead`: a hood, helmet or mask the skin's hat layer and the helmet must not poke through.
+    pub covers_head: bool,
 }
 
 #[derive(Debug)]
@@ -92,6 +124,8 @@ struct NcmPart {
     anims: Vec<Anim>,
     children: Vec<NcmPart>,
     armor: Armor,
+    /// With `armor`: the part moves by this (pixels) while the slot is worn, instead of hiding.
+    push: Option<[f32; 3]>,
     /// 0 any, 1 left only, 2 right only.
     side: u8,
     /// `layer: "glow"` (or `"emissive"`, or `glow: true`): drawn at full brightness, like the Java mod's eyes layer.
@@ -143,22 +177,21 @@ fn bone(name: &str) -> Bone {
     }
 }
 
-/// `CosmeticModel.slot` for the armour rule. A `push` rule (the part moves
-/// instead of hiding) has no counterpart in the game's items: such parts stay.
-fn armor(o: &serde_json::Value) -> Armor {
+/// `CosmeticModel`'s armour rule: the slot, and for a `push` rule the offset (pixels) the part moves by while
+/// that slot is worn (else the part hides).
+fn armor(o: &serde_json::Value) -> (Armor, Option<[f32; 3]>) {
     let Some(a) = o.get("armor").filter(|a| a.is_object()) else {
-        return Armor::None;
+        return (Armor::None, None);
     };
-    if text(a, "mode", "hide") == "push" {
-        return Armor::None;
-    }
-    match text(a, "slot", "none").to_ascii_lowercase().replace(['_', '-'], "").as_str() {
+    let push = (text(a, "mode", "hide") == "push").then(|| clamp_all(floats(a, "offset", [0.0; 3]), 8.0));
+    let slot = match text(a, "slot", "none").to_ascii_lowercase().replace(['_', '-'], "").as_str() {
         "head" | "helmet" => Armor::Head,
         "chest" => Armor::Chest,
         "legs" => Armor::Legs,
         "feet" | "boots" => Armor::Feet,
         _ => Armor::None,
-    }
+    };
+    (slot, push)
 }
 
 fn anim(o: &serde_json::Value) -> Option<Anim> {
@@ -240,7 +273,8 @@ fn parts(
             cubes,
             anims,
             children,
-            armor: armor(o),
+            armor: armor(o).0,
+            push: armor(o).1,
             side: match text(o, "side", "") {
                 "left" => 1,
                 "right" => 2,
@@ -288,8 +322,7 @@ impl Model {
 
     /// `CosmeticModel.coversHead`: a head root has a head-sized box the head's
     /// centre (0, -4, 0) sits inside, at rest. The Java mod hides the skin's hat
-    /// layer and the helmet under such a hood; the game does not do that yet.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// layer and the helmet under such a hood; so does the game ([`set_hooded`](horizon_client::native_skins::set_hooded)).
     pub fn covers_head(&self) -> bool {
         self.roots
             .iter()
@@ -301,25 +334,22 @@ impl Model {
     /// model's own) wears it, its texture already scaled to fit a skin slot.
     pub fn items(&self, id: &str, side: u8, texture: &Texture) -> Native {
         let side = if side != 0 { side } else { self.default_side() };
-        let mut groups: Vec<(Armor, Vec<&NcmPart>)> = Vec::new();
-        for root in self.roots.iter().filter(|r| r.side == 0 || r.side == side) {
-            match groups.iter_mut().find(|(a, _)| *a == root.armor) {
-                Some((_, list)) => list.push(root),
-                None => groups.push((root.armor, vec![root])),
-            }
+        let roots: Vec<&NcmPart> = self.roots.iter().filter(|r| r.side == 0 || r.side == side).collect();
+        // The armour slots any part reacts to; the model is baked once for each combination of them worn: a part
+        // under a hiding rule is left out, one under a push rule moves (the Java mod's `armorHide` / `armorOffset`).
+        let mask = roots.iter().fold(0, |bits, r| bits | armor_slots(r));
+        // Each blinking part (with what hangs on it) is an item of its own, hidden on cue, as the Java mod
+        // skips the part and its children; glowing parts are one too, drawn at full brightness (the Java
+        // mod's eyes layer).
+        let mut gates = vec![(None, Vec::new())];
+        for root in &roots {
+            blink_gates(root, &[], &mut gates);
         }
         let mut items = Vec::new();
-        for (armor, roots) in groups {
-            // Each blinking part (with what hangs on it) is an item of its own, hidden on cue, as the Java mod
-            // skips the part and its children; glowing parts are one too, drawn at full brightness (the Java
-            // mod's eyes layer).
-            let mut gates = vec![(None, Vec::new())];
-            for root in &roots {
-                blink_gates(root, &[], &mut gates);
-            }
-            for (gate, blinks) in gates {
+        for worn in (0..16u8).filter(|w| w & !mask == 0) {
+            for (gate, blinks) in &gates {
                 for glow in [false, true] {
-                    let layer = Layer { glow, gate };
+                    let layer = Layer { glow, gate: *gate, worn, tagged: mask != 0 };
                     let item = self.item(id, &roots, texture, layer);
                     if item.vertices == 0 {
                         continue;
@@ -327,11 +357,11 @@ impl Model {
                     if !blinks.is_empty() {
                         blink_registry().insert(item.id.clone(), blinks.clone());
                     }
-                    items.push((armor, Arc::new(item)));
+                    items.push((Rule { mask, state: worn }, Arc::new(item)));
                 }
             }
         }
-        Native { items }
+        Native { items, covers_head: self.covers_head() }
     }
 
     fn item(&self, id: &str, roots: &[&NcmPart], texture: &Texture, layer: Layer) -> Item {
@@ -372,7 +402,11 @@ impl Model {
         Item {
             id: format!(
                 "native:{id}{}{}",
-                layer.gate.map(|g| format!("#b{g}")).unwrap_or_default(),
+                format!(
+                    "{}{}",
+                    if layer.tagged { format!("#a{}", layer.worn) } else { String::new() },
+                    layer.gate.map(|g| format!("#b{g}")).unwrap_or_default()
+                ),
                 if layer.glow { GLOW } else { "" }
             ),
             // Never covered by the game's own rule: NCM parts carry their armour rules.
@@ -426,6 +460,15 @@ pub fn light_of(item: &Item, light: u32) -> u32 {
 struct Layer {
     glow: bool,
     gate: Option<usize>,
+    /// The armour slots worn ([`Armor::bit`]s) this item is baked for.
+    worn: u8,
+    /// Whether the model has armour rules (then the worn slots are part of the item's id).
+    tagged: bool,
+}
+
+/// The armour slots this part or its children react to.
+fn armor_slots(p: &NcmPart) -> u8 {
+    p.children.iter().fold(p.armor.bit(), |bits, c| bits | armor_slots(c))
 }
 
 /// A blink channel: cycles per second, the part of each cycle the part shows (0..1), phase (cycles).
@@ -471,6 +514,14 @@ pub fn shown(item: &Item, ticks: f32) -> bool {
 fn bake(p: &NcmPart, texture: [f32; 2], animations: &mut Vec<Animation>, layer: Layer, gate: Option<usize>) -> Part {
     let gate = if blinks_of(p).next().is_some() { Some(p.index) } else { gate };
     let name = format!("n{}", p.index);
+    // The armour rule: the slot is worn, so the part (and what hangs on it) hides, or moves aside.
+    let mut push = [0.0; 3];
+    if p.armor.bit() & layer.worn != 0 {
+        match p.push {
+            Some(offset) => push = offset,
+            None => return Part { name, pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0], faces: Vec::new(), children: Vec::new() },
+        }
+    }
     for a in &p.anims {
         let Some(motion) = a.motion else { continue };
         if a.speed == 0.0 {
@@ -492,7 +543,7 @@ fn bake(p: &NcmPart, texture: [f32; 2], animations: &mut Vec<Animation>, layer: 
         });
     }
     let [rx, ry, rz] = p.rotation.map(f32::to_radians);
-    let [x, y, z] = p.pivot;
+    let [x, y, z] = [p.pivot[0] + push[0], p.pivot[1] + push[1], p.pivot[2] + push[2]];
     Part {
         name,
         pose: [x, y, z, rx, ry, rz, 1.0, 1.0, 1.0],
@@ -702,20 +753,26 @@ impl Game<'_> {
             )
         };
         if base.is_empty() || refs.is_empty() {
+            horizon_client::native_skins::set_hooded(m.id, false);
             return Vec::new();
         }
+        let shown = own || self.settings.extras.effective_others() == horizon_cosmetics::prefs::Others::Shown;
         let mut out = Vec::new();
+        let mut hooded = false;
         for cosmetic in &refs {
             if let Some(native) = get(&base, cosmetic) {
+                hooded |= shown && native.covers_head;
                 out.extend(
                     native
                         .items
                         .iter()
-                        .filter(|(armor, _)| !armor.worn(m))
+                        .filter(|(rule, _)| rule.applies(m))
                         .map(|(_, item)| item.clone()),
                 );
             }
         }
+        // A hood, helmet or mask replaces the skin's hat layer and the helmet (the Java mod's `HeadCover`).
+        horizon_client::native_skins::set_hooded(m.id, hooded);
         out
     }
 }
@@ -950,18 +1007,41 @@ mod tests {
     fn armour_rules_become_items_of_their_own() {
         let model = Model::parse(HAT.as_bytes()).unwrap();
         let native = model.items("party_hat", 0, &tex());
-        let armors: Vec<_> = native.items.iter().map(|(a, _)| *a).collect();
-        assert_eq!(armors, vec![Armor::Head, Armor::None]);
-        let (_, hat) = &native.items[0];
-        assert_eq!(hat.id, "native:party_hat");
-        assert_eq!(hat.bone, Bone::Head);
-        // The cap's 6 faces and the bobble's 6.
-        assert_eq!(hat.vertices, 12 * 4);
-        // The others ride the body (main) and the left leg (a limb).
-        let (_, rest) = &native.items[1];
-        assert_eq!(rest.bone, Bone::Body);
-        assert_eq!(rest.limbs.len(), 1);
-        assert_eq!(rest.limbs[0].0, Bone::LeftLeg);
+        // The cap hides under a helmet: the model is baked for the head slot empty and worn.
+        assert_eq!(native.items.len(), 2);
+        let ((open_rule, open), (worn_rule, worn)) = (&native.items[0], &native.items[1]);
+        assert_eq!((open_rule.mask, open_rule.state), (Armor::Head.bit(), 0));
+        assert_eq!((worn_rule.mask, worn_rule.state), (Armor::Head.bit(), Armor::Head.bit()));
+        assert_eq!(open.id, "native:party_hat#a0");
+        assert_eq!(open.bone, Bone::Head);
+        // The cap's 6 faces, the bobble's 6, the wing's 6 and the shoe's 6; under a helmet the wing and the shoe.
+        assert_eq!(open.vertices, 24 * 4);
+        assert_eq!(worn.vertices, 12 * 4);
+        // The wing rides the body and the shoe the left leg (limbs of the item).
+        assert_eq!(open.limbs.len(), 2);
+        assert_eq!(open.limbs[0].0, Bone::Body);
+        assert_eq!(open.limbs[1].0, Bone::LeftLeg);
+        assert!(!model.covers_head());
+        assert!(!native.covers_head);
+    }
+
+    #[test]
+    fn push_rules_move_a_part_while_armour_is_worn() {
+        let model = Model::parse(
+            br#"{"texture":[64,64],"parts":[{"attach":"body","pivot":[0,2,0],
+                 "armor":{"slot":"chest","mode":"push","offset":[0,1,3]},
+                 "cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[0,0]}],
+                 "children":[{"pivot":[1,0,0],"cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[8,0]}]}]}]}"#,
+        )
+        .unwrap();
+        let items = model.items("cape", 0, &tex()).items;
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].0.state, Armor::Chest.bit());
+        let moved = |i: usize| items[i].1.root.children[0].pose;
+        assert_eq!(moved(0)[..3], [0.0, 2.0, 0.0]);
+        assert_eq!(moved(1)[..3], [0.0, 3.0, 3.0]);
+        // What hangs on the part goes along with it, as it moves through the parent's matrix.
+        assert_eq!(items[1].1.vertices, 48);
     }
 
     #[test]
@@ -1006,7 +1086,7 @@ mod tests {
         let model = Model::parse(HAT.as_bytes()).unwrap();
         let has_wing = |side| {
             model.items("h", side, &tex()).items.iter().any(|(_, i)| {
-                i.root.children.iter().any(|p| p.name == "n2")
+                i.limbs.iter().any(|(_, l)| l.children.iter().any(|p| p.name == "n2"))
             })
         };
         // The model's own side is the wing's (left).

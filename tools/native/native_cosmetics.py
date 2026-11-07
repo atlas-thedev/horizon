@@ -88,4 +88,26 @@ patch(COSMETICS,
       '                self.skin_downloads.borrow_mut().drawn(&b.location);\n'
       '                super::native_cosmetics::drawn(&b.location);\n')
 
+# Under a hood (native_skins.rs `hooded`) the helmet and the head item are not drawn either.
+ARMOR_STANDS = CLIENT / 'game/armor_stands.rs'
+patch(ARMOR_STANDS,
+      '        self.stack_armor_layers(&self.armor)\n',
+      '        let mut armor = self.armor.clone();\n'
+      '        if self.player_model.as_ref().is_some_and(|p| horizon_client::native_skins::hooded(p.id)) {\n'
+      '            armor[0] = None;\n'
+      '        }\n'
+      '        self.stack_armor_layers(&armor)\n')
+patch(ARMOR_STANDS,
+      '                (e.head.as_deref(), e.armor[0].as_ref()),\n',
+      '                (\n'
+      '                    e.head.as_deref().filter(|_| !horizon_client::native_skins::hooded(m.id)),\n'
+      '                    e.armor[0].as_ref(),\n'
+      '                ),\n')
+patch(CLIENT / 'game/mob_blocks.rs',
+      '        // The layer also draws on an invisible mob.\n',
+      '        if horizon_client::native_skins::hooded(mob.id) {\n'
+      '            return;\n'
+      '        }\n'
+      '        // The layer also draws on an invisible mob.\n')
+
 print('native_cosmetics: Native cosmetics applied')

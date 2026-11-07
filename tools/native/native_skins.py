@@ -75,4 +75,10 @@ patch(REMOTE, CAPES,
       '            }\n'
       '        }\n' + CAPES)
 
+# A hood, helmet or mask (a Native cosmetic) replaces the skin's hat layer (native_skins.rs, `hooded`).
+patch(CLIENT / 'mobs/anim.rs',
+      '                player_model_visibility(p, m.extra.hidden_model_parts, m.extra.spectator);\n',
+      '                let hooded = u8::from(crate::native_skins::hooded(m.id)) << 6;\n'
+      '                player_model_visibility(p, m.extra.hidden_model_parts | hooded, m.extra.spectator);\n')
+
 print('native_skins: Native skins and capes applied')
