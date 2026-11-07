@@ -24,6 +24,7 @@ impl Modules {
         all.extend(super::extra_modules::all());
         all.extend(super::gameplay_modules::all());
         all.extend(super::gameplay_modules::late());
+        all.extend(super::overlay_modules::all());
         // The order the Java mod registers them in: it is the order of the menu's grid.
         const ORDER: [&str; 44] = [
             "fps", "cps", "keystrokes", "coords", "direction", "clock", "memory", "ping", "server", "speed", "scoreboard", "bossbar",

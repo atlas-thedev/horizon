@@ -23,6 +23,7 @@ mod menu;
 mod module;
 mod modules;
 mod net;
+mod overlay_modules;
 mod preview3d;
 mod relay;
 mod relay_chat;

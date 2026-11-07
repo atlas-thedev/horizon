@@ -49,6 +49,12 @@ pub struct Tweaks {
     pub motion_blur: Option<f32>,
     /// Lag Free: the frame rate cap while the window is in the background.
     pub background_fps: Option<u32>,
+    /// Scoreboard and Boss Bar in the Native look: the game's own are left out.
+    pub hide_sidebar: bool,
+    pub hide_bossbars: bool,
+    /// Where the game's own sidebar / boss bars go: a shift in GUI px, then a scale.
+    pub sidebar_move: Option<[f32; 3]>,
+    pub boss_move: Option<[f32; 3]>,
 }
 
 /// The time Time Changer shows.
@@ -78,6 +84,10 @@ static TWEAKS: Mutex<Tweaks> = Mutex::new(Tweaks {
     critical: None,
     motion_blur: None,
     background_fps: None,
+    hide_sidebar: false,
+    hide_bossbars: false,
+    sidebar_move: None,
+    boss_move: None,
 });
 
 /// What the modules want right now.
@@ -162,6 +172,165 @@ pub fn critical(enchanted: bool) -> Option<[f32; 3]> {
         ((argb >> 8) & 255) as f32 / 255.0,
         (argb & 255) as f32 / 255.0,
     ])
+}
+
+// ── what the game shows on the HUD, for the modules that redraw or move it ──
+
+/// Styled text as runs of (text, ARGB), colour codes already resolved.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Rich(pub Vec<(String, u32)>);
+
+impl Rich {
+    fn of(text: &crate::text::Text) -> Rich {
+        Rich(
+            text.spans
+                .iter()
+                .filter(|s| !s.text.is_empty())
+                .map(|s| (s.text.clone(), 0xFF00_0000 | s.style.color.unwrap_or(0xFF_FFFF)))
+                .collect(),
+        )
+    }
+
+    /// Nothing but spaces.
+    pub fn is_blank(&self) -> bool {
+        self.0.iter().all(|(t, _)| t.trim().is_empty())
+    }
+}
+
+/// The server sidebar: its title and its rows as (name, score), top first, and where the game draws it
+/// (`bounds` = left, top, right, bottom in GUI px; `gui` = the GUI's size).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SidebarView {
+    pub title: Rich,
+    pub rows: Vec<(Rich, Rich)>,
+    pub bounds: [f32; 4],
+    pub gui: [f32; 2],
+}
+
+/// One boss bar.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarView {
+    pub name: Rich,
+    pub progress: f32,
+    /// Pink, blue, red, green, yellow, purple, white.
+    pub color: usize,
+    /// Width of the name in GUI px is not known here; the bar itself is 182 wide.
+    pub name_len: usize,
+}
+
+/// All the bars, and where the game draws them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarsView {
+    pub bars: Vec<BarView>,
+    pub bounds: [f32; 4],
+    pub gui: [f32; 2],
+}
+
+struct Seen<T> {
+    at: Option<std::time::Instant>,
+    value: T,
+}
+
+static SIDEBAR: Mutex<Seen<SidebarView>> = Mutex::new(Seen {
+    at: None,
+    value: SidebarView { title: Rich(Vec::new()), rows: Vec::new(), bounds: [0.0; 4], gui: [0.0; 2] },
+});
+static BARS: Mutex<Seen<BarsView>> = Mutex::new(Seen { at: None, value: BarsView { bars: Vec::new(), bounds: [0.0; 4], gui: [0.0; 2] } });
+
+/// A view the game published within this long ago is on screen.
+const FRESH: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// `draws` shifted by (`x`, `y`) GUI px and scaled by `s` about the GUI's origin.
+fn placed(draws: Vec<crate::hud_layout::GuiDraw>, m: [f32; 3]) -> Vec<crate::hud_layout::GuiDraw> {
+    use crate::hud_layout::{GuiDraw, PoseOp};
+    let mut out = Vec::with_capacity(draws.len() + 2);
+    out.push(GuiDraw::Push(vec![PoseOp::Translate(m[0], m[1]), PoseOp::Scale(m[2], m[2])]));
+    out.extend(draws);
+    out.push(GuiDraw::Pop);
+    out
+}
+
+/// What `Hud.displayScoreboardSidebar` is about to draw, remembered for Scoreboard. Returns what the game
+/// should draw: the same, moved and scaled, or nothing when Native draws it.
+pub fn sidebar_draws(w: i32, h: i32, draws: Vec<crate::hud_layout::GuiDraw>) -> Vec<crate::hud_layout::GuiDraw> {
+    use crate::hud_layout::GuiDraw;
+    let mut bounds: Option<[f32; 4]> = None;
+    let mut texts = Vec::new();
+    for d in &draws {
+        match d {
+            GuiDraw::Fill { x0, y0, x1, y1, .. } => {
+                let b = bounds.get_or_insert([*x0 as f32, *y0 as f32, *x1 as f32, *y1 as f32]);
+                *b = [b[0].min(*x0 as f32), b[1].min(*y0 as f32), b[2].max(*x1 as f32), b[3].max(*y1 as f32)];
+            }
+            GuiDraw::Text { text, .. } => texts.push(Rich::of(text)),
+            _ => {}
+        }
+    }
+    let mut texts = texts.into_iter();
+    let title = texts.next().unwrap_or_default();
+    let mut rows = Vec::new();
+    while let Some(name) = texts.next() {
+        rows.push((name, texts.next().unwrap_or_default()));
+    }
+    {
+        let mut s = SIDEBAR.lock().unwrap_or_else(|e| e.into_inner());
+        s.value = SidebarView { title, rows, bounds: bounds.unwrap_or_default(), gui: [w as f32, h as f32] };
+        s.at = Some(std::time::Instant::now());
+    }
+    let t = get();
+    if t.hide_sidebar {
+        Vec::new()
+    } else if let Some(m) = t.sidebar_move {
+        placed(draws, m)
+    } else {
+        draws
+    }
+}
+
+/// The sidebar on screen now, `None` when there is none.
+pub fn sidebar_view() -> Option<SidebarView> {
+    let s = SIDEBAR.lock().unwrap_or_else(|e| e.into_inner());
+    s.at.filter(|t| t.elapsed() < FRESH).map(|_| s.value.clone())
+}
+
+/// The boss bars `BossHealthOverlay` is about to draw: remembered for Boss Bar, and moved, scaled or left out.
+pub fn bars_draws(w: i32, h: i32, bars: &[crate::hud_overlays::BossBar], draws: Vec<crate::hud_layout::GuiDraw>) -> Vec<crate::hud_layout::GuiDraw> {
+    // The bars the game fits above a third of the screen (19 px each, the first at 12).
+    let (mut shown, mut y) = (0, 12);
+    for _ in bars {
+        shown += 1;
+        y += 19;
+        if y >= h / 3 {
+            break;
+        }
+    }
+    let views: Vec<BarView> = bars
+        .iter()
+        .map(|b| BarView { name: Rich::of(&b.name), progress: b.progress, color: b.color, name_len: b.name.plain().chars().count() })
+        .collect();
+    {
+        let mut s = BARS.lock().unwrap_or_else(|e| e.into_inner());
+        s.value = BarsView {
+            bars: views,
+            bounds: [(w / 2 - 91) as f32, 2.0, (w / 2 + 91) as f32, (2 + shown * 19 - 4) as f32],
+            gui: [w as f32, h as f32],
+        };
+        s.at = Some(std::time::Instant::now());
+    }
+    let t = get();
+    if t.hide_bossbars {
+        Vec::new()
+    } else if let Some(m) = t.boss_move {
+        placed(draws, m)
+    } else {
+        draws
+    }
+}
+
+/// The boss bars on screen now (none when there are none).
+pub fn bars_view() -> BarsView {
+    let s = BARS.lock().unwrap_or_else(|e| e.into_inner());
+    if s.at.is_some_and(|t| t.elapsed() < FRESH) { s.value.clone() } else { BarsView::default() }
 }
 
 #[cfg(test)]

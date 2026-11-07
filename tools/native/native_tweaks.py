@@ -151,4 +151,36 @@ patch(GIZMOS,
       '        self.arrow(eye, end, BLUE, STROKE_WIDTH);\n',
       '        self.arrow(eye, end, crate::native_ui::tweaks::hitbox(BLUE), STROKE_WIDTH);\n')
 
+# Scoreboard and Boss Bar: the sidebar and the bars the game is about to draw pass through Native, which
+# remembers them, moves and scales them, or (for its own look) leaves them out and draws them itself.
+SCORE = CLIENT / 'game/scoreboard.rs'
+patch(SCORE,
+      '        let draws = hud_overlays::sidebar(\n',
+      '        let draws = horizon_client::native_ui::tweaks::sidebar_draws(\n'
+      '            batch.width as i32,\n'
+      '            batch.height as i32,\n'
+      '            hud_overlays::sidebar(\n')
+patch(SCORE,
+      '            self.settings.text_background(0.4),\n'
+      '        );\n',
+      '            self.settings.text_background(0.4),\n'
+      '            ),\n'
+      '        );\n')
+DRAGON = CLIENT / 'game/dragon.rs'
+patch(DRAGON,
+      '        let draws = hud_overlays::boss_overlay(\n',
+      '        let draws = horizon_client::native_ui::tweaks::bars_draws(\n'
+      '            batch.width as i32,\n'
+      '            batch.height as i32,\n'
+      '            &bars,\n'
+      '            hud_overlays::boss_overlay(\n')
+patch(DRAGON,
+      '            &bars,\n'
+      '            &self.gui.atlas.font,\n'
+      '        );\n',
+      '            &bars,\n'
+      '            &self.gui.atlas.font,\n'
+      '            ),\n'
+      '        );\n')
+
 print('native_tweaks: Native Client engine hooks applied')
