@@ -34,7 +34,6 @@ const KEY_D: i32 = 68;
 const KEY_R: i32 = 82;
 const KEY_E: i32 = 69;
 /// The game's own list buttons (`multiplayer::Screen::click`).
-const JOIN: u8 = 40;
 const DIRECT: u8 = 41;
 const ADD: u8 = 42;
 const EDIT: u8 = 43;
