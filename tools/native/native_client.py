@@ -72,6 +72,7 @@ patch(MENU,
       '            );\n',
       '            if super::native_client::native_title_active(title) {\n'
       '                let who = self.options.as_ref().map_or_else(|| "Player".into(), |o| o.player_name());\n'
+      '                horizon_client::title::draw_logo(&gui.atlas, batch, batch.width.ceil());\n'
       '                super::native_client::native_title_frame(batch, title.allows_multiplayer, &who);\n'
       '            } else {\n'
       '                title.draw_with_items(\n'
@@ -113,6 +114,7 @@ patch(GAME,
       '            if let Some(title) = &self.title {\n'
       '                if native_client::native_title_active(title) {\n'
       '                    let who = self.options.player_name();\n'
+      '                    horizon_client::title::draw_logo(&self.gui.atlas, &mut batch, batch.width.ceil());\n'
       '                    native_client::native_title_frame(&mut batch, title.allows_multiplayer, &who);\n'
       '                } else {\n'
       '                    title.draw_with_items(\n'
@@ -143,5 +145,9 @@ patch(GAME,
       '        if self.native_window_event(&event) {\n'
       '            return;\n'
       '        }\n')
+
+# The Native title leaves the game's panorama and Minecraft logo as they are: the logo is drawn by the game.
+patch(CLIENT / 'title.rs', '\nfn draw_logo(atlas: &HudAtlas, batch: &mut HudBatch, w: f32) {\n',
+      '\npub fn draw_logo(atlas: &HudAtlas, batch: &mut HudBatch, w: f32) {\n')
 
 print('native_client: Native modules applied')
