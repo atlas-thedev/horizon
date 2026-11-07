@@ -1160,8 +1160,12 @@ pub fn normalize(q: &str) -> String {
     q.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// A head stand-in: the player's initial on a soft tile (the skin is drawn by the game).
+/// The player's face (their Native or Minecraft skin), the initial on a soft tile until it is known.
 pub fn avatar(c: &mut Canvas, name: &str, x: f32, y: f32, s: f32, r: f32) {
+    if let Some(skin) = super::avatars::own(name) {
+        super::avatars::draw(c, Some(&skin), x, y, s, r);
+        return;
+    }
     c.round(x, y, s, s, r, theme::mix(0xFF1B1D24, theme::name_color(Some(name)), 0.35));
     c.outline(x, y, s, s, r, 1.0, theme::HAIRLINE_STRONG);
     let initial = name.chars().next().map_or_else(|| "?".to_owned(), |ch| ch.to_uppercase().collect());

@@ -348,6 +348,12 @@ fn post(body: Value, swap: Option<&'static str>) {
         let api = net::api();
         let ticket = net::ticket();
         let result = (|| -> Result<(), HttpError> {
+            // A cloak and a back item hang in the same place: take the other one off first, so the server never
+            // keeps both (not every server swaps them by itself).
+            if let Some(slot) = swap {
+                let off = if slot == BACK { json!({ "slot": BACK, "itemId": Value::Null }) } else { json!({ "itemId": Value::Null }) };
+                net::post_json(&format!("{api}/v1/store/equip"), ticket.as_deref(), &off)?;
+            }
             let reply = net::post_json(&format!("{api}/v1/store/equip"), ticket.as_deref(), &body)?;
             let mut l = lock();
             apply(&mut l, &reply);
