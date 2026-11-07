@@ -206,8 +206,14 @@ patch(CLIENT / 'game.rs',
 DISCORD = CLIENT / 'discord_presence.rs'
 patch(DISCORD, 'pub const DISCORD_APP_ID: &str = "1563857609738690560";\n',
       'pub const DISCORD_APP_ID: &str = "1465139441457827972";\n')
-patch(DISCORD, '    let mut assets = json!({"large_image": "horizon", "large_text": "Native"});\n',
-      '    let mut assets = json!({"large_image": "logo", "large_text": "Native Client"});\n')
+# rebrand.py (run first by the release build, not by the checks) has made "Horizon" "Native" here.
+ASSETS = '    let mut assets = json!({"large_image": "logo", "large_text": "Native Client"});\n'
+for brand in ('Native', 'Horizon'):
+    old = '    let mut assets = json!({"large_image": "horizon", "large_text": "%s"});\n' % brand
+    if old in DISCORD.read_text(encoding='utf-8'):
+        patch(DISCORD, old, ASSETS)
+if ASSETS not in DISCORD.read_text(encoding='utf-8'):
+    raise SystemExit('native_tweaks: the Discord assets line changed upstream; update tools/native/native_tweaks.py.')
 patch(DISCORD, '                Play::Singleplayer => ("Singleplayer", None),\n',
       '                Play::Singleplayer => ("Playing Singleplayer", None),\n')
 patch(DISCORD, '                Play::Multiplayer => ("Multiplayer", None),\n',
