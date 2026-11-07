@@ -715,6 +715,13 @@ impl Canvas {
     pub fn finish_with(&mut self, batch: &mut HudBatch, host: &mut dyn FnMut(&mut HudBatch, &HostDraw)) {
         let mut markers = std::mem::take(&mut self.host).into_iter().peekable();
         let pages = &mut self.pages;
+        // The renderer lost what was uploaded (a new renderer, say): everything goes up again.
+        if crate::hud::NATIVE_PAGES_LOST.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            pages.atlas_uploaded = false;
+            pages.by_image.clear();
+            pages.free.clear();
+            pages.next = 0;
+        }
         pages.frame += 1;
         let size = self.atlas.size;
         if !pages.atlas_uploaded {

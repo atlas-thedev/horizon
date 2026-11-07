@@ -18,6 +18,10 @@ pub struct NativeUpload {
     pub smooth: bool,
 }
 
+/// Set when the renderer lost (or never had) what the Native UI uploaded before: a new renderer, a page made
+/// again for part of its pixels, a page drawn that is not there. The UI then uploads everything again.
+pub static NATIVE_PAGES_LOST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 struct NativePage {
     texture: wgpu::Texture,
     group: wgpu::BindGroup,
@@ -44,6 +48,7 @@ impl NativePages {
         glint_view: &wgpu::TextureView,
         glint_sampler: &wgpu::Sampler,
     ) -> Self {
+        NATIVE_PAGES_LOST.store(true, std::sync::atomic::Ordering::Relaxed);
         Self {
             pages: Vec::new(),
             layout: layout.clone(),
@@ -136,6 +141,10 @@ impl NativePages {
                 p.texture.width() == u.size[0] && p.texture.height() == u.size[1] && p.smooth == u.smooth
             });
             if !fits {
+                if u.rect != [0, 0, u.size[0], u.size[1]] {
+                    // Only part of a page that is not here: the rest has to come again.
+                    NATIVE_PAGES_LOST.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
                 self.pages[i] = Some(self.make(device, u.size, u.smooth));
             }
             let [x, y, w, h] = u.rect;
