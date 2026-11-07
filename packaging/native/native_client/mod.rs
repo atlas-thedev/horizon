@@ -11,6 +11,7 @@
 mod discord_module;
 mod extra_modules;
 mod gameplay_modules;
+mod ads;
 mod avatars;
 mod boxes;
 mod chat_media;
@@ -40,6 +41,7 @@ mod setting;
 mod status;
 mod status_modules;
 mod textfield;
+mod title_view;
 mod toasts;
 mod ui;
 mod uiconfig;
@@ -100,6 +102,12 @@ struct State {
     pause: pause_view::PauseView,
     pause_was: bool,
     relay_open: bool,
+    /// The Native title: its view, what is open over it (0 nothing, 1 the menu, 2 Relay, 3 the HUD editor), whether
+    /// it was drawn last frame and what it asked of the game.
+    title: title_view::TitleView,
+    title_overlay: u8,
+    title_was: bool,
+    title_pending: Option<title_view::TitleAct>,
     /// The chat to open the Relay screen on (from a toast).
     relay_select: Option<String>,
     toasts: toasts::Toasts,
@@ -140,6 +148,10 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             pause: pause_view::PauseView,
             pause_was: false,
             relay_open: false,
+            title: title_view::TitleView::default(),
+            title_overlay: 0,
+            title_was: false,
+            title_pending: None,
             relay_select: None,
             toasts: toasts::Toasts::default(),
             }
@@ -920,6 +932,198 @@ impl Game<'_> {
             }
             _ => false,
         }
+    }
+}
+
+// ── the Native title screen ──────────────────────────────────────────────
+
+/// The title's own page (not a world list or the options) is the Native one, when it is switched on.
+pub(super) fn native_title_active(title: &horizon_client::title::Title) -> bool {
+    matches!(title.mode, horizon_client::title::Mode::Main) && with_state(|s| s.cfg.custom_title)
+}
+
+/// Draws the Native title (and Relay or the Native menu over it, opened from there) into `batch`.
+pub(super) fn native_title_frame(batch: &mut HudBatch, allows_multiplayer: bool, player: &str) {
+    with_state(|state| {
+        let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
+        let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
+        let c = &mut state.canvas;
+        c.begin(fb[0], fb[1], scale);
+        let events = std::mem::take(&mut state.events);
+        state.ui.begin(&events, scale);
+        if !state.title_was {
+            state.title_was = true;
+            state.title_overlay = 0;
+        }
+        let info = title_view::TitleInfo { allows_multiplayer, game_dir: game_dir(), player: player.to_owned() };
+        match state.title_overlay {
+            1 => {
+                state.title.background(&state.ui, c, info.game_dir.clone());
+                let who = Some(player).filter(|n| !n.is_empty());
+                let action = state.menu.draw(&mut state.ui, c, &mut state.modules, &mut state.cfg, who, false);
+                match action {
+                    menu::Action::Close => state.title_overlay = 0,
+                    menu::Action::OpenRelay => {
+                        state.title_overlay = 2;
+                        state.relay.opened(&mut state.ui, None);
+                    }
+                    menu::Action::EditHud => {
+                        state.title_overlay = 3;
+                        state.editor.opened(state.ui.now);
+                    }
+                    other => state.apply(&other),
+                }
+            }
+            2 => {
+                state.title.background(&state.ui, c, info.game_dir.clone());
+                if state.relay.draw(&mut state.ui, c, &mut state.cfg, false) == relay_view::RelayAction::Close {
+                    state.title_overlay = 0;
+                }
+            }
+            3 => {
+                state.title.background(&state.ui, c, info.game_dir.clone());
+                let g = module::GameView::sample();
+                match state.editor.draw(&mut state.ui, c, &mut state.modules, &g, false) {
+                    menu::Action::Close => state.title_overlay = 0,
+                    menu::Action::OpenRelay => {
+                        state.title_overlay = 2;
+                        state.relay.opened(&mut state.ui, None);
+                    }
+                    menu::Action::OpenMenu(tab) => {
+                        state.title_overlay = 1;
+                        state.menu.opened(state.ui.now);
+                        state.menu.open_tab(tab, state.ui.now);
+                    }
+                    menu::Action::OpenMod(id) => {
+                        state.title_overlay = 1;
+                        state.menu.opened(state.ui.now);
+                        state.menu.open_mod(&id, state.ui.now);
+                    }
+                    _ => {}
+                }
+            }
+            _ => match state.title.draw(&mut state.ui, c, &info) {
+                Some(title_view::TitleAct::NativeMods) => {
+                    state.title_overlay = 1;
+                    state.editing = false;
+                    state.who = player.to_owned();
+                    state.menu.opened(state.ui.now);
+                }
+                Some(title_view::TitleAct::Relay) => {
+                    state.title_overlay = 2;
+                    state.relay.opened(&mut state.ui, None);
+                }
+                Some(title_view::TitleAct::Classic) => {
+                    state.cfg.custom_title = false;
+                    state.cfg.save();
+                }
+                Some(other) => state.title_pending = Some(other),
+                None => {}
+            },
+        }
+        state.ui.tooltips(c);
+        state.ui.end();
+        c.finish(batch);
+    });
+}
+
+/// What the Native title asked of the game, for the host to do (it needs the event loop).
+pub(super) fn native_title_take() -> Option<title_view::TitleAct> {
+    with_state(|s| s.title_pending.take())
+}
+
+/// Does what the title asked: the title's own pages here, the rest (`Options`, `Quit`, joining a server) back
+/// for the host's own title actions.
+pub(super) fn native_title_apply(title: &mut horizon_client::title::Title, act: title_view::TitleAct) -> Option<horizon_client::title::Action> {
+    use horizon_client::title::{Action, Mode};
+    use title_view::TitleAct;
+    match act {
+        TitleAct::Singleplayer => {
+            title.enter_singleplayer();
+            None
+        }
+        TitleAct::Multiplayer => {
+            // TitleScreen.init: SafetyScreen first, unless it was turned off.
+            title.mode = if title.skip_multiplayer_warning {
+                Mode::Multiplayer(horizon_client::multiplayer::Screen::list(&title.saves))
+            } else {
+                Mode::MultiplayerWarning { check: false }
+            };
+            None
+        }
+        TitleAct::Realms => {
+            title.mode = Mode::Realms(horizon_client::realms::Screen::new());
+            None
+        }
+        TitleAct::Options => Some(Action::Options),
+        TitleAct::Quit => Some(Action::Quit),
+        TitleAct::Join(address) => Some(Action::Connect { address, lan: false }),
+        TitleAct::NativeMods | TitleAct::Relay | TitleAct::Classic => None,
+    }
+}
+
+/// Window events while the Native title is up: it takes the mouse and the keys. True when it took the event.
+pub(super) fn native_title_event(event: &WindowEvent, modifiers: winit::keyboard::ModifiersState) -> bool {
+    match event {
+        WindowEvent::CursorMoved { position, .. } => {
+            with_state(|s| s.events.push(Event::Move { x: position.x, y: position.y }));
+            true
+        }
+        WindowEvent::MouseInput { state, button, .. } => {
+            let button = match button {
+                MouseButton::Left => 0,
+                MouseButton::Right => 1,
+                _ => return true,
+            };
+            let pressed = *state == ElementState::Pressed;
+            with_state(|s| s.events.push(Event::Button { button, pressed }));
+            true
+        }
+        WindowEvent::MouseWheel { delta, .. } => {
+            let y = match delta {
+                MouseScrollDelta::LineDelta(_, y) => f64::from(*y),
+                MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
+            };
+            with_state(|s| s.events.push(Event::Scroll { y }));
+            true
+        }
+        WindowEvent::KeyboardInput { event: key, .. } => {
+            let PhysicalKey::Code(code) = key.physical_key else { return true };
+            // Fullscreen stays the window's.
+            if code == winit::keyboard::KeyCode::F11 {
+                return false;
+            }
+            let Some(glfw) = keys::glfw(code) else { return true };
+            let pressed = key.state == ElementState::Pressed;
+            let mods = if modifiers.shift_key() { ui::MOD_SHIFT } else { 0 }
+                | if modifiers.control_key() { ui::MOD_CONTROL } else { 0 }
+                | if modifiers.alt_key() { ui::MOD_ALT } else { 0 }
+                | if modifiers.super_key() { ui::MOD_SUPER } else { 0 };
+            with_state(|s| {
+                let State { ui, menu, editor, relay, title_overlay, events, .. } = s;
+                if pressed && glfw == ui::KEY_ESCAPE {
+                    let kept = match *title_overlay {
+                        1 => menu.escape(ui),
+                        2 => relay.escape(ui),
+                        3 => editor.escape(ui),
+                        _ => true,
+                    };
+                    if !kept {
+                        *title_overlay = 0;
+                    }
+                    return;
+                }
+                events.push(Event::Key { code: glfw, mods, pressed });
+                if pressed
+                    && mods & (ui::MOD_CONTROL | ui::MOD_SUPER) == 0
+                    && let Some(text) = &key.text
+                {
+                    events.extend(text.chars().map(Event::Char));
+                }
+            });
+            true
+        }
+        _ => false,
     }
 }
 

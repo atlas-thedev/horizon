@@ -1226,7 +1226,7 @@ impl RelayView {
         let mut ry = y + 46.0;
         let mut dirty = false;
         for (title, sub, id, on) in [
-            ("Native pause menu", "Replace the vanilla pause screen", "set:pause", cfg.custom_pause),
+            ("Native title screen", "Replace the vanilla main menu", "set:title", cfg.custom_title),
             ("Message pop-ups", "Show new messages while playing", "set:toasts", cfg.notifications),
             ("Activity status", "Show friends what you're playing", "set:activity", cfg.share_activity),
         ] {
@@ -1235,7 +1235,7 @@ impl RelayView {
             c.text(font::REGULAR, 10.5, sub, x + 16.0, ry + 16.0, theme::TEXT_MUTED);
             if ui.toggle(c, id, x + w - 16.0 - 34.0, ry + 4.0, on) {
                 match id {
-                    "set:pause" => cfg.custom_pause = !on,
+                    "set:title" => cfg.custom_title = !on,
                     "set:toasts" => cfg.notifications = !on,
                     _ => cfg.share_activity = !on,
                 }

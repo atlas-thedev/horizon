@@ -57,4 +57,91 @@ patch(GAME, '        self.draw_debug_overlay(&mut batch, size);\n',
 TRACE = '        // Who caused it, before the event is handled: the trace wants the\n'
 patch(GAME, TRACE, '        if self.native_window_event(&event) {\n            return;\n        }\n' + TRACE)
 
+# The Native title screen: its page instead of the title's own (the world lists, the server list and the options
+# stay the game's), on the boot menu and on the title a world returns to. What it asks for goes through the
+# game's own title actions.
+MENU = CLIENT / 'game/startup_menu.rs'
+patch(MENU,
+      '            title.draw_with_items(\n'
+      '                &gui.atlas,\n'
+      '                items,\n'
+      '                batch,\n'
+      '                self.menu.cursor,\n'
+      '                self.settings.file.bool("hideSplashTexts"),\n'
+      '                self.settings.file.bool("hideServerAddress"),\n'
+      '            );\n',
+      '            if super::native_client::native_title_active(title) {\n'
+      '                let who = self.options.as_ref().map_or_else(|| "Player".into(), |o| o.player_name());\n'
+      '                super::native_client::native_title_frame(batch, title.allows_multiplayer, &who);\n'
+      '            } else {\n'
+      '                title.draw_with_items(\n'
+      '                    &gui.atlas,\n'
+      '                    items,\n'
+      '                    batch,\n'
+      '                    self.menu.cursor,\n'
+      '                    self.settings.file.bool("hideSplashTexts"),\n'
+      '                    self.settings.file.bool("hideServerAddress"),\n'
+      '                );\n'
+      '            }\n')
+MENU_FOCUS = "        // The real mouse takes the pointer back from the keyboard's focus.\n"
+patch(MENU, MENU_FOCUS,
+      '        if let Some(act) = super::native_client::native_title_take()\n'
+      '            && let Some(title) = self.menu.title.as_mut()\n'
+      '            && let Some(action) = super::native_client::native_title_apply(title, act)\n'
+      '        {\n'
+      '            self.menu_action(event_loop, action);\n'
+      '        }\n'
+      '        if !self.menu.options_open\n'
+      '            && self.menu.win.is_none()\n'
+      '            && self.menu.pending.is_none()\n'
+      '            && self.menu.title.as_ref().is_some_and(super::native_client::native_title_active)\n'
+      '            && super::native_client::native_title_event(&event, self.menu.modifiers)\n'
+      '        {\n'
+      '            return Ok(());\n'
+      '        }\n' + MENU_FOCUS)
+patch(GAME,
+      '            if let Some(title) = &self.title {\n'
+      '                title.draw_with_items(\n'
+      '                    &self.gui.atlas,\n'
+      '                    Some(&self.pack.item_renderer),\n'
+      '                    &mut batch,\n'
+      '                    self.cursor,\n'
+      '                    self.settings.file.bool("hideSplashTexts"),\n'
+      '                    self.settings.file.bool("hideServerAddress"),\n'
+      '                );\n'
+      '            }\n',
+      '            if let Some(title) = &self.title {\n'
+      '                if native_client::native_title_active(title) {\n'
+      '                    let who = self.options.player_name();\n'
+      '                    native_client::native_title_frame(&mut batch, title.allows_multiplayer, &who);\n'
+      '                } else {\n'
+      '                    title.draw_with_items(\n'
+      '                        &self.gui.atlas,\n'
+      '                        Some(&self.pack.item_renderer),\n'
+      '                        &mut batch,\n'
+      '                        self.cursor,\n'
+      '                        self.settings.file.bool("hideSplashTexts"),\n'
+      '                        self.settings.file.bool("hideServerAddress"),\n'
+      '                    );\n'
+      '                }\n'
+      '            }\n')
+patch(GAME,
+      '        if self.native_window_event(&event) {\n'
+      '            return;\n'
+      '        }\n',
+      '        if let Some(act) = native_client::native_title_take()\n'
+      '            && let Some(title) = self.title.as_mut()\n'
+      '            && let Some(action) = native_client::native_title_apply(title, act)\n'
+      '        {\n'
+      '            let _ = self.title_action(event_loop, action);\n'
+      '        }\n'
+      '        if self.title.as_ref().is_some_and(native_client::native_title_active)\n'
+      '            && native_client::native_title_event(&event, self.modifiers)\n'
+      '        {\n'
+      '            return;\n'
+      '        }\n'
+      '        if self.native_window_event(&event) {\n'
+      '            return;\n'
+      '        }\n')
+
 print('native_client: Native modules applied')

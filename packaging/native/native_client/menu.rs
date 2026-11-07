@@ -138,7 +138,7 @@ impl Menu {
             locker: Locker::new(),
             who: String::new(),
             game_dir: None,
-            s_title: Setting::bool("pause", "Native pause menu", true),
+            s_title: Setting::bool("title", "Native title screen", true),
             s_notify: Setting::bool("notify", "Message notifications in game", true),
             s_activity: Setting::bool("activity", "Show friends what I'm playing", true),
             s_scale: Setting::num("scale", "UI size", 1.0, 0.75, 1.5, 0.05, "x"),
@@ -862,7 +862,7 @@ impl Menu {
     #[allow(clippy::too_many_arguments)]
     fn settings(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &mut UiConfig, who: Option<&str>, x: f32, y: f32, w: f32, h: f32) -> Action {
         let mut action = Action::None;
-        self.s_title.set_bool(cfg.custom_pause);
+        self.s_title.set_bool(cfg.custom_title);
         self.s_notify.set_bool(cfg.notifications);
         self.s_activity.set_bool(cfg.share_activity);
         // While the slider is held (and on the frame it is let go) the slider owns the value.
@@ -912,8 +912,8 @@ impl Menu {
 
         // Write back.
         let mut save = false;
-        if self.s_title.as_bool() != cfg.custom_pause {
-            cfg.custom_pause = self.s_title.as_bool();
+        if self.s_title.as_bool() != cfg.custom_title {
+            cfg.custom_title = self.s_title.as_bool();
             save = true;
         }
         if self.s_notify.as_bool() != cfg.notifications {
