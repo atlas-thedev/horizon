@@ -41,18 +41,60 @@ const DELETE: u8 = 44;
 const REFRESH: u8 = 45;
 const BACK: u8 = 46;
 
+/// A piece of a MOTD line as the server styled it (colours, bold, underline, strikethrough, obfuscated).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Run {
+    pub text: String,
+    /// RGB, none for the default colour.
+    pub color: Option<u32>,
+    pub bold: bool,
+    pub underline: bool,
+    pub strike: bool,
+    pub obfuscated: bool,
+}
+
+/// The first two lines of a MOTD as styled runs: the game's own text styling (`§` codes in the text or the JSON
+/// component's styles), the way the vanilla list shows it.
+fn motd_lines(t: &horizon_client::text::Text) -> Vec<Vec<Run>> {
+    let mut lines: Vec<Vec<Run>> = vec![Vec::new()];
+    for span in &t.resolve_legacy().spans {
+        for (i, part) in span.text.split('\n').enumerate() {
+            if i > 0 {
+                lines.push(Vec::new());
+            }
+            if part.is_empty() {
+                continue;
+            }
+            let s = &span.style;
+            lines.last_mut().expect("a line").push(Run {
+                text: part.to_owned(),
+                color: s.color.map(|c| c & 0xFF_FFFF),
+                bold: s.bold == Some(true),
+                underline: s.underlined == Some(true),
+                strike: s.strikethrough == Some(true),
+                obfuscated: s.obfuscated == Some(true),
+            });
+        }
+    }
+    // Blank lines at the ends say nothing; two lines are shown.
+    while lines.last().is_some_and(|l| l.iter().all(|r| r.text.trim().is_empty())) {
+        lines.pop();
+    }
+    lines.into_iter().take(2).collect()
+}
+
 /// What a row's server answered.
 #[derive(Clone, Debug)]
 pub enum Status {
     Pinging,
-    Online { motd: Vec<String>, players: Option<(i64, i64)>, ms: u128 },
-    Incompatible { motd: Vec<String>, version: String },
+    Online { motd: Vec<Vec<Run>>, players: Option<(i64, i64)>, ms: u128 },
+    Incompatible { motd: Vec<Vec<Run>>, version: String },
     Failed,
 }
 
 impl Status {
     fn of(ping: Option<&Ping>) -> Self {
-        let lines = |t: &horizon_client::text::Text| t.plain().lines().map(str::to_owned).filter(|l| !l.trim().is_empty()).take(2).collect();
+        let lines = motd_lines;
         match ping {
             None | Some(Ping::Pinging) => Status::Pinging,
             Some(Ping::Ok { motd, players, ms, .. }) => Status::Online { motd: lines(motd), players: *players, ms: *ms },
@@ -245,7 +287,7 @@ impl Default for ServersView {
     }
 }
 
-fn tr(key: &str, fallback: &str) -> String {
+pub(super) fn tr(key: &str, fallback: &str) -> String {
     horizon_client::lang::get_or(key, fallback)
 }
 
@@ -647,10 +689,10 @@ impl ServersView {
         let motd_w = x + w - 12.0 - tx;
         match status {
             Status::Online { motd, .. } | Status::Incompatible { motd, .. } => {
-                let lines: Vec<String> = if motd.is_empty() { vec![fallback.to_owned()] } else { motd.clone() };
+                let fallback_line = [vec![Run { text: fallback.to_owned(), ..Run::default() }]];
+                let lines: &[Vec<Run>] = if motd.is_empty() { &fallback_line } else { motd };
                 for (i, line) in lines.iter().take(2).enumerate() {
-                    let t = c.ellipsize(font::MEDIUM, 12.0, line, motd_w);
-                    c.text(font::MEDIUM, 12.0, &t, tx, y + 34.0 + i as f32 * 15.0, theme::TEXT_SECONDARY);
+                    motd_line(c, ui.now, line, tx, y + 34.0 + i as f32 * 15.0, motd_w);
                 }
             }
             Status::Pinging => {
@@ -747,6 +789,51 @@ impl ServersView {
     }
 }
 
+/// One MOTD line: each run in the colour and style the server gave it, cut where the row ends. Unstyled text is the
+/// UI's grey; `§k` text scrambles; underline and strikethrough are drawn as lines. (There is no italic face: it
+/// shows upright.)
+fn motd_line(c: &mut Canvas, now: f64, runs: &[Run], x: f32, y: f32, max_w: f32) {
+    const SIZE: f32 = 12.0;
+    const SCRAMBLE: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789#%&$?!";
+    let mut pen = x;
+    let end = x + max_w;
+    for run in runs {
+        let face = if run.bold { font::BOLD } else { font::MEDIUM };
+        let color = run.color.map_or(theme::TEXT_SECONDARY, |rgb| 0xFF00_0000 | rgb);
+        let mut shown = String::new();
+        let mut width = 0.0;
+        for (i, ch) in run.text.chars().enumerate() {
+            let ch = if run.obfuscated && !ch.is_whitespace() {
+                // the game redraws obfuscated characters constantly; here they change a few times a second
+                let n = (now / 90.0) as usize + i * 7;
+                SCRAMBLE[(n.wrapping_mul(2654435761) >> 7) % SCRAMBLE.len()] as char
+            } else {
+                ch
+            };
+            let w = c.text_width(face, SIZE, ch.encode_utf8(&mut [0; 4]));
+            if pen + width + w > end {
+                break;
+            }
+            shown.push(ch);
+            width += w;
+        }
+        if shown.is_empty() {
+            break;
+        }
+        c.text(face, SIZE, &shown, pen, y, color);
+        if run.underline {
+            c.fill(pen, y + SIZE + 1.0, width, 1.0, color);
+        }
+        if run.strike {
+            c.fill(pen, y + SIZE * 0.55, width, 1.0, color);
+        }
+        pen += width;
+        if pen >= end - 0.5 {
+            break;
+        }
+    }
+}
+
 /// 12345 → "12,345".
 fn group(n: i64) -> String {
     let s = n.abs().to_string();
@@ -790,7 +877,7 @@ fn label(c: &mut Canvas, x: f32, y: f32, text: &str, note: Option<&str>) -> f32 
 
 /// A bottom button; a disabled one is drawn faded and ignores the mouse, like vanilla's greyed-out buttons.
 #[allow(clippy::too_many_arguments)]
-fn bottom_button(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, label: &str, style: u8, enabled: bool) -> bool {
+pub(super) fn bottom_button(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, label: &str, style: u8, enabled: bool) -> bool {
     let text = c.ellipsize(font::SEMIBOLD, 12.5, label, w - 16.0);
     if enabled {
         return ui.button(c, id, x, y, w, BTN_H, &text, 0, style);
@@ -813,6 +900,21 @@ mod tests {
         assert!(horizon_partner(OFFICIAL_SERVER.1));
         assert!(horizon_partner(&format!("{}:25565", PARTNER_SERVERS[0].1.to_uppercase())));
         assert!(!horizon_partner("mc.hypixel.net"));
+    }
+
+    #[test]
+    fn motd_codes_become_styled_runs_and_lines() {
+        let t = horizon_client::text::Text::literal("§f  §aHypixel §c§l[1.8]
+§nSecond");
+        let lines = motd_lines(&t);
+        assert_eq!(lines.len(), 2);
+        let first = &lines[0];
+        assert_eq!(first[0].color, Some(0xFFFFFF));
+        assert_eq!((first[1].text.as_str(), first[1].color), ("Hypixel ", Some(0x55FF55)));
+        assert_eq!((first[2].text.as_str(), first[2].color, first[2].bold), ("[1.8]", Some(0xFF5555), true));
+        assert!(lines[1][0].underline && lines[1][0].text == "Second");
+        // no raw code is left in any run
+        assert!(lines.iter().flatten().all(|r| !r.text.contains('§')));
     }
 
     #[test]

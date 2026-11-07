@@ -36,6 +36,12 @@ pub enum TitleAct {
     ServerMove { index: usize, up: bool },
     /// The game's own multiplayer screen, until the title shows again.
     ServersClassic,
+    /// A Native dialog's answer for the game's Add / Edit server screen (`done` false: cancelled).
+    ServerForm { name: String, address: String, packs: Option<bool>, done: bool },
+    /// The Direct Connection dialog's answer (`join` false: cancelled).
+    ServerDirect { address: String, join: bool },
+    /// The Delete dialog's answer.
+    ServerDelete { yes: bool },
 }
 
 /// What the title needs to know of the game.
