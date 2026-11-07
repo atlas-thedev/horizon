@@ -661,7 +661,8 @@ impl RelayView {
         c.text(font::SEMIBOLD, 13.0, &shown, tx, top_y, if sel { theme::TEXT_STRONG } else { theme::mix(theme::TEXT, theme::TEXT_STRONG, hv) });
         if self.row_pinned {
             let lh = c.line_height(font::SEMIBOLD, 13.0);
-            c.icon(theme::I_MAP_PIN, 10.0, tx + c.text_width(font::SEMIBOLD, 13.0, &shown) + 10.0, top_y + lh / 2.0, theme::TEXT_MUTED);
+            let sw = c.text_width(font::SEMIBOLD, 13.0, &shown);
+            c.icon(theme::I_MAP_PIN, 10.0, tx + sw + 10.0, top_y + lh / 2.0, theme::TEXT_MUTED);
         }
         if time_w > 0.0 {
             c.text(font::REGULAR, 10.0, &self.row_time, right - time_w, top_y + 2.0, if unread > 0 { theme::TEXT_STRONG } else { theme::TEXT_MUTED });
@@ -729,7 +730,8 @@ impl RelayView {
             let lw = c.text(font::SEMIBOLD, 13.0, HOME_TABS[i], tx + 11.0, by + (bh - lh) / 2.0, col);
             if i == 2 {
                 if counts[i] > 0 {
-                    badge(c, tx + 11.0 + lw + 6.0 + count_w(c, i, counts[i]) - 6.0, by + bh / 2.0, counts[i] as i32);
+                    let cw = count_w(c, i, counts[i]);
+                    badge(c, tx + 11.0 + lw + 6.0 + cw - 6.0, by + bh / 2.0, counts[i] as i32);
                 }
             } else {
                 let nh = c.line_height(font::BOLD, 11.0);
@@ -1044,7 +1046,8 @@ impl RelayView {
                     ty = heading(c, "Connections", x + pad, ty);
                     avatars::draw(c, f.skin.as_deref(), x + pad, ty, 32.0, 8.0);
                     c.text(font::SEMIBOLD, 12.5, &f.name, x + pad + 42.0, ty + 1.0, theme::TEXT_STRONG);
-                    c.icon(theme::I_CHECK_CIRCLE, 12.0, x + pad + 42.0 + c.text_width(font::SEMIBOLD, 12.5, &f.name) + 10.0, ty + 8.0, theme::ONLINE);
+                    let nw = c.text_width(font::SEMIBOLD, 12.5, &f.name);
+                    c.icon(theme::I_CHECK_CIRCLE, 12.0, x + pad + 42.0 + nw + 10.0, ty + 8.0, theme::ONLINE);
                     c.text(font::REGULAR, 11.0, "Minecraft \u{b7} Premium", x + pad + 42.0, ty + 18.0, theme::TEXT_MUTED);
                     ty += 46.0;
                 }

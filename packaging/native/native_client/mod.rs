@@ -87,6 +87,8 @@ struct State {
     /// GLFW codes of the keys and mouse buttons held, as the window events told.
     held: std::collections::HashSet<i32>,
     /// The game's own toggle-sprint and toggle-sneak options before Toggle Sprint took them over.
+    /// The game's own toggle-sprint and toggle-sneak options before Toggle Sprint took them over.
+    toggles_before: Option<(bool, bool)>,
     /// The Relay chat, and whether it is what the Native screen shows.
     relay: relay_view::RelayView,
     relay_open: bool,
