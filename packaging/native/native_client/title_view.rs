@@ -34,6 +34,7 @@ pub enum TitleAct {
 }
 
 /// What the title needs to know of the game.
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct TitleInfo {
     pub allows_multiplayer: bool,
