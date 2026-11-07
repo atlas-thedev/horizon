@@ -51,12 +51,16 @@ patch(COSMETICS,
       '        if horizon_client::mobs::trader::is_invisible(m) {\n')
 patch(COSMETICS, '        for item in worn.iter() {\n',
       '        for item in worn.iter().chain(native.iter()) {\n'
+      '            // A blinking part is off for part of its cycle (the Java mod skips it).\n'
+      '            if !super::native_cosmetics::shown(item, ticks) {\n'
+      '                continue;\n'
+      '            }\n'
       '            let light = super::native_cosmetics::light_of(item, light);\n')
 # Native items are not Horizon's "others' cosmetics", which show only to a Horizon owner.
 patch(COSMETICS, '            if !bodies || covered(m, item.slot) {\n',
       '            if (!bodies && !item.id.starts_with("native:")) || covered(m, item.slot) {\n')
 
-# Native cosmetics keep their texture's resolution: atlas slots of their own, 256×256 (a skin slot is 64×64).
+# Native cosmetics keep their texture's resolution: one 2048×2048 area of the atlas, each texture packed at its own size.
 RENDER = root / 'crates/horizon-client-render/src'
 patch(RENDER / 'hud.rs',
       '        for i in 0..SKIN_SLOTS {\n'
@@ -65,10 +69,8 @@ patch(RENDER / 'hud.rs',
       '        for i in 0..SKIN_SLOTS {\n'
       '            images.push((format!("horizon/skin{i}"), 64, 64, vec![0; 64 * 64 * 4]));\n'
       '        }\n'
-      '        // Native cosmetic textures (game/native_cosmetics.rs), at up to 256×256.\n'
-      '        for i in 0..24 {\n'
-      '            images.push((format!("native/cos{i}"), 256, 256, vec![0; 256 * 256 * 4]));\n'
-      '        }\n')
+      '        // Native cosmetic textures (game/native_cosmetics.rs), packed at their own size.\n'
+      '        images.push(("native/cosmetics".into(), 2048, 2048, vec![0; 2048 * 2048 * 4]));\n')
 patch(COSMETICS,
       '                self.store_skin(location, slot_image(&item));\n',
       '                if item.id.starts_with("native:") {\n'
@@ -79,8 +81,8 @@ patch(COSMETICS,
 patch(COSMETICS,
       '                item.texture.width as f32 / 64.0,\n'
       '                item.texture.height as f32 / 64.0,\n',
-      '                item.texture.width as f32 / super::native_cosmetics::slot_side(item),\n'
-      '                item.texture.height as f32 / super::native_cosmetics::slot_side(item),\n')
+      '                item.texture.width as f32 / super::native_cosmetics::slot_width(item),\n'
+      '                item.texture.height as f32 / super::native_cosmetics::slot_height(item),\n')
 patch(COSMETICS,
       '                self.skin_downloads.borrow_mut().drawn(&b.location);\n',
       '                self.skin_downloads.borrow_mut().drawn(&b.location);\n'

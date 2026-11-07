@@ -11,9 +11,8 @@ use super::avatars;
 use super::common::badge;
 use super::relay;
 use super::ui::{self, Ui};
-use crate::native_ui::{Canvas, Image, assets, font, icons, theme};
+use crate::native_ui::{Canvas, font, icons, theme};
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex, OnceLock};
 
 const AD_ROTATE_MS: f64 = 12_000.0;
 
@@ -45,41 +44,11 @@ pub struct TitleInfo {
 #[derive(Default)]
 pub struct TitleView {
     shown_at: f64,
-    art_shown_at: f64,
     hidden_ads: HashSet<String>,
     ad_index: usize,
     ad_switch_at: f64,
     ad_prev: Option<usize>,
     ad_fade_at: f64,
-}
-
-/// The version artwork: what the launcher copied to `.native/version-art.jpg`, else the bundled picture.
-fn art(game_dir: Option<std::path::PathBuf>) -> Option<Arc<Image>> {
-    static ART: OnceLock<Mutex<Option<Option<Arc<Image>>>>> = OnceLock::new();
-    let cell = ART.get_or_init(|| Mutex::new(None));
-    let mut slot = cell.lock().unwrap_or_else(|e| e.into_inner());
-    match &*slot {
-        Some(img) => img.clone(),
-        None => {
-            *slot = Some(None);
-            drop(slot);
-            let _ = std::thread::Builder::new().name("Native title art".into()).spawn(move || {
-                let from_launcher = game_dir
-                    .map(|d| d.join(".native").join("version-art.jpg"))
-                    .filter(|f| std::fs::metadata(f).is_ok_and(|m| m.len() < 16 * 1024 * 1024))
-                    .and_then(|f| std::fs::read(f).ok())
-                    .and_then(|b| Image::decode(&b));
-                let mut img = from_launcher.or_else(|| Image::decode(assets::BACKGROUND));
-                if let Some(i) = img.clone()
-                    && i.width > 2560
-                {
-                    img = Some(i.scaled(2560, ((i.height as f32 * 2560.0 / i.width as f32).round() as u32).max(1)));
-                }
-                *cell.lock().unwrap_or_else(|e| e.into_inner()) = Some(img);
-            });
-            None
-        }
-    }
 }
 
 fn clamp01(v: f32) -> f32 {
@@ -120,28 +89,19 @@ impl TitleView {
         hit && enabled
     }
 
-    /// Just the artwork (behind Relay and the menu when they open from the title).
-    pub fn background(&mut self, ui: &Ui, c: &mut Canvas, game_dir: Option<std::path::PathBuf>) {
+    /// The shading over the game's own title panorama (vanilla's background shows through; behind Relay and the
+    /// menu too when they open from the title), darker towards the top and bottom edges where the text sits.
+    pub fn background(&self, c: &mut Canvas) {
         let (w, h) = (c.width(), c.height());
-        c.fill(0.0, 0.0, w, h, 0xFF050608);
-        if let Some(a) = art(game_dir) {
-            if self.art_shown_at == 0.0 {
-                self.art_shown_at = ui.now;
-            }
-            let k = clamp01(((ui.now - self.art_shown_at) / 350.0) as f32);
-            c.image_cover(&a, 0.0, 0.0, w, h, 1.04, 0.2, 0.0, theme::alpha(0xFFFFFFFF, k));
-        }
-        // Even shading like vanilla's panorama, darker towards the top and bottom edges where the text sits.
-        c.fill(0.0, 0.0, w, h, 0x33000000);
-        c.gradient_v(0.0, 0.0, w, 120.0, 0x8C000000, 0x00000000);
-        c.gradient_v(0.0, h * 0.55, w, h * 0.45, 0x00000000, 0xB3000000);
+        c.gradient_v(0.0, 0.0, w, 120.0, 0x66000000, 0x00000000);
+        c.gradient_v(0.0, h * 0.55, w, h * 0.45, 0x00000000, 0x99000000);
     }
 
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, info: &TitleInfo) -> Option<TitleAct> {
         self.opened(ui);
         let (w_all, h_all) = (c.width(), c.height());
         let inn = ui.anim("title#in", 1.0, 4.0);
-        self.background(ui, c, info.game_dir.clone());
+        self.background(c);
         c.push_alpha(inn);
         let mut act = None;
 

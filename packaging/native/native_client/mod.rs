@@ -976,7 +976,7 @@ pub(super) fn native_title_frame(batch: &mut HudBatch, allows_multiplayer: bool,
         let info = title_view::TitleInfo { allows_multiplayer, game_dir: game_dir(), player: player.to_owned() };
         match state.title_overlay {
             1 => {
-                state.title.background(&state.ui, c, info.game_dir.clone());
+                state.title.background(c);
                 let who = Some(player).filter(|n| !n.is_empty());
                 let action = state.menu.draw(&mut state.ui, c, &mut state.modules, &mut state.cfg, who, false);
                 match action {
@@ -993,13 +993,13 @@ pub(super) fn native_title_frame(batch: &mut HudBatch, allows_multiplayer: bool,
                 }
             }
             2 => {
-                state.title.background(&state.ui, c, info.game_dir.clone());
+                state.title.background(c);
                 if state.relay.draw(&mut state.ui, c, &mut state.cfg, false) == relay_view::RelayAction::Close {
                     state.title_overlay = 0;
                 }
             }
             3 => {
-                state.title.background(&state.ui, c, info.game_dir.clone());
+                state.title.background(c);
                 let g = module::GameView::sample();
                 match state.editor.draw(&mut state.ui, c, &mut state.modules, &g, false) {
                     menu::Action::Close => state.title_overlay = 0,

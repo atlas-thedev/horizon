@@ -31,11 +31,9 @@ const MAX_DEPTH: usize = 8;
 const MAX_ANIMS: usize = 8;
 /// A model or texture that failed is asked for again after this long.
 const RETRY: Duration = Duration::from_secs(120);
-/// Native cosmetic textures get atlas slots of their own (`native/cos<i>`, 256×256), so an NCM texture keeps
-/// its resolution; a larger one is scaled down (the faces' UVs are fractions of the texture, so they still fit).
-pub const NATIVE_SLOT: u32 = 256;
-pub const NATIVE_SLOTS: usize = 24;
-const SLOT: u32 = NATIVE_SLOT;
+/// Bigger than this (the atlas's Native area, `AREA`) and a texture is scaled down to fit (the faces' UVs are
+/// fractions of the texture, so they still fit).
+const SLOT: u32 = AREA;
 
 /// The armour slot a part reacts to: hidden while that slot is filled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -169,7 +167,7 @@ fn anim(o: &serde_json::Value) -> Option<Anim> {
         "spin" => Some(Motion::Spin),
         "swing" | "flap" => Some(Motion::Swing),
         "bob" => Some(Motion::Bob),
-        // Blinking (showing a part part of the time) has no counterpart: the part stays shown.
+        // Blinking (shown for part of each cycle): no motion, the part goes in an item that hides on cue.
         "blink" => None,
         _ => return None,
     };
@@ -182,7 +180,7 @@ fn anim(o: &serde_json::Value) -> Option<Anim> {
         motion,
         axis,
         speed: num(o, "speed", if motion == Some(Motion::Spin) { 90.0 } else { 1.0 }, 4000.0),
-        amplitude: num(o, "amplitude", 10.0, 360.0),
+        amplitude: num(o, "amplitude", if motion.is_none() { 0.5 } else { 10.0 }, 360.0),
         phase: num(o, "phase", 0.0, 1000.0),
     })
 }
@@ -312,22 +310,37 @@ impl Model {
         }
         let mut items = Vec::new();
         for (armor, roots) in groups {
-            items.push((armor, Arc::new(self.item(id, &roots, texture, false))));
-            // Glowing parts are an item of their own, drawn at full brightness (the Java mod's eyes layer).
-            if roots.iter().any(|r| has_glow(r)) {
-                items.push((armor, Arc::new(self.item(id, &roots, texture, true))));
+            // Each blinking part (with what hangs on it) is an item of its own, hidden on cue, as the Java mod
+            // skips the part and its children; glowing parts are one too, drawn at full brightness (the Java
+            // mod's eyes layer).
+            let mut gates = vec![(None, Vec::new())];
+            for root in &roots {
+                blink_gates(root, &[], &mut gates);
+            }
+            for (gate, blinks) in gates {
+                for glow in [false, true] {
+                    let layer = Layer { glow, gate };
+                    let item = self.item(id, &roots, texture, layer);
+                    if item.vertices == 0 {
+                        continue;
+                    }
+                    if !blinks.is_empty() {
+                        blink_registry().insert(item.id.clone(), blinks.clone());
+                    }
+                    items.push((armor, Arc::new(item)));
+                }
             }
         }
         Native { items }
     }
 
-    fn item(&self, id: &str, roots: &[&NcmPart], texture: &Texture, glow: bool) -> Item {
+    fn item(&self, id: &str, roots: &[&NcmPart], texture: &Texture, layer: Layer) -> Item {
         const REST: horizon_cosmetics::Pose = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
         let main = roots.first().map_or(Bone::Head, |r| r.bone);
         let mut animations = Vec::new();
         let mut on_bone: Vec<(Bone, Vec<Part>)> = Vec::new();
         for root in roots {
-            let part = bake(root, self.texture, &mut animations, glow);
+            let part = bake(root, self.texture, &mut animations, layer, None);
             match on_bone.iter_mut().find(|(b, _)| *b == root.bone) {
                 Some((_, list)) => list.push(part),
                 None => on_bone.push((root.bone, vec![part])),
@@ -357,7 +370,11 @@ impl Model {
         }
         let vertices = count(&root) + limbs.iter().map(|(_, l)| count(l)).sum::<usize>();
         Item {
-            id: if glow { format!("native:{id}{GLOW}") } else { format!("native:{id}") },
+            id: format!(
+                "native:{id}{}{}",
+                layer.gate.map(|g| format!("#b{g}")).unwrap_or_default(),
+                if layer.glow { GLOW } else { "" }
+            ),
             // Never covered by the game's own rule: NCM parts carry their armour rules.
             slot: Slot::Shoulder,
             bone: main,
@@ -398,18 +415,61 @@ fn wraps(part: &NcmPart, parent: glam::Mat4) -> bool {
 /// The id ending of an item holding a model's glowing parts.
 pub const GLOW: &str = "#glow";
 
-fn has_glow(p: &NcmPart) -> bool {
-    (p.glow && !p.cubes.is_empty()) || p.children.iter().any(has_glow)
-}
-
 /// The light a cosmetic item is drawn with: full brightness for the glowing parts.
 pub fn light_of(item: &Item, light: u32) -> u32 {
     if item.id.starts_with("native:") && item.id.ends_with(GLOW) { horizon_client::mobs::render::FULL_BRIGHT } else { light }
 }
 
+/// Which faces an item holds: the glowing parts' or the others', of the parts whose nearest blinking part
+/// (themselves or a parent) is `gate`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Layer {
+    glow: bool,
+    gate: Option<usize>,
+}
+
+/// A blink channel: cycles per second, the part of each cycle the part shows (0..1), phase (cycles).
+type Blink = [f32; 3];
+
+fn blinks_of(p: &NcmPart) -> impl Iterator<Item = Blink> + '_ {
+    p.anims.iter().filter(|a| a.motion.is_none()).map(|a| [a.speed, a.amplitude, a.phase])
+}
+
+/// Every blinking part under `p`, with the channels it and its parents blink by.
+fn blink_gates(p: &NcmPart, above: &[Blink], out: &mut Vec<(Option<usize>, Vec<Blink>)>) {
+    let mut chain = above.to_vec();
+    let own: Vec<Blink> = blinks_of(p).collect();
+    if !own.is_empty() {
+        chain.extend(own);
+        out.push((Some(p.index), chain.clone()));
+    }
+    for c in &p.children {
+        blink_gates(c, &chain, out);
+    }
+}
+
+fn blink_registry() -> std::sync::MutexGuard<'static, HashMap<String, Vec<Blink>>> {
+    static BLINKS: OnceLock<Mutex<HashMap<String, Vec<Blink>>>> = OnceLock::new();
+    BLINKS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// `CosmeticPose.pose`'s blink: a channel hides its part once `(speed × time + phase) mod 1` reaches the
+/// amplitude. False while any channel of this item's blinking part (or of a part it hangs on) hides it.
+pub fn shown(item: &Item, ticks: f32) -> bool {
+    if !item.id.starts_with("native:") || !item.id.contains("#b") {
+        return true;
+    }
+    let time = ticks / 20.0;
+    match blink_registry().get(&item.id) {
+        Some(blinks) => blinks.iter().all(|[speed, amplitude, phase]| (speed * time + phase).rem_euclid(1.0) < *amplitude),
+        None => true,
+    }
+}
+
 /// A part as the game's item has it, its animations added to `animations`; only the faces of the parts on
-/// the `glow` layer (or only the others), every part keeping its place so children move with their parents.
-fn bake(p: &NcmPart, texture: [f32; 2], animations: &mut Vec<Animation>, glow: bool) -> Part {
+/// `layer`, every part keeping its place so children move with their parents.
+fn bake(p: &NcmPart, texture: [f32; 2], animations: &mut Vec<Animation>, layer: Layer, gate: Option<usize>) -> Part {
+    let gate = if blinks_of(p).next().is_some() { Some(p.index) } else { gate };
     let name = format!("n{}", p.index);
     for a in &p.anims {
         let Some(motion) = a.motion else { continue };
@@ -436,8 +496,12 @@ fn bake(p: &NcmPart, texture: [f32; 2], animations: &mut Vec<Animation>, glow: b
     Part {
         name,
         pose: [x, y, z, rx, ry, rz, 1.0, 1.0, 1.0],
-        faces: if p.glow == glow { p.cubes.iter().flat_map(|c| box_faces(c, texture)).collect() } else { Vec::new() },
-        children: p.children.iter().map(|c| bake(c, texture, animations, glow)).collect(),
+        faces: if p.glow == layer.glow && gate == layer.gate {
+            p.cubes.iter().flat_map(|c| box_faces(c, texture)).collect()
+        } else {
+            Vec::new()
+        },
+        children: p.children.iter().map(|c| bake(c, texture, animations, layer, gate)).collect(),
     }
 }
 
@@ -493,7 +557,8 @@ fn box_faces(cube: &Cube, [tw, th]: [f32; 2]) -> Vec<Face> {
         .collect()
 }
 
-/// A texture scaled down (nearest texel) to fit a 256×256 Native slot, if larger.
+/// A texture as it goes into the atlas: as it is, or (only when bigger than the Native area) shrunk to fit,
+/// every texel the average of the ones it covers.
 pub fn fit_slot(width: u32, height: u32, rgba: &[u8]) -> Texture {
     if width <= SLOT && height <= SLOT {
         return Texture {
@@ -509,10 +574,21 @@ pub fn fit_slot(width: u32, height: u32, rgba: &[u8]) -> Texture {
     );
     let mut out = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
+        let (y0, y1) = (y * height / h, ((y + 1) * height / h).max(y * height / h + 1).min(height));
         for x in 0..w {
-            let (sx, sy) = (x * width / w, y * height / h);
-            let i = ((sy * width + sx) * 4) as usize;
-            out.extend_from_slice(&rgba[i..i + 4]);
+            let (x0, x1) = (x * width / w, ((x + 1) * width / w).max(x * width / w + 1).min(width));
+            let mut sum = [0u32; 4];
+            let mut n = 0;
+            for sy in y0..y1 {
+                for sx in x0..x1 {
+                    let i = ((sy * width + sx) * 4) as usize;
+                    for c in 0..4 {
+                        sum[c] += u32::from(rgba[i + c]);
+                    }
+                    n += 1;
+                }
+            }
+            out.extend(sum.iter().map(|s| (s / n.max(1)) as u8));
         }
     }
     Texture {
@@ -644,81 +720,154 @@ impl Game<'_> {
     }
 }
 
-// ── the atlas's Native slots ─────────────────────────────────────────────
+// ── the atlas's Native area ──────────────────────────────────────────────
 
-/// Which texture holds each Native slot, and when it was last drawn. A new texture takes a free slot, else
-/// the one drawn longest ago (never one drawn in the last moment, which would make it flicker).
-fn slots() -> std::sync::MutexGuard<'static, Vec<Option<(String, Instant)>>> {
-    static SLOTS: OnceLock<Mutex<Vec<Option<(String, Instant)>>>> = OnceLock::new();
-    SLOTS
-        .get_or_init(|| Mutex::new(vec![None; NATIVE_SLOTS]))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+/// One area of the atlas (`native/cosmetics`) holds every Native cosmetic texture at its own size, packed in
+/// rows (shelves). Most NCM textures are long strips (wings are 2032×126): a square slot made them a fraction of
+/// their width and they looked speckled. When the area is full it starts over: textures go back in as they are
+/// drawn.
+pub const AREA: u32 = 2048;
+
+#[derive(Clone, Debug, PartialEq)]
+struct Placed {
+    /// The texture (its model's id and size): the items of one model (plain, glowing, blinking) share it.
+    key: String,
+    /// The atlas sprites naming it, one per item.
+    locations: Vec<String>,
+    rect: [u32; 4],
+    drawn: Instant,
 }
 
-/// A slot for `location`: its own, a free one, else the least recently drawn (with the location it held).
-fn place(slots: &mut [Option<(String, Instant)>], location: &str, now: Instant) -> Option<(usize, Option<String>)> {
-    if let Some(i) = slots.iter().position(|s| s.as_ref().is_some_and(|(l, _)| l == location)) {
-        slots[i] = Some((location.to_owned(), now));
-        return Some((i, None));
-    }
-    let i = match slots.iter().position(Option::is_none) {
-        Some(i) => i,
-        None => {
-            let (i, (_, at)) = slots
-                .iter()
-                .enumerate()
-                .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
-                .min_by_key(|(_, (_, at))| *at)?;
-            if now.duration_since(*at) < Duration::from_millis(250) {
-                return None;
-            }
-            i
+#[derive(Default)]
+struct Packer {
+    /// The atlas the area belongs to (`HudAtlas::revision`): a rebuilt atlas starts with it empty.
+    revision: u64,
+    placed: Vec<Placed>,
+    /// Shelves: (top, height, used width).
+    shelves: Vec<(u32, u32, u32)>,
+}
+
+/// Where a texture went: its place in the area, whether its pixels must be uploaded (else they are there
+/// already), and the sprites that left the area.
+#[derive(Debug, PartialEq)]
+struct Placement {
+    rect: [u32; 4],
+    upload: bool,
+    evicted: Vec<String>,
+}
+
+impl Packer {
+    /// Room for a `w`×`h` texture in the shelves as they are.
+    fn fit(&mut self, w: u32, h: u32) -> Option<[u32; 2]> {
+        // The best shelf: tall enough, wide enough, wasting the least height.
+        let best = self
+            .shelves
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, sh, used))| *sh >= h && AREA - used >= w)
+            .min_by_key(|(_, (_, sh, _))| *sh - h)
+            .map(|(i, _)| i);
+        if let Some(i) = best {
+            let (top, _, used) = self.shelves[i];
+            self.shelves[i].2 += w;
+            return Some([used, top]);
         }
-    };
-    let evicted = slots[i].take().map(|(l, _)| l);
-    slots[i] = Some((location.to_owned(), now));
-    Some((i, evicted))
-}
+        let bottom = self.shelves.last().map_or(0, |(top, sh, _)| top + sh);
+        if bottom + h > AREA || w > AREA {
+            return None;
+        }
+        self.shelves.push((bottom, h, w));
+        Some([0, bottom])
+    }
 
-/// A Native item's texture was drawn this frame: its slot is kept.
-pub fn drawn(location: &str) {
-    let mut s = slots();
-    if let Some(slot) = s.iter_mut().flatten().find(|(l, _)| l == location) {
-        slot.1 = Instant::now();
+    /// A place for texture `key` drawn through sprite `location`: where it is, or new room. When there is none
+    /// the area starts over (every sprite in it is named, to be taken out of the atlas and put back when drawn).
+    fn place(&mut self, key: &str, location: &str, w: u32, h: u32, now: Instant) -> Option<Placement> {
+        if let Some(p) = self.placed.iter_mut().find(|p| p.key == key) {
+            if !p.locations.iter().any(|l| l == location) {
+                p.locations.push(location.to_owned());
+            }
+            p.drawn = now;
+            return Some(Placement { rect: p.rect, upload: false, evicted: Vec::new() });
+        }
+        let mut evicted = Vec::new();
+        let spot = match self.fit(w, h) {
+            Some(spot) => spot,
+            None => {
+                evicted = std::mem::take(&mut self.placed).into_iter().flat_map(|p| p.locations).collect();
+                self.shelves.clear();
+                self.fit(w, h)?
+            }
+        };
+        let rect = [spot[0], spot[1], w, h];
+        self.placed.push(Placed { key: key.to_owned(), locations: vec![location.to_owned()], rect, drawn: now });
+        Some(Placement { rect, upload: true, evicted })
     }
 }
 
-/// The side of the atlas slot an item's texture is in, in texels.
-pub fn slot_side(item: &Item) -> f32 {
-    if item.id.starts_with("native:") { NATIVE_SLOT as f32 } else { 64.0 }
+fn packer() -> std::sync::MutexGuard<'static, Packer> {
+    static PACKER: OnceLock<Mutex<Packer>> = OnceLock::new();
+    PACKER.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A Native item's texture was drawn this frame.
+pub fn drawn(location: &str) {
+    let mut p = packer();
+    if let Some(placed) = p.placed.iter_mut().find(|p| p.locations.iter().any(|l| l == location)) {
+        placed.drawn = Instant::now();
+    }
+}
+
+/// The size of the atlas region an item's texture fills, in texels: a Native texture has a region of exactly its
+/// own size, a Horizon item the top-left of a 64×64 skin slot.
+pub fn slot_width(item: &Item) -> f32 {
+    if item.id.starts_with("native:") { item.texture.width.max(1) as f32 } else { 64.0 }
+}
+
+pub fn slot_height(item: &Item) -> f32 {
+    if item.id.starts_with("native:") { item.texture.height.max(1) as f32 } else { 64.0 }
+}
+
+/// The texture an item draws: its model's (the id before any `#` ending) at its size.
+fn texture_key(item: &Item) -> String {
+    let model = item.id.split('#').next().unwrap_or(&item.id);
+    format!("{model}@{}x{}", item.texture.width, item.texture.height)
 }
 
 impl Game<'_> {
-    /// Puts a Native item's texture into one of the atlas's 256×256 Native slots, at its own resolution.
+    /// Puts a Native item's texture into the atlas's Native area, at its own resolution.
     pub(super) fn store_native_cosmetic(&mut self, location: &str, item: &Item) {
-        let Some((slot, evicted)) = place(&mut slots(), location, Instant::now()) else { return };
-        if let Some(old) = evicted {
+        let t = &item.texture;
+        let (w, h) = (t.width.clamp(1, AREA), t.height.clamp(1, AREA));
+        let placed = {
+            let mut p = packer();
+            if p.revision != self.gui.atlas.revision {
+                *p = Packer { revision: self.gui.atlas.revision, ..Packer::default() };
+            }
+            p.place(&texture_key(item), location, w, h, Instant::now())
+        };
+        let Some(placed) = placed else { return };
+        for old in placed.evicted {
             self.gui.atlas.sprites.remove(&old);
         }
-        let Some(rect) = self.gui.atlas.sprites.get(&format!("native/cos{slot}")).copied() else { return };
-        let side = NATIVE_SLOT as usize;
-        let t = &item.texture;
-        let (tw, th) = ((t.width as usize).min(side), (t.height as usize).min(side));
-        let mut rgba = vec![0; side * side * 4];
-        for y in 0..th {
-            let row = &t.rgba[y * t.width as usize * 4..y * t.width as usize * 4 + tw * 4];
-            rgba[y * side * 4..y * side * 4 + row.len()].copy_from_slice(row);
+        let Some(area) = self.gui.atlas.sprites.get("native/cosmetics").copied() else { return };
+        let (aw, ah) = (self.gui.atlas.width as f32, self.gui.atlas.height as f32);
+        let (ax, ay) = ((area.u0 * aw).round() as u32, (area.v0 * ah).round() as u32);
+        let rect = placed.rect;
+        if placed.upload {
+            let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+            for y in 0..h as usize {
+                let start = y * t.width as usize * 4;
+                rgba.extend_from_slice(&t.rgba[start..start + w as usize * 4]);
+            }
+            self.map_patches.push(horizon_client::font::Patch { x: ax + rect[0], y: ay + rect[1], width: w, height: h, rgba });
         }
-        let (w, h) = (self.gui.atlas.width as f32, self.gui.atlas.height as f32);
-        self.map_patches.push(horizon_client::font::Patch {
-            x: (rect.u0 * w).round() as u32,
-            y: (rect.v0 * h).round() as u32,
-            width: NATIVE_SLOT,
-            height: NATIVE_SLOT,
-            rgba,
-        });
-        self.gui.atlas.sprites.insert(location.to_owned(), rect);
+        let mut sprite = area;
+        sprite.u0 = (ax + rect[0]) as f32 / aw;
+        sprite.v0 = (ay + rect[1]) as f32 / ah;
+        sprite.u1 = (ax + rect[0] + w) as f32 / aw;
+        sprite.v1 = (ay + rect[1] + h) as f32 / ah;
+        self.gui.atlas.sprites.insert(location.to_owned(), sprite);
     }
 }
 
@@ -727,16 +876,33 @@ mod slot_tests {
     use super::*;
 
     #[test]
-    fn slots_go_to_the_least_recently_drawn_texture() {
+    fn strips_are_packed_at_their_own_size() {
+        let now = Instant::now();
+        let mut p = Packer::default();
+        let a = p.place("wings", "w1", 2032, 126, now).unwrap();
+        let b = p.place("tails", "t1", 300, 17, now).unwrap();
+        let c = p.place("hat", "h1", 64, 64, now).unwrap();
+        assert_eq!(a.rect, [0, 0, 2032, 126]);
+        assert!(a.upload && b.upload && c.upload);
+        // A short texture shares a shelf with room for it, else gets one of its own.
+        assert!(b.rect[1] >= 126 || b.rect[0] >= 2032);
+        assert_ne!(b.rect, c.rect);
+        // The glowing item of the same model draws the same pixels: nothing new to upload.
+        let again = p.place("wings", "w1-glow", 2032, 126, now).unwrap();
+        assert_eq!((again.rect, again.upload), (a.rect, false));
+    }
+
+    #[test]
+    fn a_full_area_starts_over() {
         let t0 = Instant::now();
-        let later = t0 + Duration::from_secs(1);
-        let mut s = vec![None; 2];
-        assert_eq!(place(&mut s, "a", t0), Some((0, None)));
-        assert_eq!(place(&mut s, "b", t0 + Duration::from_millis(10)), Some((1, None)));
-        assert_eq!(place(&mut s, "a", t0), Some((0, None)));
-        // Both drawn a moment ago: the new one waits.
-        assert_eq!(place(&mut s, "c", t0 + Duration::from_millis(100)), None);
-        assert_eq!(place(&mut s, "c", later), Some((0, Some("a".to_owned()))));
+        let mut p = Packer::default();
+        for i in 0..16 {
+            p.place(&format!("old{i}"), &format!("s{i}"), 2048, 128, t0).unwrap();
+        }
+        p.place("old0", "s0b", 2048, 128, t0).unwrap();
+        let fresh = p.place("new", "n", 2048, 128, t0 + Duration::from_secs(2)).unwrap();
+        assert_eq!(fresh.rect, [0, 0, 2048, 128]);
+        assert_eq!(fresh.evicted.len(), 17);
     }
 
     #[test]
@@ -754,7 +920,7 @@ mod slot_tests {
         assert_eq!(light_of(glow, 7), horizon_client::mobs::render::FULL_BRIGHT);
         // Each holds only its own faces: one box each.
         assert_eq!((plain.vertices, glow.vertices), (24, 24));
-        assert_eq!(slot_side(plain), 256.0);
+        assert_eq!((slot_width(plain), slot_height(plain)), (64.0, 64.0));
     }
 }
 
@@ -765,7 +931,7 @@ mod tests {
     const HAT: &str = r#"{"format":1, "texture":[64,32], "parts":[
         {"id":"cap", "attach":"head", "armor":{"slot":"head","mode":"hide"},
          "cubes":[{"origin":[-4,-9,-4], "size":[8,1,8], "uv":[0,0], "inflate":0.25}],
-         "anim":[{"type":"spin","axis":"y","speed":540}, {"type":"blink"}],
+         "anim":[{"type":"spin","axis":"y","speed":540}],
          "children":[{"id":"bobble", "cubes":[{"origin":[-1,-11,-1], "size":[2,2,2], "uv":[32,0]}],
                       "anim":[{"type":"bob","speed":2,"amplitude":1}]}]},
         {"id":"wing", "attach":"body", "side":"left", "cubes":[{"origin":[0,0,2], "size":[1,8,6], "uv":[0,10]}]},
@@ -799,7 +965,7 @@ mod tests {
     }
 
     #[test]
-    fn animations_keep_their_speed_and_blinks_are_dropped() {
+    fn animations_keep_their_speed() {
         let model = Model::parse(HAT.as_bytes()).unwrap();
         let hat = &model.items("h", 0, &tex()).items[0].1;
         assert_eq!(hat.animations.len(), 2);
@@ -811,6 +977,30 @@ mod tests {
         assert_eq!((bob.motion, bob.period, bob.amplitude), (Motion::Bob, 10.0, 1.0));
     }
 
+
+    #[test]
+    fn blinking_parts_hide_for_part_of_each_cycle() {
+        // A visor that blinks once a second, shown for the first half; its light hangs on it and blinks with it.
+        let model = Model::parse(
+            br#"{"texture":[64,64],"parts":[{"attach":"head","cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[0,0]}],
+                 "children":[{"anim":[{"type":"blink","speed":1,"amplitude":0.5}],
+                              "cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[8,0]}],
+                              "children":[{"cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[16,0]}]}]}]}]}"#,
+        )
+        .unwrap();
+        let tex = Texture { width: 64, height: 64, rgba: vec![255; 64 * 64 * 4] };
+        let items = model.items("visor", 0, &tex).items;
+        assert_eq!(items.len(), 2);
+        let (plain, visor) = (&items[0].1, &items[1].1);
+        assert_eq!(plain.vertices, 24);
+        assert_eq!(visor.vertices, 48);
+        assert_eq!(visor.id, "native:visor#b1");
+        // Ticks: 20 a second. A quarter second in it shows, three quarters in it is hidden (CosmeticPose).
+        assert!(shown(plain, 15.0));
+        assert!(shown(visor, 5.0));
+        assert!(!shown(visor, 15.0));
+        assert!(shown(visor, 25.0));
+    }
     #[test]
     fn a_side_only_part_shows_on_its_side() {
         let model = Model::parse(HAT.as_bytes()).unwrap();
@@ -848,11 +1038,16 @@ mod tests {
 
     #[test]
     fn big_textures_shrink_to_a_native_slot() {
-        let t = fit_slot(512, 256, &vec![9; 512 * 256 * 4]);
-        assert_eq!((t.width, t.height), (256, 128));
-        assert_eq!(t.rgba.len(), 256 * 128 * 4);
-        let kept = fit_slot(128, 128, &vec![9; 128 * 128 * 4]);
-        assert_eq!((kept.width, kept.height), (128, 128));
+        let t = fit_slot(4096, 64, &vec![9; 4096 * 64 * 4]);
+        assert_eq!((t.width, t.height), (2048, 32));
+        assert_eq!(t.rgba.len(), 2048 * 32 * 4);
+        // Shrinking averages: a black and white checker turns grey, not speckled.
+        let checker: Vec<u8> = (0..4096 * 2).flat_map(|i| if (i % 4096 + i / 4096) % 2 == 0 { [0, 0, 0, 255] } else { [255, 255, 255, 255] }).collect();
+        let grey = fit_slot(4096, 2, &checker);
+        assert!(grey.rgba.chunks(4).all(|p| p[0] == 127 && p[3] == 255));
+        // Wings (2032×126) keep every texel.
+        let kept = fit_slot(2032, 126, &vec![9; 2032 * 126 * 4]);
+        assert_eq!((kept.width, kept.height), (2032, 126));
         let small = fit_slot(32, 32, &vec![1; 32 * 32 * 4]);
         assert_eq!((small.width, small.height), (32, 32));
     }
