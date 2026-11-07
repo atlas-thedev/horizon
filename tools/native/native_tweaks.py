@@ -202,4 +202,21 @@ patch(CLIENT / 'game.rs',
       '            Screen::Paused if self.pause_menu && horizon_client::native_ui::tweaks::get().custom_pause => {}\n'
       '            Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),\n')
 
+# Discord: Native's own application (as the Java mod's presence uses), its logo and its words, not Horizon's.
+DISCORD = CLIENT / 'discord_presence.rs'
+patch(DISCORD, 'pub const DISCORD_APP_ID: &str = "1563857609738690560";\n',
+      'pub const DISCORD_APP_ID: &str = "1465139441457827972";\n')
+patch(DISCORD, '    let mut assets = json!({"large_image": "horizon", "large_text": "Native"});\n',
+      '    let mut assets = json!({"large_image": "logo", "large_text": "Native Client"});\n')
+patch(DISCORD, '                Play::Singleplayer => ("Singleplayer", None),\n',
+      '                Play::Singleplayer => ("Playing Singleplayer", None),\n')
+patch(DISCORD, '                Play::Multiplayer => ("Multiplayer", None),\n',
+      '                Play::Multiplayer => ("Playing Multiplayer", None),\n')
+patch(DISCORD, '        assert_eq!(menus["assets"]["large_image"], "horizon");\n',
+      '        assert_eq!(menus["assets"]["large_image"], "logo");\n')
+patch(DISCORD, '        assert_eq!(single["details"], "Singleplayer");\n',
+      '        assert_eq!(single["details"], "Playing Singleplayer");\n')
+patch(DISCORD, '        assert_eq!(multi["details"], "Multiplayer");\n',
+      '        assert_eq!(multi["details"], "Playing Multiplayer");\n')
+
 print('native_tweaks: Native Client engine hooks applied')

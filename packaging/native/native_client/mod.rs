@@ -955,6 +955,7 @@ pub(super) fn native_title_frame(batch: &mut HudBatch, allows_multiplayer: bool,
             state.title_was = true;
             state.title_overlay = 0;
         }
+        let mut deferred = None;
         let info = title_view::TitleInfo { allows_multiplayer, game_dir: game_dir(), player: player.to_owned() };
         match state.title_overlay {
             1 => {
@@ -971,7 +972,7 @@ pub(super) fn native_title_frame(batch: &mut HudBatch, allows_multiplayer: bool,
                         state.title_overlay = 3;
                         state.editor.opened(state.ui.now);
                     }
-                    other => state.apply(&other),
+                    other => deferred = Some(other),
                 }
             }
             2 => {
@@ -1024,6 +1025,9 @@ pub(super) fn native_title_frame(batch: &mut HudBatch, allows_multiplayer: bool,
         state.ui.tooltips(c);
         state.ui.end();
         c.finish(batch);
+        if let Some(action) = deferred {
+            state.apply(&action);
+        }
     });
 }
 

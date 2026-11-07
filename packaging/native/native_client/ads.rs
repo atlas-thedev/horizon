@@ -28,7 +28,7 @@ impl Button {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Ad {
     pub id: String,
     pub title: String,
