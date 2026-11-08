@@ -222,7 +222,7 @@ patch(CLIENT / 'game.rs',
 
 # Discord: Native's own application (as the Java mod's presence uses), its logo and its words, not Horizon's.
 # The logo is the Native Discord icon (the Native Cape's look), hosted on the Native API: Discord loads image URLs directly.
-ICON = "https://api.playnative.net/v1/site/media/0b3a3c4adde07695da039ecd.png"
+ICON = "https://api.playnative.net/v1/site/media/e3c3ffebf47300fe60c82456.png"
 DISCORD = CLIENT / 'discord_presence.rs'
 patch(DISCORD, 'pub const DISCORD_APP_ID: &str = "1563857609738690560";\n',
       'pub const DISCORD_APP_ID: &str = "1465139441457827972";\n')
