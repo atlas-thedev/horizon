@@ -1144,6 +1144,18 @@ mod tests {
         assert!(shown(visor, 5.0));
         assert!(!shown(visor, 15.0));
         assert!(shown(visor, 25.0));
+        // The Locker preview hides it on the same cue, with its light.
+        let cubes_at = |time: f64| {
+            let mut n = 0;
+            model.walk(0, time, &mut |step| {
+                if let Walk::Cubes(c) = step {
+                    n += c.len();
+                }
+            });
+            n
+        };
+        assert_eq!(cubes_at(0.25), 3);
+        assert_eq!(cubes_at(0.75), 1);
     }
     #[test]
     fn a_side_only_part_shows_on_its_side() {
@@ -1243,6 +1255,11 @@ fn cycle(a: &Anim, time: f64) -> f64 {
 }
 
 fn walk_part(p: &NcmPart, time: f64, sink: &mut dyn FnMut(Walk)) {
+    // A blinking part (one frame of a frame-by-frame animation) shows for its share of each cycle, with what
+    // hangs on it, as `CosmeticPose.pose` hides it. Without this the preview drew every frame at once, still.
+    if p.anims.iter().any(|a| a.motion.is_none() && cycle(a, time) >= f64::from(a.amplitude)) {
+        return;
+    }
     sink(Walk::Push);
     let mut pos = p.pivot;
     let mut rot = p.rotation.map(f32::to_radians);
