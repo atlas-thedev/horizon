@@ -221,11 +221,13 @@ patch(CLIENT / 'game.rs',
       '            Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),\n')
 
 # Discord: Native's own application (as the Java mod's presence uses), its logo and its words, not Horizon's.
+# The logo is the Native Discord icon (the Native Cape's look), hosted on the Native API: Discord loads image URLs directly.
+ICON = "https://api.playnative.net/v1/site/media/0b3a3c4adde07695da039ecd.png"
 DISCORD = CLIENT / 'discord_presence.rs'
 patch(DISCORD, 'pub const DISCORD_APP_ID: &str = "1563857609738690560";\n',
       'pub const DISCORD_APP_ID: &str = "1465139441457827972";\n')
 # rebrand.py (run first by the release build, not by the checks) has made "Horizon" "Native" here.
-ASSETS = '    let mut assets = json!({"large_image": "logo", "large_text": "Native Client"});\n'
+ASSETS = '    let mut assets = json!({"large_image": "%s", "large_text": "Native Client"});\n' % ICON
 for brand in ('Native', 'Horizon'):
     old = '    let mut assets = json!({"large_image": "horizon", "large_text": "%s"});\n' % brand
     if old in DISCORD.read_text(encoding='utf-8'):
@@ -237,7 +239,7 @@ patch(DISCORD, '                Play::Singleplayer => ("Singleplayer", None),\n'
 patch(DISCORD, '                Play::Multiplayer => ("Multiplayer", None),\n',
       '                Play::Multiplayer => ("Playing Multiplayer", None),\n')
 patch(DISCORD, '        assert_eq!(menus["assets"]["large_image"], "horizon");\n',
-      '        assert_eq!(menus["assets"]["large_image"], "logo");\n')
+      '        assert_eq!(menus["assets"]["large_image"], "%s");\n' % ICON)
 patch(DISCORD, '        assert_eq!(single["details"], "Singleplayer");\n',
       '        assert_eq!(single["details"], "Playing Singleplayer");\n')
 patch(DISCORD, '        assert_eq!(multi["details"], "Multiplayer");\n',
