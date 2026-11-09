@@ -14,6 +14,10 @@ pub const VISUAL: &str = "Visual";
 pub const PERFORMANCE: &str = "Performance";
 pub const SETTINGS: &str = "Settings";
 
+pub fn label(value: &str) -> std::borrow::Cow<'_, str> {
+    if value.starts_with("native.") { horizon_client::lang::get(value).into() } else { value.into() }
+}
+
 pub const MARGIN: f32 = 6.0;
 pub const STYLE_CARD: usize = 0;
 pub const STYLE_TEXT: usize = 1;
