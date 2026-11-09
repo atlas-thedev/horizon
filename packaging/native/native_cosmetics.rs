@@ -759,6 +759,11 @@ impl Game<'_> {
         let mut out = Vec::new();
         let mut hooded = false;
         for cosmetic in &refs {
+            if cosmetic.slot.as_deref() == Some("hand")
+                && horizon_client::native_emotes::is_playing(m.id)
+            {
+                continue;
+            }
             if let Some(native) = get(&base, cosmetic) {
                 hooded |= shown && native.covers_head;
                 out.extend(

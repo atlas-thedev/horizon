@@ -173,6 +173,18 @@ pub fn play(page: usize, slot: usize) {
 fn identity_matches(id: u32, rendered: Option<&str>, authenticated: Option<&str>) -> bool {
     id == 0 || rendered.is_none_or(|u| u.chars().nth(12) == Some('3') || Some(u) == authenticated)
 }
+/// True only while a validated, loaded emote actually poses this rendered player.
+pub fn is_playing(id: u32) -> bool {
+    let s = lock();
+    let Some((name, uuid)) = s.names.get(&id) else {
+        return false;
+    };
+    s.playing.get(name).is_some_and(|p| {
+        p.end > Instant::now()
+            && s.clips.contains_key(&p.hash)
+            && identity_matches(id, uuid.as_deref(), p.uuid.as_deref())
+    })
+}
 pub fn apply(id: u32, rest: [Option<[f32; 9]>; 6], p: &mut crate::mobs::anim::Poses) {
     let s = lock();
     let Some((name, uuid)) = s.names.get(&id) else {
@@ -437,6 +449,48 @@ mod tests {
         assert!(identity_matches(4, Some(premium), Some(premium)));
         assert!(identity_matches(4, Some(offline), None));
         assert!(identity_matches(0, Some(premium), None));
+    }
+    #[test]
+    fn hands_are_hidden_only_for_loaded_active_emotes() {
+        let id = 700007;
+        let name = "emote_cosmetic_probe".to_string();
+        let hash = "cosmetic_probe_clip".to_string();
+        let now = Instant::now();
+        {
+            let mut s = lock();
+            s.names.insert(id, (name.clone(), None));
+            s.playing.insert(
+                name.clone(),
+                Playback {
+                    hash: hash.clone(),
+                    uuid: None,
+                    start: now,
+                    end: now + Duration::from_secs(10),
+                },
+            );
+        }
+        assert!(
+            !is_playing(id),
+            "an unloaded clip must keep hand items visible"
+        );
+        lock().clips.insert(
+            hash.clone(),
+            Clip {
+                duration: 1000.0,
+                looping: true,
+                frames: vec![(0.0, [[0.0; 6]; 6]), (1000.0, [[0.0; 6]; 6])],
+            },
+        );
+        assert!(is_playing(id));
+        lock().playing.get_mut(&name).unwrap().end = now - Duration::from_secs(1);
+        assert!(
+            !is_playing(id),
+            "hand items return as soon as playback expires"
+        );
+        let mut s = lock();
+        s.names.remove(&id);
+        s.playing.remove(&name);
+        s.clips.remove(&hash);
     }
     #[test]
     fn scope_normalizes_default_port() {
