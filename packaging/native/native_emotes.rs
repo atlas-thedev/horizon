@@ -17,6 +17,7 @@ const PARTS: [&str; 6] = [
 struct Clip {
     duration: f64,
     looping: bool,
+    connected: bool,
     frames: Vec<(f64, [[f32; 6]; 6])>,
 }
 impl Clip {
@@ -62,6 +63,7 @@ impl Clip {
         Some(Self {
             duration,
             looping: v["loop"].as_bool()?,
+            connected: v["connected"].as_bool().unwrap_or(false),
             frames,
         })
     }
@@ -75,9 +77,64 @@ impl Clip {
         let a = &self.frames[i];
         let b = &self.frames[(i + 1).min(self.frames.len() - 1)];
         let k = ((t - a.0) / (b.0 - a.0).max(1.0)) as f32;
-        std::array::from_fn(|bone| {
-            std::array::from_fn(|axis| a.1[bone][axis] + (b.1[bone][axis] - a.1[bone][axis]) * k)
-        })
+        let mut pose = std::array::from_fn(|bone| {
+            std::array::from_fn(|axis| {
+                let mut d = b.1[bone][axis] - a.1[bone][axis];
+                if self.connected && axis < 3 {
+                    d -= (d / std::f32::consts::TAU).round() * std::f32::consts::TAU;
+                }
+                a.1[bone][axis] + d * k
+            })
+        });
+        if self.connected {
+            connect_pose(&mut pose);
+        }
+        pose
+    }
+}
+fn connect_pose(p: &mut [[f32; 6]; 6]) {
+    fn rotate(r: [f32; 6], v: [f32; 3]) -> [f32; 3] {
+        let (sx, cx) = r[0].sin_cos();
+        let (sy, cy) = r[1].sin_cos();
+        let (sz, cz) = r[2].sin_cos();
+        let yy = cx * v[1] - sx * v[2];
+        let zz = sx * v[1] + cx * v[2];
+        let xx = cy * v[0] + sy * zz;
+        [cz * xx - sz * yy, sz * xx + cz * yy, -sy * v[0] + cy * zz]
+    }
+    let hip: [f32; 3] = std::array::from_fn(
+        |j| if j == 1 { 12.0 } else { 0.0 } + (p[4][j + 3] + p[5][j + 3]) * 0.5,
+    );
+    let bottom = rotate(p[1], [0.0, 12.0, 0.0]);
+    let neck: [f32; 3] = std::array::from_fn(|j| hip[j] - bottom[j]);
+    p[0][3..].copy_from_slice(&neck);
+    p[1][3..].copy_from_slice(&neck);
+    for b in 2..4 {
+        let anchor = [if b == 2 { -5.0 } else { 5.0 }, 2.0, 0.0];
+        let r = rotate(p[1], anchor);
+        for j in 0..3 {
+            p[b][j + 3] = neck[j] + r[j] - anchor[j];
+        }
+    }
+    let mut side: [f32; 3] =
+        std::array::from_fn(|j| if j == 0 { -3.8 } else { 0.0 } + p[4][j + 3] - p[5][j + 3]);
+    let mut length = side.iter().map(|v| v * v).sum::<f32>().sqrt();
+    if length < 0.00001 {
+        side = [-3.8, 0.0, 0.0];
+        length = 3.8;
+    }
+    for b in 4..6 {
+        for j in 0..3 {
+            let anchor = if j == 0 {
+                if b == 4 { -1.9 } else { 1.9 }
+            } else if j == 1 {
+                12.0
+            } else {
+                0.0
+            };
+            p[b][j + 3] =
+                hip[j] + if b == 4 { 1.0 } else { -1.0 } * side[j] * 1.9 / length - anchor;
+        }
     }
 }
 #[derive(Clone)]
@@ -478,6 +535,7 @@ mod tests {
             Clip {
                 duration: 1000.0,
                 looping: true,
+                connected: true,
                 frames: vec![(0.0, [[0.0; 6]; 6]), (1000.0, [[0.0; 6]; 6])],
             },
         );
@@ -491,6 +549,17 @@ mod tests {
         s.names.remove(&id);
         s.playing.remove(&name);
         s.clips.remove(&hash);
+    }
+    #[test]
+    fn connected_rig_keeps_neck_and_shoulders_attached() {
+        let mut pose = [[0.0; 6]; 6];
+        pose[1][0] = std::f32::consts::FRAC_PI_2;
+        connect_pose(&mut pose);
+        assert!((pose[1][4] - 12.0).abs() < 0.0001);
+        assert!((pose[1][5] + 12.0).abs() < 0.0001);
+        assert_eq!(&pose[0][3..], &pose[1][3..]);
+        assert!((pose[2][4] - 10.0).abs() < 0.0001);
+        assert!((pose[2][5] + 10.0).abs() < 0.0001);
     }
     #[test]
     fn scope_normalizes_default_port() {
