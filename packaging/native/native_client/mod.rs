@@ -10,6 +10,7 @@
 
 mod discord_module;
 mod emote_wheel;
+mod emotes_module;
 mod extra_modules;
 mod gameplay_modules;
 mod ads;
@@ -489,12 +490,32 @@ impl Game<'_> {
         if let WindowEvent::KeyboardInput { event:key, .. }=event
             && let PhysicalKey::Code(code)=key.physical_key {
             let glfw=keys::glfw(code);
+            let wheel_key = with_state(|s| emotes_module::wheel_key(&s.modules));
+            let m = self.modifiers;
+            let modifiers = if m.shift_key() { 1 } else { 0 } | if m.control_key() { 2 } else { 0 }
+                | if m.alt_key() { 4 } else { 0 } | if m.super_key() { 8 } else { 0 };
+            let allowed = self.focused && self.screen == Screen::Playing && self.title.is_none() && self.native_mod_screen().is_none();
             if with_state(|s|s.emote_wheel.open) {
-                let consumed=with_state(|s|s.emote_wheel.key(glfw==Some(s.cfg.emote_key),glfw==Some(256),key.state==ElementState::Pressed,key.repeat));
+                let consumed=with_state(|s|s.emote_wheel.key(glfw==Some(wheel_key),glfw==Some(256),key.state==ElementState::Pressed,key.repeat));
                 if consumed {if !with_state(|s|s.emote_wheel.open){self.native_mod_screen_close(MOD_ID);}return true;}
-            } else if glfw==Some(with_state(|s|s.cfg.emote_key)) && key.state==ElementState::Pressed && !key.repeat
-                && self.screen==Screen::Playing && self.title.is_none() && self.native_mod_screen().is_none() && self.native_mod_screen_open(MOD_ID) {
-                with_state(|s|{s.emote_wheel.open=true;s.emote_wheel.selected=None;s.events.clear();s.was_open=false;});return true;
+            } else if let Some(glfw) = glfw
+                && let Some(input) = with_state(|s| emotes_module::input(&s.modules, &s.cfg, glfw, modifiers, key.state == ElementState::Pressed, key.repeat, allowed)) {
+                match input {
+                    emotes_module::Input::Wheel => {
+                        if self.native_mod_screen_open(MOD_ID) {
+                            with_state(|s|{s.emote_wheel.open=true;s.emote_wheel.selected=None;s.events.clear();s.was_open=false;});
+                            return true;
+                        }
+                    }
+                    emotes_module::Input::Slot { index, play } => {
+                        if play {
+                            let pages = horizon_client::native_emotes::snapshot()["usablePages"].as_u64().unwrap_or(1).max(1) as usize;
+                            let page = with_state(|s| s.emote_wheel.page.min(pages - 1));
+                            horizon_client::native_emotes::play(page, index);
+                        }
+                        return true;
+                    }
+                }
             }
         }
         if self.native_mod_screen() == Some(MOD_ID) {

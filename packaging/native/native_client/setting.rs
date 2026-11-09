@@ -40,6 +40,7 @@ pub struct Setting {
     pub kind: Kind,
     /// Kept at its default and not offered in the menu (the module still reads it).
     pub fixed: bool,
+    binding_default: (i32, i32),
 }
 
 impl Setting {
@@ -76,8 +77,13 @@ impl Setting {
     pub fn binding() -> Self {
         Self::new("toggleKey", "Toggle keybind", Kind::Binding { key: -1, modifiers: 0 })
     }
+    pub fn chord(id: &'static str, label: &'static str, key: i32, modifiers: i32) -> Self {
+        let mut s = Self::new(id, label, Kind::Binding { key, modifiers });
+        s.binding_default = (key, modifiers);
+        s
+    }
     fn new(id: &'static str, label: &'static str, kind: Kind) -> Self {
-        Setting { id, label, kind, fixed: false }
+        Setting { id, label, kind, fixed: false, binding_default: (-1, 0) }
     }
     /// Not offered in the menu.
     pub fn fixed(mut self) -> Self {
@@ -194,7 +200,7 @@ impl Setting {
             Kind::Key { value, def } => *value = *def,
             Kind::Pixels { grid, def, .. } => *grid = def.clone(),
             Kind::Device { value, .. } => value.clear(),
-            Kind::Binding { key, modifiers } => (*key, *modifiers) = (-1, 0),
+            Kind::Binding { key, modifiers } => (*key, *modifiers) = self.binding_default,
         }
     }
 
@@ -209,7 +215,7 @@ impl Setting {
             Kind::Key { value, def } => value == def,
             Kind::Pixels { grid, def, .. } => grid == def,
             Kind::Device { value, .. } => value.is_empty(),
-            Kind::Binding { key, .. } => *key == -1,
+            Kind::Binding { key, modifiers } => (*key, *modifiers) == self.binding_default,
         }
     }
 

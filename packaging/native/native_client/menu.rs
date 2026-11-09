@@ -3,7 +3,7 @@
 //! cosmetics locker and the UI settings. Same glass look as the launcher.
 #![allow(dead_code)]
 
-use super::module::{GameView, Module};
+use super::module::{GameView, Module, label};
 use super::modules::Modules;
 use super::locker::Locker;
 use super::screenshots::Screenshots;
@@ -89,7 +89,6 @@ pub struct Menu {
     s_scale: Setting,
     s_menu: Setting,
     s_chat: Setting,
-    s_emote: Setting,
     s_play: Setting,
     s_next: Setting,
     s_prev: Setting,
@@ -144,7 +143,6 @@ impl Menu {
             s_activity: Setting::bool("activity", "Show friends what I'm playing", true),
             s_scale: Setting::num("scale", "UI size", 1.0, 0.75, 1.5, 0.05, "x"),
             s_menu: Setting::key("menukey", "Menu key", 344),
-            s_emote: Setting::key("emotekey", "native.emotes.key", 66),
             s_chat: Setting::key("chatkey", "Chat key", 89),
             s_play: Setting::key("musicplay", "Music: play / pause", -1),
             s_next: Setting::key("musicnext", "Music: next song", -1),
@@ -300,7 +298,7 @@ impl Menu {
             TAB_MODS => {
                 if let Some(id) = self.selected.clone() {
                     c.push_alpha(pe);
-                    let a = self.mod_page(ui, c, mods, &id, mx, py, mw, ph);
+                    let a = self.mod_page(ui, c, mods, cfg, &id, mx, py, mw, ph);
                     if a != Action::None {
                         action = a;
                     }
@@ -422,7 +420,7 @@ impl Menu {
         if q.is_empty() {
             return true;
         }
-        let hay = format!("{} {} {}", m.state.id, m.state.name, m.state.description).to_lowercase();
+        let hay = format!("{} {} {}", m.state.id, label(m.state.name), label(m.state.description)).to_lowercase();
         q.split(' ').all(|word| hay.contains(word))
     }
 
@@ -526,7 +524,7 @@ impl Menu {
             iy - hv * 2.0,
             theme::mix(theme::mix(0xFF52525B, theme::TEXT_SECONDARY, hv), theme::TEXT_STRONG, on),
         );
-        let name = c.ellipsize(font::SEMIBOLD, 12.5, m.state.name, w - 20.0);
+        let name = c.ellipsize(font::SEMIBOLD, 12.5, &label(m.state.name), w - 20.0);
         let nw = c.text_width(font::SEMIBOLD, 12.5, &name);
         c.text(font::SEMIBOLD, 12.5, &name, x + (w - nw) / 2.0, y + h - 44.0 - 26.0, theme::mix(theme::TEXT, theme::TEXT_STRONG, on));
         if heart(ui, c, &format!("{id}:fav"), &mut m.state.favorite, x + w - 32.0, y + 8.0, over) {
@@ -568,9 +566,9 @@ impl Menu {
         c.round(x + 12.0, y + 12.0, 36.0, 36.0, 10.0, theme::mix(theme::SUBTLE_HOVER, 0xFFF4F4F5, on));
         c.icon(m.state.icon, 17.0, x + 30.0, y + 30.0, theme::mix(theme::TEXT, theme::SOLID_FG, on));
         let tw = w - 160.0;
-        let name = c.ellipsize(font::SEMIBOLD, 13.0, m.state.name, tw);
+        let name = c.ellipsize(font::SEMIBOLD, 13.0, &label(m.state.name), tw);
         c.text(font::SEMIBOLD, 13.0, &name, x + 60.0, y + 12.0, theme::TEXT_STRONG);
-        let desc = c.ellipsize(font::REGULAR, 11.0, m.state.description, tw);
+        let desc = c.ellipsize(font::REGULAR, 11.0, &label(m.state.description), tw);
         c.text(font::REGULAR, 11.0, &desc, x + 60.0, y + 31.0, theme::TEXT_MUTED);
         let mut fav_changed = heart(ui, c, &format!("{id}:fav"), &mut m.state.favorite, x + w - 84.0, y + 18.0, true);
         let enabled = m.state.enabled;
@@ -631,7 +629,7 @@ impl Menu {
 
     /// A mod's settings on a dedicated full page: header with back button, enable switch, live preview, settings, and appearance.
     #[allow(clippy::too_many_arguments)]
-    fn mod_page(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, id: &str, x: f32, y: f32, w: f32, h: f32) -> Action {
+    fn mod_page(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &UiConfig, id: &str, x: f32, y: f32, w: f32, h: f32) -> Action {
         let Some(mi) = mods.all.iter().position(|m| m.state.id == id) else {
             self.selected = None;
             return Action::None;
@@ -652,16 +650,16 @@ impl Menu {
 
         let (name, category, icon, enabled, is_hud) = {
             let m = &mods.all[mi];
-            (m.state.name, m.state.category, m.state.icon, m.state.enabled, m.is_hud())
+            (label(m.state.name), m.state.category, m.state.icon, m.state.enabled, m.is_hud())
         };
         let ic = 36.0;
         let (ix, iy) = (div_x + 16.0, y + (hh - ic) / 2.0);
         c.round(ix, iy, ic, ic, 10.0, if enabled { 0xFFF4F4F5 } else { theme::SUBTLE_HOVER });
         c.icon(icon, 18.0, ix + ic / 2.0, iy + ic / 2.0, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });
         let tx = ix + ic + 12.0;
-        c.text(font::SEMIBOLD, 15.0, name, tx, y + 15.0, theme::TEXT_STRONG);
+        c.text(font::SEMIBOLD, 15.0, &name, tx, y + 15.0, theme::TEXT_STRONG);
         c.text(font::MEDIUM, 10.0, &category.to_uppercase(), tx, y + 34.0, theme::TEXT_MUTED);
-        let heart_x = tx + c.text_width(font::SEMIBOLD, 15.0, name) + 12.0;
+        let heart_x = tx + c.text_width(font::SEMIBOLD, 15.0, &name) + 12.0;
         if heart(ui, c, "menu:page:fav", &mut mods.all[mi].state.favorite, heart_x, y + 18.0, true) {
             mods.changed();
         }
@@ -699,15 +697,15 @@ impl Menu {
         let gap = 16.0;
         if !mods.all[mi].has_preview() {
             // Nothing to preview: the options fill the page edge to edge, lined up with the header.
-            self.settings_panel(ui, c, mods, mi, bx, by, bw, bh);
+            self.settings_panel(ui, c, mods, cfg, mi, bx, by, bw, bh);
         } else if bw >= 640.0 {
             let lw = (bw * 0.56).clamp(340.0, 600.0).min(bw - 200.0).max(340.0);
-            self.settings_panel(ui, c, mods, mi, bx, by, lw, bh);
+            self.settings_panel(ui, c, mods, cfg, mi, bx, by, lw, bh);
             self.stage(ui, c, mods, mi, bx + lw + gap, by, bw - lw - gap, bh);
         } else {
             let stage_h = (bh * 0.38).clamp(120.0, 200.0);
             self.stage(ui, c, mods, mi, bx, by, bw, stage_h);
-            self.settings_panel(ui, c, mods, mi, bx, by + stage_h + gap, bw, bh - stage_h - gap);
+            self.settings_panel(ui, c, mods, cfg, mi, bx, by + stage_h + gap, bw, bh - stage_h - gap);
         }
         action
     }
@@ -762,35 +760,35 @@ impl Menu {
 
     /// What the module does, then its options in foldable sections (like a game client's module screen).
     #[allow(clippy::too_many_arguments)]
-    fn settings_panel(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, mi: usize, x: f32, y: f32, w: f32, h: f32) {
+    fn settings_panel(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &UiConfig, mi: usize, x: f32, y: f32, w: f32, h: f32) {
         c.round(x, y, w, h, 12.0, CARD);
         c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE);
         let pad = 18.0;
-        let desc = mods.all[mi].state.description;
+        let desc = label(mods.all[mi].state.description);
         let text_w = w - pad * 2.0 - 26.0;
-        let desc_h = wrap_height(c, font::REGULAR, 11.5, desc, text_w, 16.0, 2);
+        let desc_h = wrap_height(c, font::REGULAR, 11.5, &desc, text_w, 16.0, 2);
         let info_h = 34.0f32.max(desc_h + 20.0);
         let iy = y + info_h / 2.0;
         c.circle(x + pad + 8.0, iy, 8.0, theme::SUBTLE_HOVER);
         let iw = c.text_width(font::BOLD, 10.0, "i");
         let ih = c.line_height(font::BOLD, 10.0);
         c.text(font::BOLD, 10.0, "i", x + pad + 8.0 - iw / 2.0, iy - ih / 2.0, theme::TEXT_SECONDARY);
-        wrap(c, font::REGULAR, 11.5, desc, x + pad + 26.0, y + (info_h - desc_h) / 2.0, text_w, 16.0, theme::TEXT_SECONDARY, 2);
+        wrap(c, font::REGULAR, 11.5, &desc, x + pad + 26.0, y + (info_h - desc_h) / 2.0, text_w, 16.0, theme::TEXT_SECONDARY, 2);
         c.fill(x + 1.0, y + info_h, w - 2.0, 1.0, theme::HAIRLINE);
 
         let top = y + info_h + 1.0;
         let ph = h - info_h - 2.0;
         let off = self.detail.begin(ui, c, x + 1.0, top, w - 2.0, ph);
         let mut cy = top - off + 6.0;
-        cy = self.section(ui, c, mods, mi, "Keybind", Part::Keybind, x, cy, w);
-        cy = self.section(ui, c, mods, mi, "Options", Part::Options, x, cy, w);
-        cy = self.section(ui, c, mods, mi, "Appearance", Part::Appearance, x, cy, w);
+        cy = self.section(ui, c, mods, cfg, mi, "Keybind", Part::Keybind, x, cy, w);
+        cy = self.section(ui, c, mods, cfg, mi, "Options", Part::Options, x, cy, w);
+        cy = self.section(ui, c, mods, cfg, mi, "Appearance", Part::Appearance, x, cy, w);
         self.detail.end(ui, c, cy - (top - off) + 8.0);
     }
 
     /// One foldable group: a header row (chevron, title, option count) and, when open, the option rows. Returns the y below it.
     #[allow(clippy::too_many_arguments)]
-    fn section(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, mi: usize, title: &str, part: Part, x: f32, y: f32, w: f32) -> f32 {
+    fn section(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &UiConfig, mi: usize, title: &str, part: Part, x: f32, y: f32, w: f32) -> f32 {
         let rows: Vec<usize> = match part {
             Part::Keybind => vec![0],
             Part::Options => mods.all[mi].shown_settings(),
@@ -838,7 +836,12 @@ impl Menu {
             if n > 0 {
                 c.fill(rx, y, rw, 1.0, theme::HAIRLINE);
             }
-            let warning = if part == Part::Keybind { conflict(mods, mi) } else { None };
+            let current = match part {
+                Part::Keybind => Some(&mods.all[mi].state.toggle_key),
+                Part::Options => mods.all[mi].state.settings.get(*si),
+                Part::Appearance => None,
+            };
+            let warning = current.and_then(|s| super::emotes_module::conflict(mods, s, cfg));
             let m = &mut mods.all[mi];
             let s = match part {
                 Part::Keybind => &mut m.state.toggle_key,
@@ -874,7 +877,6 @@ impl Menu {
         }
         self.s_menu.set_key(cfg.menu_key);
         self.s_chat.set_key(cfg.relay_key);
-        self.s_emote.set_key(cfg.emote_key);
         self.s_play.set_key(cfg.music_play_key);
         self.s_next.set_key(cfg.music_next_key);
         self.s_prev.set_key(cfg.music_prev_key);
@@ -944,7 +946,6 @@ impl Menu {
             cfg.menu_key = self.s_menu.as_key();
             save = true;
         }
-        if self.s_emote.as_key() != cfg.emote_key && self.s_emote.as_key() != -1 {cfg.emote_key=self.s_emote.as_key();save=true;}
         if self.s_chat.as_key() != cfg.relay_key && self.s_chat.as_key() != -1 {
             cfg.relay_key = self.s_chat.as_key();
             save = true;
@@ -970,7 +971,7 @@ impl Menu {
         let head = 62.0;
         let rows: Vec<&mut Setting> = match which {
             Group::General => vec![&mut self.s_title, &mut self.s_notify, &mut self.s_activity, &mut self.s_scale],
-            Group::Keys => vec![&mut self.s_menu, &mut self.s_chat, &mut self.s_emote, &mut self.s_play, &mut self.s_next, &mut self.s_prev],
+            Group::Keys => vec![&mut self.s_menu, &mut self.s_chat, &mut self.s_play, &mut self.s_next, &mut self.s_prev],
         };
         let rh: f32 = rows.iter().map(|s| Widgets::row_height(s)).sum();
         let h = head + rh + 8.0;
@@ -1139,6 +1140,9 @@ pub fn conflict(mods: &Modules, mi: usize) -> Option<String> {
         }
         // Hold-to-use controls poll the key state independently of modifiers, even while disabled.
         for s in m.state.all_settings() {
+            if !std::ptr::eq(s, b) && matches!(s.kind, Kind::Binding { key: k, modifiers: md } if k == key && md == modifiers) {
+                return Some(format!("Conflict: {} / {}", label(m.state.name), label(s.label)));
+            }
             if matches!(s.kind, Kind::Key { value, .. } if value == key) {
                 return Some(format!("Reserved: {} / {}", m.state.name, s.label));
             }
