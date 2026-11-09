@@ -67,7 +67,7 @@ jobs:
               if not m:
                   raise SystemExit(f'Unexpected Nightly title: {name!r}')
               date, short = m.groups()
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write(f'date={date}\nshort={short}\ntag=native-{date}-{short}\nname={name}\n')
           PY
       - name: Skip when already built
