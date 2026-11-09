@@ -490,12 +490,8 @@ impl Game<'_> {
             && let PhysicalKey::Code(code)=key.physical_key {
             let glfw=keys::glfw(code);
             if with_state(|s|s.emote_wheel.open) {
-                if glfw==Some(256) && key.state==ElementState::Pressed {
-                    with_state(|s| {s.emote_wheel.open=false;s.emote_wheel.selected=None;}); self.native_mod_screen_close(MOD_ID);return true;
-                }
-                if glfw==Some(with_state(|s|s.cfg.emote_key)) && key.state==ElementState::Released {
-                    with_state(|s|s.emote_wheel.release());self.native_mod_screen_close(MOD_ID);return true;
-                }
+                let consumed=with_state(|s|s.emote_wheel.key(glfw==Some(s.cfg.emote_key),glfw==Some(256),key.state==ElementState::Pressed,key.repeat));
+                if consumed {if !with_state(|s|s.emote_wheel.open){self.native_mod_screen_close(MOD_ID);}return true;}
             } else if glfw==Some(with_state(|s|s.cfg.emote_key)) && key.state==ElementState::Pressed && !key.repeat
                 && self.screen==Screen::Playing && self.title.is_none() && self.native_mod_screen().is_none() && self.native_mod_screen_open(MOD_ID) {
                 with_state(|s|{s.emote_wheel.open=true;s.emote_wheel.selected=None;s.events.clear();s.was_open=false;});return true;

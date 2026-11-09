@@ -218,14 +218,20 @@ pub fn stop() {
 pub fn snapshot() -> Value {
     lock().me.clone()
 }
-pub fn play(page: usize, slot: usize) {
+pub fn play(page: usize, slot: usize) -> bool {
     let mut s = lock();
-    if s.scope.is_empty() || s.commands.len() > 8 {
-        return;
+    if s.scope.is_empty()
+        || s.commands.len() > 8
+        || slot >= 8
+        || page >= s.me["usablePages"].as_u64().unwrap_or(1) as usize
+        || s.me["pages"][page][slot].as_str().is_none()
+    {
+        return false;
     }
     let scope = s.scope.clone();
     s.commands
         .push_back(serde_json::json!({"page":page,"slot":slot,"scope":scope}));
+    true
 }
 fn identity_matches(id: u32, rendered: Option<&str>, authenticated: Option<&str>) -> bool {
     id == 0 || rendered.is_none_or(|u| u.chars().nth(12) == Some('3') || Some(u) == authenticated)
