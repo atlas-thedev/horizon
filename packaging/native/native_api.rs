@@ -287,3 +287,8 @@ fn native_run() {
         let _ = native_push(found, Status::Off);
     }
 }
+
+/// Trusted launcher ticket, refreshed on disk by Native.
+pub fn native_emote_auth() -> Option<(String,String)> {
+    read_native_session().map(|s|(s.api,s.ticket))
+}

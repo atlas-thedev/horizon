@@ -86,7 +86,8 @@ patch(MENU,
       '                    self.settings.file.bool("hideSplashTexts"),\n'
       '                    self.settings.file.bool("hideServerAddress"),\n'
       '                );\n'
-      '            }\n')
+      '            }\n'
+      '            super::native_client::native_title_restore_frame(batch, title);\n')
 MENU_FOCUS = "        // The real mouse takes the pointer back from the keyboard's focus.\n"
 patch(MENU, MENU_FOCUS,
       '        if let Some(act) = super::native_client::native_title_take()\n'
@@ -95,6 +96,8 @@ patch(MENU, MENU_FOCUS,
       '        {\n'
       '            self.menu_action(event_loop, action);\n'
       '        }\n'
+      '        if !self.menu.options_open && self.menu.win.is_none() && self.menu.pending.is_none()\n'
+      '            && self.menu.title.as_ref().is_some_and(|title| super::native_client::native_title_restore_event(title, &event)) { return Ok(()); }\n'
       '        if !self.menu.options_open\n'
       '            && self.menu.win.is_none()\n'
       '            && self.menu.pending.is_none()\n'
@@ -132,6 +135,7 @@ patch(GAME,
       '                        self.settings.file.bool("hideServerAddress"),\n'
       '                    );\n'
       '                }\n'
+      '                native_client::native_title_restore_frame(&mut batch, title);\n'
       '            }\n')
 patch(GAME,
       '        if self.native_window_event(&event) {\n'
@@ -143,6 +147,7 @@ patch(GAME,
       '        {\n'
       '            let _ = self.title_action(event_loop, action);\n'
       '        }\n'
+      '        if self.screen != Screen::Options && self.title.as_ref().is_some_and(|title| native_client::native_title_restore_event(title, &event)) { return; }\n'
       '        // Options opened from the title is a screen over it: its input goes to the options, as vanilla.\n'
       '        if self.screen != Screen::Options\n'
       '            && self.title.as_ref().is_some_and(native_client::native_title_active)\n'
@@ -179,3 +184,10 @@ if 'include!("native_exe.rs");' not in build_rs.read_text(encoding='utf-8'):
         build.write('\ninclude!("native_exe.rs");\n')
 
 print('native_client: Native modules applied')
+
+# New Native-only labels remain translation keys.
+import json
+lang = root / 'crates/horizon-client/assets/horizon/lang/en_us.json'
+labels = json.loads(lang.read_text(encoding='utf-8'))
+labels['native.ui.restore'] = 'Use Native UI'
+lang.write_text(json.dumps(labels, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

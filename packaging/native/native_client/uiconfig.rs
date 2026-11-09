@@ -19,6 +19,7 @@ pub struct UiConfig {
     pub share_activity: bool,
     /// GLFW key that opens the chat in game (default Y).
     pub relay_key: i32,
+    pub emote_key: i32,
     pub scale: f32,
     /// GLFW key that opens the Native menu in game (default Right Shift).
     pub menu_key: i32,
@@ -46,6 +47,7 @@ impl Default for UiConfig {
             discord_hidden_text: None,
             share_activity: true,
             relay_key: 89,
+            emote_key: 66,
             scale: 1.0,
             menu_key: 344,
             music_volume: 0.7,

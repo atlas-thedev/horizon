@@ -479,7 +479,8 @@ impl Widgets {
     pub fn row(&mut self, ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, s: &mut Setting, warning: Option<&str>) -> bool {
         let h = ROW;
         let fs = 12.5;
-        let label_w = c.text_width(font::MEDIUM, fs, s.label);
+        let display_label = if s.label.starts_with("native.") { horizon_client::lang::get(s.label) } else { s.label.to_owned() };
+        let label_w = c.text_width(font::MEDIUM, fs, &display_label);
         let mut changed = false;
         let mut control_x = x + w; // Left edge of the control, so the reset button can sit just before it.
         let label_max = match &s.kind {
@@ -494,9 +495,9 @@ impl Widgets {
             Kind::Pixels { .. } => w,
         };
         let label = if label_w > label_max {
-            c.ellipsize(font::MEDIUM, fs, s.label, label_max.max(40.0))
+            c.ellipsize(font::MEDIUM, fs, &display_label, label_max.max(40.0))
         } else {
-            s.label.to_owned()
+            display_label
         };
         let label_w = c.text_width(font::MEDIUM, fs, &label);
         let lh = c.line_height(font::MEDIUM, fs);

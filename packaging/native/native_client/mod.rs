@@ -9,6 +9,7 @@
 //! thread.
 
 mod discord_module;
+mod emote_wheel;
 mod extra_modules;
 mod gameplay_modules;
 mod ads;
@@ -108,6 +109,7 @@ struct State {
     pause: pause_view::PauseView,
     pause_was: bool,
     relay_open: bool,
+    emote_wheel: emote_wheel::Wheel,
     /// The Native title: its view, what is open over it (0 nothing, 1 the menu, 2 Relay, 3 the HUD editor), whether
     /// it was drawn last frame and what it asked of the game.
     title: title_view::TitleView,
@@ -160,6 +162,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             pause: pause_view::PauseView,
             pause_was: false,
             relay_open: false,
+            emote_wheel: emote_wheel::Wheel::default(),
             title: title_view::TitleView::default(),
             title_overlay: 0,
             title_was: false,
@@ -324,6 +327,11 @@ impl Game<'_> {
         };
         let (action, copied, pause_action) = with_state(|state| {
             let g = self.native_view(state);
+            let local = self.options.player_name();
+            let mut players: Vec<_> = self.remote_player_names().into_iter().map(|(id,n)| (id,n,self.remote_player_uuid(id).map(|u|format!("{u:032x}")))).collect();
+            players.push((0,local.clone(),self.remote.as_ref().map(|r|format!("{:032x}",r.profile()))));
+            let scope = if !g.in_world { String::new() } else if let Some(server)=self.server_address() { horizon_client::native_emotes::scope(server) } else { horizon_client::native_emotes::scope(&format!("local:{local}")) };
+            horizon_client::native_emotes::tick(scope,players,&local,[g.x,g.y,g.z],g.down[4]||g.down[7]||g.down[8]);
             let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
             let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
             for m in &mut state.modules.all {
@@ -440,7 +448,9 @@ impl Game<'_> {
                     }
                     state.was_open = true;
                 }
-                if state.relay_open {
+                if state.emote_wheel.open {
+                    if state.emote_wheel.draw(&mut state.ui, c) { action = menu::Action::Close; }
+                } else if state.relay_open {
                     if state.relay.draw(&mut state.ui, c, &mut state.cfg, g.in_world) == relay_view::RelayAction::Close {
                         action = menu::Action::Close;
                     }
@@ -476,6 +486,21 @@ impl Game<'_> {
     /// UI took it (the game then never sees it).
     pub(super) fn native_window_event(&mut self, event: &WindowEvent) -> bool {
         self.native_track_input(event);
+        if let WindowEvent::KeyboardInput { event:key, .. }=event
+            && let PhysicalKey::Code(code)=key.physical_key {
+            let glfw=keys::glfw(code);
+            if with_state(|s|s.emote_wheel.open) {
+                if glfw==Some(256) && key.state==ElementState::Pressed {
+                    with_state(|s| {s.emote_wheel.open=false;s.emote_wheel.selected=None;}); self.native_mod_screen_close(MOD_ID);return true;
+                }
+                if glfw==Some(with_state(|s|s.cfg.emote_key)) && key.state==ElementState::Released {
+                    with_state(|s|s.emote_wheel.release());self.native_mod_screen_close(MOD_ID);return true;
+                }
+            } else if glfw==Some(with_state(|s|s.cfg.emote_key)) && key.state==ElementState::Pressed && !key.repeat
+                && self.screen==Screen::Playing && self.title.is_none() && self.native_mod_screen().is_none() && self.native_mod_screen_open(MOD_ID) {
+                with_state(|s|{s.emote_wheel.open=true;s.emote_wheel.selected=None;s.events.clear();s.was_open=false;});return true;
+            }
+        }
         if self.native_mod_screen() == Some(MOD_ID) {
             return self.native_menu_event(event);
         }
@@ -1472,5 +1497,42 @@ fn server_click(title: &mut horizon_client::title::Title, id: u8) -> Option<hori
         }
         Outcome::Connect { address, lan } => Some(Action::Connect { address, lan }),
         Outcome::None => None,
+    }
+}
+
+thread_local! {
+    static RESTORE_NATIVE: std::cell::Cell<([f64;4], bool)> = const { std::cell::Cell::new(([0.0;4],false)) };
+}
+
+/// A visible way back, drawn over the classic title in both startup and return-to-title paths.
+pub(super) fn native_title_restore_frame(batch: &mut HudBatch, title: &horizon_client::title::Title) {
+    let show = matches!(title.mode, horizon_client::title::Mode::Main) && with_state(|s| !s.cfg.custom_title);
+    if !show { RESTORE_NATIVE.with(|r| r.set(([0.0;4],false))); return; }
+    with_state(|s| {
+        let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
+        let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * s.cfg.scale;
+        let c = &mut s.canvas;
+        c.begin(fb[0],fb[1],scale);
+        let x=c.width()-152.0;
+        let hovered=RESTORE_NATIVE.with(|r| { let (_,hovered)=r.get();r.set(([f64::from(x*scale),12.0*f64::from(scale),140.0*f64::from(scale),32.0*f64::from(scale)],hovered));hovered });
+        c.round(x,12.0,140.0,32.0,6.0,if hovered {0xFF303036}else{0xE818181C});
+        c.outline(x,12.0,140.0,32.0,6.0,1.0,0xFF606068);
+        let label=horizon_client::lang::get("native.ui.restore");
+        let tw=c.text_width(native_ui::font::BOLD,12.0,&label);
+        c.text(native_ui::font::BOLD,12.0,&label,x+(140.0-tw)/2.0,21.0,0xFFFFFFFF);
+        c.finish_with(batch,&mut |_batch,_draw| {});
+    });
+}
+
+pub(super) fn native_title_restore_event(title: &horizon_client::title::Title,event: &WindowEvent) -> bool {
+    if !matches!(title.mode,horizon_client::title::Mode::Main) || with_state(|s| s.cfg.custom_title) { return false; }
+    match event {
+        WindowEvent::CursorMoved{position,..} => {RESTORE_NATIVE.with(|r| {let (rect,_)=r.get();let [x,y,w,h]=rect;r.set((rect,w>0.0&&position.x>=x&&position.x<=x+w&&position.y>=y&&position.y<=y+h));});false}
+        WindowEvent::MouseInput{state:ElementState::Pressed,button:MouseButton::Left,..} if RESTORE_NATIVE.with(|r|r.get().1) => {
+            with_state(|s| {s.cfg.custom_title=true;s.cfg.save();s.events.clear();s.title_was=false;});
+            RESTORE_NATIVE.with(|r|r.set(([0.0;4],false)));true
+        }
+        WindowEvent::Focused(false) => {RESTORE_NATIVE.with(|r|r.set(([0.0;4],false)));false}
+        _=>false,
     }
 }

@@ -89,6 +89,7 @@ pub struct Menu {
     s_scale: Setting,
     s_menu: Setting,
     s_chat: Setting,
+    s_emote: Setting,
     s_play: Setting,
     s_next: Setting,
     s_prev: Setting,
@@ -143,6 +144,7 @@ impl Menu {
             s_activity: Setting::bool("activity", "Show friends what I'm playing", true),
             s_scale: Setting::num("scale", "UI size", 1.0, 0.75, 1.5, 0.05, "x"),
             s_menu: Setting::key("menukey", "Menu key", 344),
+            s_emote: Setting::key("emotekey", "native.emotes.key", 66),
             s_chat: Setting::key("chatkey", "Chat key", 89),
             s_play: Setting::key("musicplay", "Music: play / pause", -1),
             s_next: Setting::key("musicnext", "Music: next song", -1),
@@ -872,6 +874,7 @@ impl Menu {
         }
         self.s_menu.set_key(cfg.menu_key);
         self.s_chat.set_key(cfg.relay_key);
+        self.s_emote.set_key(cfg.emote_key);
         self.s_play.set_key(cfg.music_play_key);
         self.s_next.set_key(cfg.music_next_key);
         self.s_prev.set_key(cfg.music_prev_key);
@@ -941,6 +944,7 @@ impl Menu {
             cfg.menu_key = self.s_menu.as_key();
             save = true;
         }
+        if self.s_emote.as_key() != cfg.emote_key && self.s_emote.as_key() != -1 {cfg.emote_key=self.s_emote.as_key();save=true;}
         if self.s_chat.as_key() != cfg.relay_key && self.s_chat.as_key() != -1 {
             cfg.relay_key = self.s_chat.as_key();
             save = true;
@@ -966,7 +970,7 @@ impl Menu {
         let head = 62.0;
         let rows: Vec<&mut Setting> = match which {
             Group::General => vec![&mut self.s_title, &mut self.s_notify, &mut self.s_activity, &mut self.s_scale],
-            Group::Keys => vec![&mut self.s_menu, &mut self.s_chat, &mut self.s_play, &mut self.s_next, &mut self.s_prev],
+            Group::Keys => vec![&mut self.s_menu, &mut self.s_chat, &mut self.s_emote, &mut self.s_play, &mut self.s_next, &mut self.s_prev],
         };
         let rh: f32 = rows.iter().map(|s| Widgets::row_height(s)).sum();
         let h = head + rh + 8.0;
