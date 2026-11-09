@@ -335,3 +335,121 @@ mod tests {
         assert!(!batch.vertices.is_empty());
     }
 }
+
+/// The player's skin, reduced to a sensible size for the wheel.
+pub fn wheel_skin(name: &str) -> (Arc<Image>, bool) {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static URLS: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    static SMALL: OnceLock<Mutex<HashMap<u64, Arc<Image>>>> = OnceLock::new();
+    let (skin, _, directory_slim) = skin_of(name);
+    let local = wheel_local_look(name);
+    let slim = directory_slim.or_else(|| local.as_ref().map(|(_, slim)| *slim))
+        .or_else(|| net::account().and_then(|a| a.model).map(|m| m.eq_ignore_ascii_case("slim"))).unwrap_or(false);
+    let skin = skin.or_else(|| {
+        let reference = local.as_ref().map(|(hash, _)| hash.clone()).or_else(|| super::avatars::own(name))?;
+        let url = if let Some(uuid) = reference.strip_prefix("mj:") {
+            let mut map = URLS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+            if !map.contains_key(uuid) {
+                map.insert(uuid.to_string(), None);
+                let uuid = uuid.to_string();
+                let _ = std::thread::Builder::new().name("Native wheel skin".into()).spawn(move || {
+                    let result = super::avatars::mojang_skin_url(&uuid);
+                    URLS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).insert(uuid, result);
+                });
+            }
+            map.get(uuid).cloned().flatten()
+        } else if reference.len() == 64 && reference.bytes().all(|b| b.is_ascii_hexdigit()) {
+            Some(net::hash_url(&wardrobe::base(), &reference))
+        } else { None }?;
+        match net::image(&url, 2 * 1024 * 1024) { Pic::Ready(img) => Some(img), _ => None }
+    });
+    let Some(skin) = skin else { return (wheel_steve(), false) };
+    if skin.width <= 64 { return (skin, slim); }
+    let mut cache = SMALL.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(small) = cache.get(&skin.id) { return (small.clone(), slim); }
+    let height = if skin.height * 2 == skin.width { 32 } else { 64 };
+    let mut pixels = vec![0; 64 * height];
+    for y in 0..height { for x in 0..64 {
+        let sx = x * skin.width as usize / 64;
+        let sy = y * skin.height as usize / height;
+        pixels[y * 64 + x] = skin.argb[sy * skin.width as usize + sx];
+    } }
+    let small = Image::new(64, height as u32, pixels);
+    if cache.len() > 32 { cache.clear(); }
+    cache.insert(skin.id, small.clone());
+    (small, slim)
+}
+fn wheel_local_look(name: &str) -> Option<(String, bool)> {
+    static LOCAL: std::sync::OnceLock<Option<(String, String, bool)>> = std::sync::OnceLock::new();
+    let look = LOCAL.get_or_init(|| {
+        let game = std::env::var_os("NATIVE_GAME_DIR").map(std::path::PathBuf::from).or_else(|| std::env::current_dir().ok())?;
+        let root = [game.join(".native/launcher.json"), game.join(".noctra/launcher.json")]
+            .into_iter().find_map(|p| std::fs::metadata(&p).ok().filter(|m| m.len() < 16384)
+                .and_then(|_| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()))?;
+        let local = &root["local"];
+        let name = local["name"].as_str()?.to_owned(); let hash = local["skin"].as_str()?.to_owned();
+        if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) { return None; }
+        Some((name, hash, local["slim"].as_bool().unwrap_or(false)))
+    });
+    look.as_ref().filter(|(n,_,_)| n.eq_ignore_ascii_case(name)).map(|(_,h,s)| (h.clone(), *s))
+}
+fn wheel_steve() -> Arc<Image> {
+    use std::sync::OnceLock;
+    static STEVE: OnceLock<Arc<Image>> = OnceLock::new();
+    STEVE.get_or_init(|| {
+        let mut px = vec![0u32; 64 * 64];
+        let mut rect = |x: usize, y: usize, w: usize, h: usize, color: u32| {
+            for yy in y..y+h { for xx in x..x+w { px[yy*64+xx] = color; } }
+        };
+        rect(0,0,32,16,0xffa97753); rect(0,0,32,8,0xff4a3322);
+        rect(16,16,24,16,0xff2eaaa3); rect(40,16,16,16,0xffa97753);
+        rect(0,16,16,16,0xff303b80); rect(16,48,16,16,0xff303b80);
+        rect(32,48,16,16,0xffa97753);
+        rect(9,11,2,1,0xffffffff); rect(13,11,2,1,0xffffffff);
+        rect(10,11,1,1,0xff4b3a8c); rect(13,11,1,1,0xff4b3a8c);
+        rect(10,14,4,1,0xff6b4a33);
+        Image::new(64,64,px)
+    }).clone()
+}
+/// Fits the transformed skin cubes to a wheel sector rectangle, including outer layers.
+pub fn draw_wheel(c: &mut Canvas, skin: &Arc<Image>, slim: bool, p: [[f32; 6]; 6], rect: [f32; 4]) {
+    let pivots = [[0.,0.,0.],[0.,0.,0.],[-5.,if slim {2.5} else {2.},0.],[5.,if slim {2.5} else {2.},0.],[-1.9,12.,0.],[1.9,12.,0.]];
+    let aw = if slim {3.} else {4.};
+    let boxes = [([-4.,-8.,-4.],[8.,8.,8.],[0.,0.],[32.,0.]),
+        ([-4.,0.,-2.],[8.,12.,4.],[16.,16.],[16.,32.]),
+        ([-aw+1.,-2.,-2.],[aw,12.,4.],[40.,16.],[40.,32.]),
+        ([-1.,-2.,-2.],[aw,12.,4.],[32.,48.],[48.,48.]),
+        ([-2.,0.,-2.],[4.,12.,4.],[0.,16.],[0.,32.]),
+        ([-2.,0.,-2.],[4.,12.,4.],[16.,48.],[0.,48.])];
+    let (sy,cy) = (-0.38f32).sin_cos(); let (sp,cp) = (-0.10f32).sin_cos();
+    let mut bounds = [f32::INFINITY,f32::INFINITY,f32::NEG_INFINITY,f32::NEG_INFINITY];
+    for i in 0..6 {
+        let (sx,cx) = p[i][0].sin_cos(); let (syaw,cyaw) = p[i][1].sin_cos(); let (sz,cz) = p[i][2].sin_cos();
+        for mask in 0..8 {
+            let mut v = [0.;3];
+            for j in 0..3 { v[j] = boxes[i].0[j] + if mask & (1<<j) == 0 {-0.5} else {boxes[i].1[j]+0.5}; }
+            let yy = cx*v[1]-sx*v[2]; let zz = sx*v[1]+cx*v[2]; let xx = cyaw*v[0]+syaw*zz;
+            let x = cz*xx-sz*yy+pivots[i][0]+p[i][3];
+            let y = sz*xx+cz*yy+pivots[i][1]+p[i][4]-8.;
+            let z = -syaw*v[0]+cyaw*zz+pivots[i][2]+p[i][5];
+            let vx = cy*x+sy*z; let vy = cp*y-sp*(-sy*x+cy*z);
+            bounds[0]=bounds[0].min(vx); bounds[1]=bounds[1].min(vy);
+            bounds[2]=bounds[2].max(vx); bounds[3]=bounds[3].max(vy);
+        }
+    }
+    let [rx,ry,rw,rh] = rect;
+    let unit = (rw / (bounds[2]-bounds[0]).max(1.)).min(rh / (bounds[3]-bounds[1]).max(1.));
+    let mut b = Boxes::new();
+    b.begin(rx+rw/2.-(bounds[0]+bounds[2])*unit/2., ry+rh/2.-(bounds[1]+bounds[3])*unit/2., unit, -0.38, -0.10);
+    b.translate(0.,-8.,0.);
+    let legacy = skin.height*2 == skin.width;
+    for i in 0..6 {
+        b.push(); b.translate(pivots[i][0]+p[i][3],pivots[i][1]+p[i][4],pivots[i][2]+p[i][5]); b.rotate(p[i][0],p[i][1],p[i][2]);
+        let uv = if legacy && i == 3 { [40.,16.] } else if legacy && i == 5 { [0.,16.] } else { boxes[i].2 };
+        b.cube(skin,64,if legacy {32} else {64},boxes[i].0,boxes[i].1,uv,0.,legacy && (i==3||i==5),0xffffffff);
+        if i == 0 || !legacy { b.cube(skin,64,if legacy {32} else {64},boxes[i].0,boxes[i].1,boxes[i].3,if i==0 {0.5} else {0.25},false,0xffffffff); }
+        b.pop();
+    }
+    b.end(c);
+}

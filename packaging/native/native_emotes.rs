@@ -1,8 +1,8 @@
 //! Native's authenticated emote playback. Network work stays off the render thread.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 const BONES: [&str; 6] = ["head", "body", "rightArm", "leftArm", "rightLeg", "leftLeg"];
 const PARTS: [&str; 6] = [
@@ -156,10 +156,20 @@ struct State {
     canceled: HashMap<String, Instant>,
     position: Option<[f64; 3]>,
     local: String,
+    fetching: HashSet<String>,
+    failed_fetch: HashMap<String, Instant>,
+    preview_times: HashMap<String, f64>,
+    waiting: HashSet<String>,
+    command_gen: u64,
+    pending: bool,
 }
 fn state() -> &'static Mutex<State> {
     static S: OnceLock<Mutex<State>> = OnceLock::new();
     S.get_or_init(|| Mutex::new(State::default()))
+}
+fn commands_ready() -> &'static Condvar {
+    static WAKE: OnceLock<Condvar> = OnceLock::new();
+    WAKE.get_or_init(Condvar::new)
 }
 fn lock() -> std::sync::MutexGuard<'static, State> {
     state().lock().unwrap_or_else(|e| e.into_inner())
@@ -179,6 +189,8 @@ pub fn tick(
     static START: std::sync::Once = std::sync::Once::new();
     START.call_once(|| {
         let _ = std::thread::Builder::new()
+            .name("Native emote commands".into()).spawn(run_commands);
+        let _ = std::thread::Builder::new()
             .name("Native emotes".into())
             .spawn(run);
     });
@@ -186,6 +198,9 @@ pub fn tick(
     if s.scope != scope {
         s.playing.clear();
         s.commands.clear();
+        s.command_gen = s.command_gen.wrapping_add(1);
+        s.pending = false;
+        s.waiting.clear();
         s.position = None;
         s.scope = scope;
     }
@@ -211,7 +226,13 @@ pub fn tick(
 fn stop_locked(s: &mut State) {
     s.playing.remove(&s.local);
     s.canceled.insert(s.local.clone(), Instant::now());
+    let local = s.local.clone();
+    s.waiting.remove(&local);
+    s.command_gen = s.command_gen.wrapping_add(1);
+    s.pending = false;
+    s.commands.clear();
     s.commands.push_back(serde_json::json!({"stop":true}));
+    commands_ready().notify_one();
 }
 pub fn stop() {
     stop_locked(&mut lock());
@@ -229,9 +250,26 @@ pub fn play(page: usize, slot: usize) -> bool {
     {
         return false;
     }
+    let id = s.me["pages"][page][slot].as_str().unwrap_or("");
+    let hash = s.me["catalog"].as_array().and_then(|items| items.iter()
+        .find(|item| item["id"].as_str() == Some(id)))
+        .and_then(|item| item["hash"].as_str()).map(str::to_owned);
+    if let Some(hash) = hash {
+        let local = s.local.clone();
+        if !local.is_empty() {
+            let now = Instant::now();
+            let duration = s.clips.get(&hash).map(|c| if c.looping { 30000.0 } else { c.duration });
+            if duration.is_none() { s.waiting.insert(local.clone()); } else { s.waiting.remove(&local); }
+            s.playing.insert(local, Playback { hash, uuid: None, server_start: 0,
+                start: now, end: now + Duration::from_millis(duration.unwrap_or(30000.0) as u64) });
+        }
+    }
     let scope = s.scope.clone();
-    s.commands
-        .push_back(serde_json::json!({"page":page,"slot":slot,"scope":scope}));
+    s.command_gen = s.command_gen.wrapping_add(1);
+    s.pending = true;
+    s.commands.clear();
+    s.commands.push_back(serde_json::json!({"page":page,"slot":slot,"scope":scope}));
+    commands_ready().notify_one();
     true
 }
 fn identity_matches(id: u32, rendered: Option<&str>, authenticated: Option<&str>) -> bool {
@@ -244,7 +282,7 @@ pub fn is_playing(id: u32) -> bool {
         return false;
     };
     s.playing.get(name).is_some_and(|p| {
-        p.end > Instant::now()
+        !s.waiting.contains(name) && p.end > Instant::now()
             && s.clips.contains_key(&p.hash)
             && identity_matches(id, uuid.as_deref(), p.uuid.as_deref())
     })
@@ -257,7 +295,7 @@ pub fn apply(id: u32, rest: [Option<[f32; 9]>; 6], p: &mut crate::mobs::anim::Po
     let Some(active) = s.playing.get(name) else {
         return;
     };
-    if Instant::now() >= active.end {
+    if s.waiting.contains(name) || Instant::now() >= active.end {
         return;
     }
     // The local model is trusted from our own ticket; nearby premium players must match UUIDs.
@@ -287,6 +325,16 @@ fn record_playback(s: &mut State, name: String, next: Playback) {
             || (old.server_start == next.server_start && old.hash == next.hash && old.uuid == next.uuid)
     }) {
         return;
+    }
+    let mut next = next;
+    if let Some(old) = s.playing.get(&name)
+        && old.server_start == 0 && old.hash == next.hash
+    {
+        next.start = old.start;
+        if !s.waiting.contains(&name)
+            && let Some(clip) = s.clips.get(&next.hash)
+            && !clip.looping
+        { next.end = old.start + Duration::from_millis(clip.duration as u64); }
     }
     s.playing.insert(name, next);
 }
@@ -322,6 +370,81 @@ fn request(
     }
     serde_json::from_slice(&bytes).ok()
 }
+fn cache_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("NATIVE_GAME_DIR").map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .map(|dir| dir.join(".native").join("emotes"))
+}
+fn load_clip(api: &str, hash: &str) {
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) { return; }
+    { let mut s = lock(); if s.clips.contains_key(hash) || s.fetching.len() >= 4 || s.failed_fetch.get(hash).is_some_and(|t| t.elapsed() < Duration::from_secs(20)) || !s.fetching.insert(hash.to_owned()) { return; } }
+    let api = api.to_owned(); let hash = hash.to_owned(); let requested = hash.clone();
+    let spawned = std::thread::Builder::new().name("Native emote asset".into()).spawn(move || {
+        use std::io::Read;
+        let path = cache_dir().map(|p| p.join("clips").join(format!("{hash}.json")));
+        let valid = |raw: &[u8]| raw.len() <= 2 * 1024 * 1024 && format!("{:x}", Sha256::digest(raw)) == hash;
+        let mut raw = path.as_ref().and_then(|p| std::fs::metadata(p).ok().filter(|m| m.len() <= 2 * 1024 * 1024).and_then(|_| std::fs::read(p).ok())).filter(|b| valid(b));
+        if raw.is_none() {
+            let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build();
+            if let Ok(res) = agent.get(&format!("{api}/v1/emotes/clips/{hash}")).call() {
+                let mut bytes = Vec::new();
+                if res.into_reader().take(2 * 1024 * 1024 + 1).read_to_end(&mut bytes).is_ok() && valid(&bytes) { raw = Some(bytes); }
+            }
+        }
+        let mut loaded = false;
+        if let Some(raw) = raw && let Ok(value) = serde_json::from_slice::<Value>(&raw) && let Some(clip) = Clip::parse(&value) {
+            if let Some(path) = path && let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent); let _ = std::fs::write(path, raw);
+            }
+            let preview_time = clip.frames.iter().max_by(|a, b| {
+                let score = |p: &[[f32; 6]; 6]| p.iter().flatten().map(|n| n*n).sum::<f32>();
+                score(&a.1).total_cmp(&score(&b.1))
+            }).map(|frame| frame.0.min(clip.duration - 0.001)).unwrap_or(0.0);
+            let mut s = lock();
+            let names: Vec<String> = s.waiting.iter().filter(|name| s.playing.get(*name).is_some_and(|p| p.hash == hash)).cloned().collect();
+            let now = Instant::now();
+            for name in names {
+                s.waiting.remove(&name);
+                if let Some(p) = s.playing.get_mut(&name) { p.start = now; p.end = now + Duration::from_millis(if clip.looping { 30000 } else { clip.duration as u64 }); }
+            }
+            if s.clips.len() >= 256 { if let Some(key) = s.clips.keys().find(|key| !s.playing.values().any(|p| &p.hash == *key)).cloned() { s.clips.remove(&key); s.preview_times.remove(&key); } }
+            s.preview_times.insert(hash.clone(), preview_time);
+            s.clips.insert(hash.clone(), clip);
+            loaded = true;
+        }
+        let mut s = lock(); s.fetching.remove(&hash);
+        s.failed_fetch.retain(|_, t| t.elapsed() < Duration::from_secs(20));
+        if loaded { s.failed_fetch.remove(&hash); } else { s.failed_fetch.insert(hash, Instant::now()); }
+    });
+    if spawned.is_err() { lock().fetching.remove(&requested); }
+}
+fn cached_me(ticket: &str) -> Option<Value> {
+    let path = cache_dir()?.join("me.json");
+    if std::fs::metadata(&path).ok()?.len() > 2 * 1024 * 1024 { return None; }
+    let wrapper: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    if wrapper["ticketFingerprint"].as_str()? != format!("{:x}", Sha256::digest(ticket.as_bytes())) { return None; }
+    wrapper.get("me").cloned()
+}
+fn save_me(ticket: &str, me: &Value) {
+    if let Some(dir) = cache_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        let wrapper = serde_json::json!({"ticketFingerprint": format!("{:x}", Sha256::digest(ticket.as_bytes())), "me": me});
+        if let Ok(bytes) = serde_json::to_vec(&wrapper) { let _ = std::fs::write(dir.join("me.json"), bytes); }
+    }
+}
+pub fn local_name() -> String { lock().local.clone() }
+pub fn preview_pose(hash: &str, elapsed: Option<f64>) -> Option<[[f32; 6]; 6]> {
+    let s = lock(); let clip = s.clips.get(hash)?;
+    let time = elapsed.unwrap_or_else(|| *s.preview_times.get(hash).unwrap_or(&0.0)); Some(clip.sample(time))
+}
+fn prefetch(api: &str, me: &Value) {
+    if let (Some(pages), Some(items)) = (me["pages"].as_array(), me["catalog"].as_array()) {
+        for id in pages.iter().take(me["usablePages"].as_u64().unwrap_or(1) as usize).filter_map(Value::as_array).flatten().filter_map(Value::as_str) {
+            if let Some(hash) = items.iter().find(|item| item["id"].as_str() == Some(id)).and_then(|i| i["hash"].as_str()) { load_clip(api, hash); }
+        }
+    }
+}
+
 fn adopt(
     v: &Value,
     agent: &ureq::Agent,
@@ -342,8 +465,8 @@ fn adopt(
             .collect();
         let mut s = lock();
         if s.scope == scope {
-            s.playing
-                .retain(|name, p| present.contains(name) || p.start > requested);
+            let local = s.local.clone(); let pending = s.pending;
+            s.playing.retain(|name, p| present.contains(name) || p.start > requested || (pending && *name == local));
         }
     }
     for e in events {
@@ -353,28 +476,7 @@ fn adopt(
         if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
             continue;
         }
-        if !lock().clips.contains_key(hash) {
-            use std::io::Read;
-            if let Ok(res) = agent.get(&format!("{api}/v1/emotes/clips/{hash}")).call() {
-                let mut raw = Vec::new();
-                if res
-                    .into_reader()
-                    .take(2 * 1024 * 1024 + 1)
-                    .read_to_end(&mut raw)
-                    .is_ok()
-                    && raw.len() <= 2 * 1024 * 1024
-                    && format!("{:x}", Sha256::digest(&raw)) == hash
-                    && let Ok(v) = serde_json::from_slice::<Value>(&raw)
-                    && let Some(clip) = Clip::parse(&v)
-                {
-                    let mut s = lock();
-                    if s.clips.len() >= 256 {
-                        s.clips.clear();
-                    }
-                    s.clips.insert(hash.into(), clip);
-                }
-            }
-        }
+        load_clip(api, hash);
         let Some(name) = e["name"].as_str() else {
             continue;
         };
@@ -385,6 +487,7 @@ fn adopt(
         let remaining = (e["expiresAt"].as_f64().unwrap_or(0.0) - server).clamp(0.0, 30000.0);
         let mut s = lock();
         if s.scope != scope
+            || (v["events"].is_array() && s.pending && name == s.local)
             || remaining <= 0.0
             || s.canceled.get(&name).is_some_and(|t| {
                 *t >= requested
@@ -408,6 +511,28 @@ fn adopt(
         );
     }
 }
+fn run_commands() {
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(6)).build();
+    loop {
+        let (command, scope, generation) = {
+            let mut s = lock();
+            while s.commands.is_empty() { s = commands_ready().wait(s).unwrap_or_else(|e| e.into_inner()); }
+            (s.commands.pop_front().unwrap(), s.scope.clone(), s.command_gen)
+        };
+        let Some((api, ticket)) = crate::discord_presence::native_emote_auth() else {
+            let mut s = lock(); if s.command_gen == generation { s.pending = false; } continue;
+        };
+        let when = Instant::now(); let stop = command["stop"] == true;
+        let result = request(&agent, &api, &ticket, if stop { "/v1/mod/emotes/stop" } else { "/v1/mod/emotes/play" }, Some(&command));
+        let current = { let s = lock(); s.command_gen == generation && s.scope == scope }
+            && crate::discord_presence::native_emote_auth().is_some_and(|(_, current)| current == ticket);
+        if current && !stop {
+            if let Some(v) = result { adopt(&v, &agent, &api, &ticket, &scope, when); }
+            let mut s = lock(); if s.command_gen == generation { s.pending = false; }
+        }
+    }
+}
+
 fn run() {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(6))
@@ -419,43 +544,23 @@ fn run() {
             if ticket != previous {
                 let mut s = lock();
                 s.me = Value::Null;
-                s.playing.clear();
+                s.playing.clear(); s.waiting.clear(); s.commands.clear(); s.pending = false;
+                s.command_gen = s.command_gen.wrapping_add(1);
                 previous = ticket.clone();
                 refresh = Instant::now() - Duration::from_secs(30);
+                drop(s);
+                if let Some(me) = cached_me(&ticket) { prefetch(&api, &me); lock().me = me; }
             }
             if refresh.elapsed() > Duration::from_secs(15) {
                 if let Some(v) = request(&agent, &api, &ticket, "/v1/mod/emotes/me", None) {
-                    lock().me = v;
+                    if crate::discord_presence::native_emote_auth().is_some_and(|(_, current)| current == ticket) {
+                        save_me(&ticket, &v); prefetch(&api, &v); lock().me = v;
+                    }
                 }
                 refresh = Instant::now();
             }
-            let (scope, names, commands) = {
-                let mut s = lock();
-                (
-                    s.scope.clone(),
-                    s.names.values().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
-                    s.commands.drain(..).collect::<Vec<_>>(),
-                )
-            };
-            for command in commands {
-                let when = Instant::now();
-                let stop = command["stop"] == true;
-                if let Some(v) = request(
-                    &agent,
-                    &api,
-                    &ticket,
-                    if stop {
-                        "/v1/mod/emotes/stop"
-                    } else {
-                        "/v1/mod/emotes/play"
-                    },
-                    Some(&command),
-                ) {
-                    if !stop {
-                        adopt(&v, &agent, &api, &ticket, &scope, when);
-                    }
-                }
-            }
+            let current_me = { lock().me.clone() }; prefetch(&api, &current_me);
+            let (scope, names) = { let s = lock(); (s.scope.clone(), s.names.values().map(|(n, _)| n.clone()).collect::<Vec<_>>()) };
             if !scope.is_empty() && !names.is_empty() {
                 let when = Instant::now();
                 if let Some(v) = request(
@@ -484,7 +589,8 @@ fn run() {
             let mut s = lock();
             s.me = Value::Null;
             s.playing.clear();
-            s.commands.clear();
+            s.commands.clear(); s.waiting.clear(); s.pending = false;
+            s.command_gen = s.command_gen.wrapping_add(1); previous.clear();
         }
         std::thread::sleep(Duration::from_millis(750));
     }

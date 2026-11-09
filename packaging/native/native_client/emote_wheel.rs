@@ -1,5 +1,5 @@
 //! Eight radial sectors over the world, with actual player renders and an open cancel zone.
-use super::{net, ui::Ui};
+use super::{net, preview3d, ui::Ui};
 use horizon_client::{
     native_emotes,
     native_ui::{Canvas, Image, font, theme},
@@ -224,6 +224,7 @@ impl Wheel {
         let api = net::api();
         c.fill(0.0, 0.0, c.width(), c.height(), 0x28000000);
         self.selected = slot_at(ui.mx - cx, ui.my - cy, inner, outer);
+        let (skin, slim) = preview3d::wheel_skin(&native_emotes::local_name());
         for slot in 0..8 {
             let angle = slot as f32 * std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2;
             let a = angle - std::f32::consts::FRAC_PI_4 * 0.5 + 0.022;
@@ -263,7 +264,14 @@ impl Wheel {
             let h0 = outer * 0.34;
             let label_y = y + h0 * 0.38;
             let mut drawn = false;
-            if let Some(item) = item
+            if let Some(hash) = item.and_then(|i| i["hash"].as_str())
+                && let Some(pose) = native_emotes::preview_pose(hash, if active { Some(ui.now) } else { None })
+            {
+                let rect = fit_poster([0.,0.,1.,1.], 0.75, cx, cy, inner, outer, angle, label_y);
+                preview3d::draw_wheel(c, &skin, slim, pose, rect);
+                drawn = true;
+            }
+            if !drawn && let Some(item) = item
                 && let Some(url) = poster_url(item, &api)
                 && let net::Pic::Ready(img) = net::image(&url, 512 * 1024)
             {

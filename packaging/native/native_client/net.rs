@@ -433,6 +433,42 @@ fn pics() -> &'static Mutex<HashMap<String, Pic>> {
     PICS.get_or_init(Default::default)
 }
 
+// The launcher cache uses SHA-256 filenames. Never trust disk or network bytes without
+// checking the name, and don't delete a launcher's file while it may be rewriting it.
+fn texture_file(url: &str) -> Option<(PathBuf, String)> {
+    // Only Native's content-addressed endpoint promises that the URL is a byte hash;
+    // Mojang and other image URLs can also end in a 64-character identifier.
+    if !url.contains("/csl/textures/") { return None; }
+    let hash = url.split('?').next()?.rsplit('/').next()?;
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) { return None; }
+    let game = std::env::var_os("NATIVE_GAME_DIR").map(PathBuf::from).or_else(|| std::env::current_dir().ok())?;
+    let info = [game.join(".native/launcher.json"), game.join(".noctra/launcher.json")]
+        .into_iter().find_map(|p| std::fs::metadata(&p).ok().filter(|m| m.len() < 16384)
+            .and_then(|_| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()));
+    let dir = info.and_then(|v| v["textureCache"].as_str().map(PathBuf::from))
+        .filter(|p| p.is_absolute()).unwrap_or_else(|| game.join(".native/textures"));
+    Some((dir.join(format!("{hash}.png")), hash.to_owned()))
+}
+fn image_bytes(url: &str, limit: u64) -> Option<Vec<u8>> {
+    use sha2::{Digest, Sha256};
+    let cached = texture_file(url);
+    let valid = |bytes: &[u8], hash: &str| bytes.len() as u64 <= limit && format!("{:x}", Sha256::digest(bytes)) == hash;
+    if let Some((path, hash)) = &cached
+        && std::fs::metadata(path).is_ok_and(|m| m.len() <= limit)
+        && let Ok(bytes) = std::fs::read(path)
+        && valid(&bytes, hash)
+    { return Some(bytes); }
+    let bytes = get_bytes(url, None, limit).ok()?;
+    if let Some((path, hash)) = cached {
+        if !valid(&bytes, &hash) { return None; }
+        if !path.exists() {
+            if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+            let _ = std::fs::write(path, &bytes);
+        }
+    }
+    Some(bytes)
+}
+
 static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 
 /// The picture at `url`, fetched on a background thread the first time it is asked for (at most four at once).
@@ -458,7 +494,7 @@ pub fn image(url: &str, limit: u64) -> Pic {
     let spawned = std::thread::Builder::new().name("Native image".into()).spawn({
         let url = url.clone();
         move || {
-            let result = get_bytes(&url, None, limit).ok().and_then(|b| Image::decode(&b));
+            let result = image_bytes(&url, limit).and_then(|b| Image::decode(&b));
             let pic = result.map_or(Pic::Failed, Pic::Ready);
             pics().lock().unwrap_or_else(|e| e.into_inner()).insert(url, pic);
             IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
