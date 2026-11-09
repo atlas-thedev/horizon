@@ -47,7 +47,8 @@ echo "nightly: $NAME -> $TAG"
 if [ ! -d src/.git ]; then
   git clone -q --filter=blob:none "https://github.com/$UPSTREAM.git" src
 fi
-git -C src fetch -q --tags
+# --force: upstream moves its nightly tags (nightly, nightly-<date>) to each new build
+git -C src fetch -q --tags --force
 git -C src checkout -q -f "nightly-source/$DATE-$SHORT" 2> /dev/null || git -C src checkout -q -f "$SHORT"
 git -C src clean -qfd crates packaging tools
 
@@ -59,13 +60,17 @@ python3 native/tools/native/native_api.py src native
 python3 native/tools/native/native_skins.py src native
 python3 native/tools/native/native_marks.py src native
 python3 native/tools/native/native_cosmetics.py src native
+python3 native/tools/native/native_ui.py src native
+python3 native/tools/native/native_tweaks.py src native
+python3 native/tools/native/native_client.py src native
+python3 native/tools/native/native_emotes.py src native
 python3 native/tools/native/make_vanilla_icon.py src/packaging/icons/horizon.ico src/crates/horizon-theme/icons/horizon-64.png
 
 cd src
 export RUSTFLAGS="-C target-feature=+crt-static"
 export HORIZON_VERSION="nightly-$DATE"
 export HORIZON_NIGHTLY="$DATE $SHORT"
-nice -n 15 cargo build --release --locked -j "$JOBS" --target "$TARGET" \
+nice -n 15 cargo build --release -j "$JOBS" --target "$TARGET" \
   -p horizon-client -p horizon-client-lib --bin horizon-client
 
 EXE="target/$TARGET/release/horizon-client.exe"

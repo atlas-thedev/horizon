@@ -31,9 +31,9 @@ const MAX_DEPTH: usize = 8;
 const MAX_ANIMS: usize = 8;
 /// A model or texture that failed is asked for again after this long.
 const RETRY: Duration = Duration::from_secs(120);
-/// The game's item textures fit one 64×64 skin slot; a larger NCM texture is
-/// scaled down (the faces' UVs are fractions of the texture, so they still fit).
-const SLOT: u32 = 64;
+/// Bigger than this (the atlas's Native area, `AREA`) and a texture is scaled down to fit (the faces' UVs are
+/// fractions of the texture, so they still fit).
+const SLOT: u32 = AREA;
 
 /// The armour slot a part reacts to: hidden while that slot is filled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -57,10 +57,42 @@ impl Armor {
     }
 }
 
-/// A Native cosmetic ready to draw: one game item per armour rule.
+impl Armor {
+    fn bit(self) -> u8 {
+        match self {
+            Armor::None => 0,
+            Armor::Head => 1,
+            Armor::Chest => 2,
+            Armor::Legs => 4,
+            Armor::Feet => 8,
+        }
+    }
+}
+
+/// When an item shows: it depends on the armour slots in `mask`, and shows while exactly `state` of them are worn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rule {
+    mask: u8,
+    state: u8,
+}
+
+impl Rule {
+    /// Whether the item shows on `m`, by the armour it wears.
+    pub fn applies(self, m: &Mob) -> bool {
+        let worn = [Armor::Head, Armor::Chest, Armor::Legs, Armor::Feet]
+            .into_iter()
+            .filter(|a| a.worn(m))
+            .fold(0, |bits, a| bits | a.bit());
+        worn & self.mask == self.state
+    }
+}
+
+/// A Native cosmetic ready to draw: the game's items, each for one combination of worn armour.
 #[derive(Debug)]
 pub struct Native {
-    pub items: Vec<(Armor, Arc<Item>)>,
+    pub items: Vec<(Rule, Arc<Item>)>,
+    /// `CosmeticModel.coversHead`: a hood, helmet or mask the skin's hat layer and the helmet must not poke through.
+    pub covers_head: bool,
 }
 
 #[derive(Debug)]
@@ -92,8 +124,12 @@ struct NcmPart {
     anims: Vec<Anim>,
     children: Vec<NcmPart>,
     armor: Armor,
+    /// With `armor`: the part moves by this (pixels) while the slot is worn, instead of hiding.
+    push: Option<[f32; 3]>,
     /// 0 any, 1 left only, 2 right only.
     side: u8,
+    /// `layer: "glow"` (or `"emissive"`, or `glow: true`): drawn at full brightness, like the Java mod's eyes layer.
+    glow: bool,
 }
 
 /// A parsed NCM model.
@@ -141,22 +177,21 @@ fn bone(name: &str) -> Bone {
     }
 }
 
-/// `CosmeticModel.slot` for the armour rule. A `push` rule (the part moves
-/// instead of hiding) has no counterpart in the game's items: such parts stay.
-fn armor(o: &serde_json::Value) -> Armor {
+/// `CosmeticModel`'s armour rule: the slot, and for a `push` rule the offset (pixels) the part moves by while
+/// that slot is worn (else the part hides).
+fn armor(o: &serde_json::Value) -> (Armor, Option<[f32; 3]>) {
     let Some(a) = o.get("armor").filter(|a| a.is_object()) else {
-        return Armor::None;
+        return (Armor::None, None);
     };
-    if text(a, "mode", "hide") == "push" {
-        return Armor::None;
-    }
-    match text(a, "slot", "none").to_ascii_lowercase().replace(['_', '-'], "").as_str() {
+    let push = (text(a, "mode", "hide") == "push").then(|| clamp_all(floats(a, "offset", [0.0; 3]), 8.0));
+    let slot = match text(a, "slot", "none").to_ascii_lowercase().replace(['_', '-'], "").as_str() {
         "head" | "helmet" => Armor::Head,
         "chest" => Armor::Chest,
         "legs" => Armor::Legs,
         "feet" | "boots" => Armor::Feet,
         _ => Armor::None,
-    }
+    };
+    (slot, push)
 }
 
 fn anim(o: &serde_json::Value) -> Option<Anim> {
@@ -165,7 +200,7 @@ fn anim(o: &serde_json::Value) -> Option<Anim> {
         "spin" => Some(Motion::Spin),
         "swing" | "flap" => Some(Motion::Swing),
         "bob" => Some(Motion::Bob),
-        // Blinking (showing a part part of the time) has no counterpart: the part stays shown.
+        // Blinking (shown for part of each cycle): no motion, the part goes in an item that hides on cue.
         "blink" => None,
         _ => return None,
     };
@@ -178,7 +213,7 @@ fn anim(o: &serde_json::Value) -> Option<Anim> {
         motion,
         axis,
         speed: num(o, "speed", if motion == Some(Motion::Spin) { 90.0 } else { 1.0 }, 4000.0),
-        amplitude: num(o, "amplitude", 10.0, 360.0),
+        amplitude: num(o, "amplitude", if motion.is_none() { 0.5 } else { 10.0 }, 360.0),
         phase: num(o, "phase", 0.0, 1000.0),
     })
 }
@@ -238,12 +273,17 @@ fn parts(
             cubes,
             anims,
             children,
-            armor: armor(o),
+            armor: armor(o).0,
+            push: armor(o).1,
             side: match text(o, "side", "") {
                 "left" => 1,
                 "right" => 2,
                 _ => 0,
             },
+            glow: matches!(
+                text(o, "layer", if o.get("glow").and_then(serde_json::Value::as_bool) == Some(true) { "glow" } else { "cutout" }),
+                "glow" | "emissive"
+            ),
         });
     }
     Ok(out)
@@ -282,8 +322,7 @@ impl Model {
 
     /// `CosmeticModel.coversHead`: a head root has a head-sized box the head's
     /// centre (0, -4, 0) sits inside, at rest. The Java mod hides the skin's hat
-    /// layer and the helmet under such a hood; the game does not do that yet.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// layer and the helmet under such a hood; so does the game ([`set_hooded`](horizon_client::native_skins::set_hooded)).
     pub fn covers_head(&self) -> bool {
         self.roots
             .iter()
@@ -295,27 +334,43 @@ impl Model {
     /// model's own) wears it, its texture already scaled to fit a skin slot.
     pub fn items(&self, id: &str, side: u8, texture: &Texture) -> Native {
         let side = if side != 0 { side } else { self.default_side() };
-        let mut groups: Vec<(Armor, Vec<&NcmPart>)> = Vec::new();
-        for root in self.roots.iter().filter(|r| r.side == 0 || r.side == side) {
-            match groups.iter_mut().find(|(a, _)| *a == root.armor) {
-                Some((_, list)) => list.push(root),
-                None => groups.push((root.armor, vec![root])),
+        let roots: Vec<&NcmPart> = self.roots.iter().filter(|r| r.side == 0 || r.side == side).collect();
+        // The armour slots any part reacts to; the model is baked once for each combination of them worn: a part
+        // under a hiding rule is left out, one under a push rule moves (the Java mod's `armorHide` / `armorOffset`).
+        let mask = roots.iter().fold(0, |bits, r| bits | armor_slots(r));
+        // Each blinking part (with what hangs on it) is an item of its own, hidden on cue, as the Java mod
+        // skips the part and its children; glowing parts are one too, drawn at full brightness (the Java
+        // mod's eyes layer).
+        let mut gates = vec![(None, Vec::new())];
+        for root in &roots {
+            blink_gates(root, &[], &mut gates);
+        }
+        let mut items = Vec::new();
+        for worn in (0..16u8).filter(|w| w & !mask == 0) {
+            for (gate, blinks) in &gates {
+                for glow in [false, true] {
+                    let layer = Layer { glow, gate: *gate, worn, tagged: mask != 0 };
+                    let item = self.item(id, &roots, texture, layer);
+                    if item.vertices == 0 {
+                        continue;
+                    }
+                    if !blinks.is_empty() {
+                        blink_registry().insert(item.id.clone(), blinks.clone());
+                    }
+                    items.push((Rule { mask, state: worn }, Arc::new(item)));
+                }
             }
         }
-        let items = groups
-            .into_iter()
-            .map(|(armor, roots)| (armor, Arc::new(self.item(id, &roots, texture))))
-            .collect();
-        Native { items }
+        Native { items, covers_head: self.covers_head() }
     }
 
-    fn item(&self, id: &str, roots: &[&NcmPart], texture: &Texture) -> Item {
+    fn item(&self, id: &str, roots: &[&NcmPart], texture: &Texture, layer: Layer) -> Item {
         const REST: horizon_cosmetics::Pose = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
         let main = roots.first().map_or(Bone::Head, |r| r.bone);
         let mut animations = Vec::new();
         let mut on_bone: Vec<(Bone, Vec<Part>)> = Vec::new();
         for root in roots {
-            let part = bake(root, self.texture, &mut animations);
+            let part = bake(root, self.texture, &mut animations, layer, None);
             match on_bone.iter_mut().find(|(b, _)| *b == root.bone) {
                 Some((_, list)) => list.push(part),
                 None => on_bone.push((root.bone, vec![part])),
@@ -344,18 +399,25 @@ impl Model {
             }
         }
         let vertices = count(&root) + limbs.iter().map(|(_, l)| count(l)).sum::<usize>();
-        Item {
-            id: format!("native:{id}"),
+        Item::native(
+            format!(
+                "native:{id}{}{}",
+                format!(
+                    "{}{}",
+                    if layer.tagged { format!("#a{}", layer.worn) } else { String::new() },
+                    layer.gate.map(|g| format!("#b{g}")).unwrap_or_default()
+                ),
+                if layer.glow { GLOW } else { "" }
+            ),
             // Never covered by the game's own rule: NCM parts carry their armour rules.
-            slot: Slot::Shoulder,
-            bone: main,
+            Slot::Shoulder,
+            main,
             root,
-            texture: texture.clone(),
+            texture.clone(),
             animations,
             vertices,
             limbs,
-            tag: None,
-        }
+        )
     }
 }
 
@@ -383,9 +445,82 @@ fn wraps(part: &NcmPart, parent: glam::Mat4) -> bool {
     inside || part.children.iter().any(|c| wraps(c, m))
 }
 
-/// A part as the game's item has it, its animations added to `animations`.
-fn bake(p: &NcmPart, texture: [f32; 2], animations: &mut Vec<Animation>) -> Part {
+/// The id ending of an item holding a model's glowing parts.
+pub const GLOW: &str = "#glow";
+
+/// The light a cosmetic item is drawn with: full brightness for the glowing parts.
+pub fn light_of(item: &Item, light: u32) -> u32 {
+    if item.id.starts_with("native:") && item.id.ends_with(GLOW) { horizon_client::mobs::render::FULL_BRIGHT } else { light }
+}
+
+/// Which faces an item holds: the glowing parts' or the others', of the parts whose nearest blinking part
+/// (themselves or a parent) is `gate`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Layer {
+    glow: bool,
+    gate: Option<usize>,
+    /// The armour slots worn ([`Armor::bit`]s) this item is baked for.
+    worn: u8,
+    /// Whether the model has armour rules (then the worn slots are part of the item's id).
+    tagged: bool,
+}
+
+/// The armour slots this part or its children react to.
+fn armor_slots(p: &NcmPart) -> u8 {
+    p.children.iter().fold(p.armor.bit(), |bits, c| bits | armor_slots(c))
+}
+
+/// A blink channel: cycles per second, the part of each cycle the part shows (0..1), phase (cycles).
+type Blink = [f32; 3];
+
+fn blinks_of(p: &NcmPart) -> impl Iterator<Item = Blink> + '_ {
+    p.anims.iter().filter(|a| a.motion.is_none()).map(|a| [a.speed, a.amplitude, a.phase])
+}
+
+/// Every blinking part under `p`, with the channels it and its parents blink by.
+fn blink_gates(p: &NcmPart, above: &[Blink], out: &mut Vec<(Option<usize>, Vec<Blink>)>) {
+    let mut chain = above.to_vec();
+    let own: Vec<Blink> = blinks_of(p).collect();
+    if !own.is_empty() {
+        chain.extend(own);
+        out.push((Some(p.index), chain.clone()));
+    }
+    for c in &p.children {
+        blink_gates(c, &chain, out);
+    }
+}
+
+fn blink_registry() -> std::sync::MutexGuard<'static, HashMap<String, Vec<Blink>>> {
+    static BLINKS: OnceLock<Mutex<HashMap<String, Vec<Blink>>>> = OnceLock::new();
+    BLINKS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// `CosmeticPose.pose`'s blink: a channel hides its part once `(speed × time + phase) mod 1` reaches the
+/// amplitude. False while any channel of this item's blinking part (or of a part it hangs on) hides it.
+pub fn shown(item: &Item, ticks: f32) -> bool {
+    if !item.id.starts_with("native:") || !item.id.contains("#b") {
+        return true;
+    }
+    let time = ticks / 20.0;
+    match blink_registry().get(&item.id) {
+        Some(blinks) => blinks.iter().all(|[speed, amplitude, phase]| (speed * time + phase).rem_euclid(1.0) < *amplitude),
+        None => true,
+    }
+}
+
+/// A part as the game's item has it, its animations added to `animations`; only the faces of the parts on
+/// `layer`, every part keeping its place so children move with their parents.
+fn bake(p: &NcmPart, texture: [f32; 2], animations: &mut Vec<Animation>, layer: Layer, gate: Option<usize>) -> Part {
+    let gate = if blinks_of(p).next().is_some() { Some(p.index) } else { gate };
     let name = format!("n{}", p.index);
+    // The armour rule: the slot is worn, so the part (and what hangs on it) hides, or moves aside.
+    let mut push = [0.0; 3];
+    if p.armor.bit() & layer.worn != 0 {
+        match p.push {
+            Some(offset) => push = offset,
+            None => return Part { name, pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0], faces: Vec::new(), children: Vec::new() },
+        }
+    }
     for a in &p.anims {
         let Some(motion) = a.motion else { continue };
         if a.speed == 0.0 {
@@ -407,12 +542,16 @@ fn bake(p: &NcmPart, texture: [f32; 2], animations: &mut Vec<Animation>) -> Part
         });
     }
     let [rx, ry, rz] = p.rotation.map(f32::to_radians);
-    let [x, y, z] = p.pivot;
+    let [x, y, z] = [p.pivot[0] + push[0], p.pivot[1] + push[1], p.pivot[2] + push[2]];
     Part {
         name,
         pose: [x, y, z, rx, ry, rz, 1.0, 1.0, 1.0],
-        faces: p.cubes.iter().flat_map(|c| box_faces(c, texture)).collect(),
-        children: p.children.iter().map(|c| bake(c, texture, animations)).collect(),
+        faces: if p.glow == layer.glow && gate == layer.gate {
+            p.cubes.iter().flat_map(|c| box_faces(c, texture)).collect()
+        } else {
+            Vec::new()
+        },
+        children: p.children.iter().map(|c| bake(c, texture, animations, layer, gate)).collect(),
     }
 }
 
@@ -468,7 +607,8 @@ fn box_faces(cube: &Cube, [tw, th]: [f32; 2]) -> Vec<Face> {
         .collect()
 }
 
-/// A texture scaled down (nearest texel) to fit a 64×64 skin slot, if larger.
+/// A texture as it goes into the atlas: as it is, or (only when bigger than the Native area) shrunk to fit,
+/// every texel the average of the ones it covers.
 pub fn fit_slot(width: u32, height: u32, rgba: &[u8]) -> Texture {
     if width <= SLOT && height <= SLOT {
         return Texture {
@@ -484,10 +624,21 @@ pub fn fit_slot(width: u32, height: u32, rgba: &[u8]) -> Texture {
     );
     let mut out = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
+        let (y0, y1) = (y * height / h, ((y + 1) * height / h).max(y * height / h + 1).min(height));
         for x in 0..w {
-            let (sx, sy) = (x * width / w, y * height / h);
-            let i = ((sy * width + sx) * 4) as usize;
-            out.extend_from_slice(&rgba[i..i + 4]);
+            let (x0, x1) = (x * width / w, ((x + 1) * width / w).max(x * width / w + 1).min(width));
+            let mut sum = [0u32; 4];
+            let mut n = 0;
+            for sy in y0..y1 {
+                for sx in x0..x1 {
+                    let i = ((sy * width + sx) * 4) as usize;
+                    for c in 0..4 {
+                        sum[c] += u32::from(rgba[i + c]);
+                    }
+                    n += 1;
+                }
+            }
+            out.extend(sum.iter().map(|s| (s / n.max(1)) as u8));
         }
     }
     Texture {
@@ -601,21 +752,296 @@ impl Game<'_> {
             )
         };
         if base.is_empty() || refs.is_empty() {
+            horizon_client::native_skins::set_hooded(m.id, false);
             return Vec::new();
         }
+        let shown = own || self.settings.extras.effective_others() == horizon_cosmetics::prefs::Others::Shown;
         let mut out = Vec::new();
+        let mut hooded = false;
         for cosmetic in &refs {
             if let Some(native) = get(&base, cosmetic) {
+                hooded |= shown && native.covers_head;
                 out.extend(
                     native
                         .items
                         .iter()
-                        .filter(|(armor, _)| !armor.worn(m))
+                        .filter(|(rule, _)| rule.applies(m))
                         .map(|(_, item)| item.clone()),
                 );
             }
         }
+        // A hood, helmet or mask replaces the skin's hat layer and the helmet (the Java mod's `HeadCover`).
+        horizon_client::native_skins::set_hooded(m.id, hooded);
         out
+    }
+}
+
+// ── the atlas's Native area ──────────────────────────────────────────────
+
+/// One area of the atlas (`native/cosmetics`) holds every Native cosmetic texture at its own size, packed in
+/// rows (shelves). Most NCM textures are long strips (wings are 2032×126): a square slot made them a fraction of
+/// their width and they looked speckled. When the area is full it starts over: textures go back in as they are
+/// drawn.
+pub const AREA: u32 = 2048;
+
+#[derive(Clone, Debug, PartialEq)]
+struct Placed {
+    /// The texture (its model's id and size): the items of one model (plain, glowing, blinking) share it.
+    key: String,
+    /// The atlas sprites naming it, one per item.
+    locations: Vec<String>,
+    rect: [u32; 4],
+    drawn: Instant,
+    /// For pictures that change in place (an animated HD cape's frames): the version uploaded last.
+    stamp: u64,
+}
+
+#[derive(Default)]
+struct Packer {
+    /// The atlas the area belongs to (`HudAtlas::revision`): a rebuilt atlas starts with it empty.
+    revision: u64,
+    placed: Vec<Placed>,
+    /// Shelves: (top, height, used width).
+    shelves: Vec<(u32, u32, u32)>,
+}
+
+/// Where a texture went: its place in the area, whether its pixels must be uploaded (else they are there
+/// already), and the sprites that left the area.
+#[derive(Debug, PartialEq)]
+struct Placement {
+    rect: [u32; 4],
+    upload: bool,
+    evicted: Vec<String>,
+}
+
+impl Packer {
+    /// Room for a `w`×`h` texture in the shelves as they are.
+    fn fit(&mut self, w: u32, h: u32) -> Option<[u32; 2]> {
+        // The best shelf: tall enough, wide enough, wasting the least height.
+        let best = self
+            .shelves
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, sh, used))| *sh >= h && AREA - used >= w)
+            .min_by_key(|(_, (_, sh, _))| *sh - h)
+            .map(|(i, _)| i);
+        if let Some(i) = best {
+            let (top, _, used) = self.shelves[i];
+            self.shelves[i].2 += w;
+            return Some([used, top]);
+        }
+        let bottom = self.shelves.last().map_or(0, |(top, sh, _)| top + sh);
+        if bottom + h > AREA || w > AREA {
+            return None;
+        }
+        self.shelves.push((bottom, h, w));
+        Some([0, bottom])
+    }
+
+    /// A place for texture `key` drawn through sprite `location`: where it is, or new room. When there is none
+    /// the area starts over (every sprite in it is named, to be taken out of the atlas and put back when drawn).
+    fn place(&mut self, key: &str, location: &str, w: u32, h: u32, now: Instant) -> Option<Placement> {
+        if let Some(p) = self.placed.iter_mut().find(|p| p.key == key) {
+            if !p.locations.iter().any(|l| l == location) {
+                p.locations.push(location.to_owned());
+            }
+            p.drawn = now;
+            return Some(Placement { rect: p.rect, upload: false, evicted: Vec::new() });
+        }
+        let mut evicted = Vec::new();
+        let spot = match self.fit(w, h) {
+            Some(spot) => spot,
+            None => {
+                evicted = std::mem::take(&mut self.placed).into_iter().flat_map(|p| p.locations).collect();
+                self.shelves.clear();
+                self.fit(w, h)?
+            }
+        };
+        let rect = [spot[0], spot[1], w, h];
+        self.placed.push(Placed { key: key.to_owned(), locations: vec![location.to_owned()], rect, drawn: now, stamp: 0 });
+        Some(Placement { rect, upload: true, evicted })
+    }
+
+    /// [`Packer::place`] for a picture that changes in place (`stamp` is its version, an animated cape's frame): the
+    /// same room while its size stays, uploaded again whenever the version moves on.
+    fn place_stamped(&mut self, key: &str, location: &str, w: u32, h: u32, now: Instant, stamp: u64) -> Option<Placement> {
+        if let Some(i) = self.placed.iter().position(|p| p.key == key) {
+            let p = &mut self.placed[i];
+            if p.rect[2] == w && p.rect[3] == h {
+                let upload = p.stamp != stamp;
+                p.stamp = stamp;
+                p.drawn = now;
+                if !p.locations.iter().any(|l| l == location) {
+                    p.locations.push(location.to_owned());
+                }
+                return Some(Placement { rect: p.rect, upload, evicted: Vec::new() });
+            }
+            // a new size: its old room stays unused until the area starts over
+            self.placed.remove(i);
+        }
+        let placed = self.place(key, location, w, h, now)?;
+        if let Some(p) = self.placed.iter_mut().find(|p| p.key == key) {
+            p.stamp = stamp;
+        }
+        Some(placed)
+    }
+}
+
+fn packer() -> std::sync::MutexGuard<'static, Packer> {
+    static PACKER: OnceLock<Mutex<Packer>> = OnceLock::new();
+    PACKER.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A Native item's texture was drawn this frame.
+pub fn drawn(location: &str) {
+    let mut p = packer();
+    if let Some(placed) = p.placed.iter_mut().find(|p| p.locations.iter().any(|l| l == location)) {
+        placed.drawn = Instant::now();
+    }
+}
+
+/// The size of the atlas region an item's texture fills, in texels: a Native texture has a region of exactly its
+/// own size, a Horizon item the top-left of a 64×64 skin slot.
+pub fn slot_width(item: &Item) -> f32 {
+    if item.id.starts_with("native:") { item.texture.width.max(1) as f32 } else { 64.0 }
+}
+
+pub fn slot_height(item: &Item) -> f32 {
+    if item.id.starts_with("native:") { item.texture.height.max(1) as f32 } else { 64.0 }
+}
+
+/// The texture an item draws: its model's (the id before any `#` ending) at its size.
+fn texture_key(item: &Item) -> String {
+    let model = item.id.split('#').next().unwrap_or(&item.id);
+    format!("{model}@{}x{}", item.texture.width, item.texture.height)
+}
+
+impl Game<'_> {
+    /// Puts a Native item's texture into the atlas's Native area, at its own resolution.
+    pub(super) fn store_native_cosmetic(&mut self, location: &str, item: &Item) {
+        let t = &item.texture;
+        let (w, h) = (t.width.clamp(1, AREA), t.height.clamp(1, AREA));
+        let placed = {
+            let mut p = packer();
+            if p.revision != self.gui.atlas.revision {
+                *p = Packer { revision: self.gui.atlas.revision, ..Packer::default() };
+            }
+            p.place(&texture_key(item), location, w, h, Instant::now())
+        };
+        let Some(placed) = placed else { return };
+        for old in placed.evicted {
+            self.gui.atlas.sprites.remove(&old);
+        }
+        let Some(area) = self.gui.atlas.sprites.get("native/cosmetics").copied() else { return };
+        let (aw, ah) = (self.gui.atlas.width as f32, self.gui.atlas.height as f32);
+        let (ax, ay) = ((area.u0 * aw).round() as u32, (area.v0 * ah).round() as u32);
+        let rect = placed.rect;
+        if placed.upload {
+            let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+            for y in 0..h as usize {
+                let start = y * t.width as usize * 4;
+                rgba.extend_from_slice(&t.rgba[start..start + w as usize * 4]);
+            }
+            self.map_patches.push(horizon_client::font::Patch { x: ax + rect[0], y: ay + rect[1], width: w, height: h, rgba });
+        }
+        let mut sprite = area;
+        sprite.u0 = (ax + rect[0]) as f32 / aw;
+        sprite.v0 = (ay + rect[1]) as f32 / ah;
+        sprite.u1 = (ax + rect[0] + w) as f32 / aw;
+        sprite.v1 = (ay + rect[1] + h) as f32 / ah;
+        self.gui.atlas.sprites.insert(location.to_owned(), sprite);
+    }
+
+    /// An HD cape (`skins::hd_cape`): its full picture into the Native area at its own size, and its sprite pointed
+    /// there instead of the 64x32 copy in its skin slot (that copy stays the fallback when the area has no room). The
+    /// cape's UVs are fractions of its sprite, so the model draws it unchanged, only sharp.
+    pub(super) fn store_native_hd_cape(&mut self, location: &str) {
+        let Some(hd) = horizon_client::skins::hd_cape(location) else { return };
+        let (w, h) = (hd.width.clamp(1, AREA), hd.height.clamp(1, AREA));
+        let placed = {
+            let mut p = packer();
+            if p.revision != self.gui.atlas.revision {
+                *p = Packer { revision: self.gui.atlas.revision, ..Packer::default() };
+            }
+            p.place_stamped(&format!("cape:{location}"), location, w, h, Instant::now(), hd.generation)
+        };
+        let Some(placed) = placed else { return };
+        for old in placed.evicted {
+            if old != location {
+                self.gui.atlas.sprites.remove(&old);
+            }
+        }
+        let Some(area) = self.gui.atlas.sprites.get("native/cosmetics").copied() else { return };
+        let (aw, ah) = (self.gui.atlas.width as f32, self.gui.atlas.height as f32);
+        let (ax, ay) = ((area.u0 * aw).round() as u32, (area.v0 * ah).round() as u32);
+        let rect = placed.rect;
+        if placed.upload {
+            let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+            for y in 0..h as usize {
+                let start = y * hd.width as usize * 4;
+                rgba.extend_from_slice(&hd.rgba[start..start + w as usize * 4]);
+            }
+            self.map_patches.push(horizon_client::font::Patch { x: ax + rect[0], y: ay + rect[1], width: w, height: h, rgba });
+        }
+        let mut sprite = area;
+        sprite.u0 = (ax + rect[0]) as f32 / aw;
+        sprite.v0 = (ay + rect[1]) as f32 / ah;
+        sprite.u1 = (ax + rect[0] + w) as f32 / aw;
+        sprite.v1 = (ay + rect[1] + h) as f32 / ah;
+        self.gui.atlas.sprites.insert(location.to_owned(), sprite);
+    }
+}
+
+#[cfg(test)]
+mod slot_tests {
+    use super::*;
+
+    #[test]
+    fn strips_are_packed_at_their_own_size() {
+        let now = Instant::now();
+        let mut p = Packer::default();
+        let a = p.place("wings", "w1", 2032, 126, now).unwrap();
+        let b = p.place("tails", "t1", 300, 17, now).unwrap();
+        let c = p.place("hat", "h1", 64, 64, now).unwrap();
+        assert_eq!(a.rect, [0, 0, 2032, 126]);
+        assert!(a.upload && b.upload && c.upload);
+        // A short texture shares a shelf with room for it, else gets one of its own.
+        assert!(b.rect[1] >= 126 || b.rect[0] >= 2032);
+        assert_ne!(b.rect, c.rect);
+        // The glowing item of the same model draws the same pixels: nothing new to upload.
+        let again = p.place("wings", "w1-glow", 2032, 126, now).unwrap();
+        assert_eq!((again.rect, again.upload), (a.rect, false));
+    }
+
+    #[test]
+    fn a_full_area_starts_over() {
+        let t0 = Instant::now();
+        let mut p = Packer::default();
+        for i in 0..16 {
+            p.place(&format!("old{i}"), &format!("s{i}"), 2048, 128, t0).unwrap();
+        }
+        p.place("old0", "s0b", 2048, 128, t0).unwrap();
+        let fresh = p.place("new", "n", 2048, 128, t0 + Duration::from_secs(2)).unwrap();
+        assert_eq!(fresh.rect, [0, 0, 2048, 128]);
+        assert_eq!(fresh.evicted.len(), 17);
+    }
+
+    #[test]
+    fn glowing_parts_become_a_full_bright_item() {
+        let model = Model::parse(
+            br#"{"texture":[64,64],"parts":[{"attach":"head","cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[0,0]}],
+                 "children":[{"layer":"glow","cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[8,0]}]}]}]}"#,
+        )
+        .unwrap();
+        let tex = Texture { width: 64, height: 64, rgba: vec![255; 64 * 64 * 4] };
+        let items = model.items("halo", 0, &tex).items;
+        assert_eq!(items.len(), 2);
+        let (plain, glow) = (&items[0].1, &items[1].1);
+        assert_eq!(light_of(plain, 7), 7);
+        assert_eq!(light_of(glow, 7), horizon_client::mobs::render::FULL_BRIGHT);
+        // Each holds only its own faces: one box each.
+        assert_eq!((plain.vertices, glow.vertices), (24, 24));
+        assert_eq!((slot_width(plain), slot_height(plain)), (64.0, 64.0));
     }
 }
 
@@ -626,7 +1052,7 @@ mod tests {
     const HAT: &str = r#"{"format":1, "texture":[64,32], "parts":[
         {"id":"cap", "attach":"head", "armor":{"slot":"head","mode":"hide"},
          "cubes":[{"origin":[-4,-9,-4], "size":[8,1,8], "uv":[0,0], "inflate":0.25}],
-         "anim":[{"type":"spin","axis":"y","speed":540}, {"type":"blink"}],
+         "anim":[{"type":"spin","axis":"y","speed":540}],
          "children":[{"id":"bobble", "cubes":[{"origin":[-1,-11,-1], "size":[2,2,2], "uv":[32,0]}],
                       "anim":[{"type":"bob","speed":2,"amplitude":1}]}]},
         {"id":"wing", "attach":"body", "side":"left", "cubes":[{"origin":[0,0,2], "size":[1,8,6], "uv":[0,10]}]},
@@ -645,22 +1071,45 @@ mod tests {
     fn armour_rules_become_items_of_their_own() {
         let model = Model::parse(HAT.as_bytes()).unwrap();
         let native = model.items("party_hat", 0, &tex());
-        let armors: Vec<_> = native.items.iter().map(|(a, _)| *a).collect();
-        assert_eq!(armors, vec![Armor::Head, Armor::None]);
-        let (_, hat) = &native.items[0];
-        assert_eq!(hat.id, "native:party_hat");
-        assert_eq!(hat.bone, Bone::Head);
-        // The cap's 6 faces and the bobble's 6.
-        assert_eq!(hat.vertices, 12 * 4);
-        // The others ride the body (main) and the left leg (a limb).
-        let (_, rest) = &native.items[1];
-        assert_eq!(rest.bone, Bone::Body);
-        assert_eq!(rest.limbs.len(), 1);
-        assert_eq!(rest.limbs[0].0, Bone::LeftLeg);
+        // The cap hides under a helmet: the model is baked for the head slot empty and worn.
+        assert_eq!(native.items.len(), 2);
+        let ((open_rule, open), (worn_rule, worn)) = (&native.items[0], &native.items[1]);
+        assert_eq!((open_rule.mask, open_rule.state), (Armor::Head.bit(), 0));
+        assert_eq!((worn_rule.mask, worn_rule.state), (Armor::Head.bit(), Armor::Head.bit()));
+        assert_eq!(open.id, "native:party_hat#a0");
+        assert_eq!(open.bone, Bone::Head);
+        // The cap's 6 faces, the bobble's 6, the wing's 6 and the shoe's 6; under a helmet the wing and the shoe.
+        assert_eq!(open.vertices, 24 * 4);
+        assert_eq!(worn.vertices, 12 * 4);
+        // The wing rides the body and the shoe the left leg (limbs of the item).
+        assert_eq!(open.limbs.len(), 2);
+        assert_eq!(open.limbs[0].0, Bone::Body);
+        assert_eq!(open.limbs[1].0, Bone::LeftLeg);
+        assert!(!model.covers_head());
+        assert!(!native.covers_head);
     }
 
     #[test]
-    fn animations_keep_their_speed_and_blinks_are_dropped() {
+    fn push_rules_move_a_part_while_armour_is_worn() {
+        let model = Model::parse(
+            br#"{"texture":[64,64],"parts":[{"attach":"body","pivot":[0,2,0],
+                 "armor":{"slot":"chest","mode":"push","offset":[0,1,3]},
+                 "cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[0,0]}],
+                 "children":[{"pivot":[1,0,0],"cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[8,0]}]}]}]}"#,
+        )
+        .unwrap();
+        let items = model.items("cape", 0, &tex()).items;
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].0.state, Armor::Chest.bit());
+        let moved = |i: usize| items[i].1.root.children[0].pose;
+        assert_eq!(moved(0)[..3], [0.0, 2.0, 0.0]);
+        assert_eq!(moved(1)[..3], [0.0, 3.0, 3.0]);
+        // What hangs on the part goes along with it, as it moves through the parent's matrix.
+        assert_eq!(items[1].1.vertices, 48);
+    }
+
+    #[test]
+    fn animations_keep_their_speed() {
         let model = Model::parse(HAT.as_bytes()).unwrap();
         let hat = &model.items("h", 0, &tex()).items[0].1;
         assert_eq!(hat.animations.len(), 2);
@@ -672,12 +1121,48 @@ mod tests {
         assert_eq!((bob.motion, bob.period, bob.amplitude), (Motion::Bob, 10.0, 1.0));
     }
 
+
+    #[test]
+    fn blinking_parts_hide_for_part_of_each_cycle() {
+        // A visor that blinks once a second, shown for the first half; its light hangs on it and blinks with it.
+        let model = Model::parse(
+            br#"{"texture":[64,64],"parts":[{"attach":"head","cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[0,0]}],
+                 "children":[{"anim":[{"type":"blink","speed":1,"amplitude":0.5}],
+                              "cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[8,0]}],
+                              "children":[{"cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[16,0]}]}]}]}]}"#,
+        )
+        .unwrap();
+        let tex = Texture { width: 64, height: 64, rgba: vec![255; 64 * 64 * 4] };
+        let items = model.items("visor", 0, &tex).items;
+        assert_eq!(items.len(), 2);
+        let (plain, visor) = (&items[0].1, &items[1].1);
+        assert_eq!(plain.vertices, 24);
+        assert_eq!(visor.vertices, 48);
+        assert_eq!(visor.id, "native:visor#b1");
+        // Ticks: 20 a second. A quarter second in it shows, three quarters in it is hidden (CosmeticPose).
+        assert!(shown(plain, 15.0));
+        assert!(shown(visor, 5.0));
+        assert!(!shown(visor, 15.0));
+        assert!(shown(visor, 25.0));
+        // The Locker preview hides it on the same cue, with its light.
+        let cubes_at = |time: f64| {
+            let mut n = 0;
+            model.walk(0, time, &mut |step| {
+                if let Walk::Cubes(c) = step {
+                    n += c.len();
+                }
+            });
+            n
+        };
+        assert_eq!(cubes_at(0.25), 3);
+        assert_eq!(cubes_at(0.75), 1);
+    }
     #[test]
     fn a_side_only_part_shows_on_its_side() {
         let model = Model::parse(HAT.as_bytes()).unwrap();
         let has_wing = |side| {
             model.items("h", side, &tex()).items.iter().any(|(_, i)| {
-                i.root.children.iter().any(|p| p.name == "n2")
+                i.limbs.iter().any(|(_, l)| l.children.iter().any(|p| p.name == "n2"))
             })
         };
         // The model's own side is the wing's (left).
@@ -708,10 +1193,17 @@ mod tests {
     }
 
     #[test]
-    fn big_textures_shrink_to_a_skin_slot() {
-        let t = fit_slot(128, 64, &vec![9; 128 * 64 * 4]);
-        assert_eq!((t.width, t.height), (64, 32));
-        assert_eq!(t.rgba.len(), 64 * 32 * 4);
+    fn big_textures_shrink_to_a_native_slot() {
+        let t = fit_slot(4096, 64, &vec![9; 4096 * 64 * 4]);
+        assert_eq!((t.width, t.height), (2048, 32));
+        assert_eq!(t.rgba.len(), 2048 * 32 * 4);
+        // Shrinking averages: a black and white checker turns grey, not speckled.
+        let checker: Vec<u8> = (0..4096 * 2).flat_map(|i| if (i % 4096 + i / 4096) % 2 == 0 { [0, 0, 0, 255] } else { [255, 255, 255, 255] }).collect();
+        let grey = fit_slot(4096, 2, &checker);
+        assert!(grey.rgba.chunks(4).all(|p| p[0] == 127 && p[3] == 255));
+        // Wings (2032×126) keep every texel.
+        let kept = fit_slot(2032, 126, &vec![9; 2032 * 126 * 4]);
+        assert_eq!((kept.width, kept.height), (2032, 126));
         let small = fit_slot(32, 32, &vec![1; 32 * 32 * 4]);
         assert_eq!((small.width, small.height), (32, 32));
     }
@@ -723,4 +1215,140 @@ mod tests {
         assert!(Model::parse(br#"{"parts":[]}"#).is_err());
         assert!(Model::parse(br#"{"texture":[0,0],"parts":[{}]}"#).is_err());
     }
+}
+
+// ── the Locker's preview ─────────────────────────────────────────────────
+
+/// A box of a part, for the preview to draw (`CosmeticModel.Cube`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PreviewCube {
+    pub origin: [f32; 3],
+    pub size: [f32; 3],
+    pub uv: [f32; 2],
+    pub inflate: f32,
+    pub mirror: bool,
+}
+
+/// One step of walking a model the way `CosmeticRenderer` does.
+#[derive(Debug)]
+pub enum Walk<'a> {
+    Push,
+    Pop,
+    /// Into a root part: the bone it hangs on.
+    Root(Bone),
+    /// The part's pose after its animations: pivot in pixels, rotation in radians.
+    Transform { pos: [f32; 3], rot: [f32; 3] },
+    Cubes(&'a [PreviewCube]),
+}
+
+fn axis_index(axis: Axis) -> usize {
+    match axis {
+        Axis::X => 0,
+        Axis::Y => 1,
+        Axis::Z => 2,
+    }
+}
+
+/// Position in an animation's cycle, 0 to 1 (`CosmeticPose.cycle`).
+fn cycle(a: &Anim, time: f64) -> f64 {
+    (f64::from(a.speed) * time + f64::from(a.phase)).rem_euclid(1.0)
+}
+
+fn walk_part(p: &NcmPart, time: f64, sink: &mut dyn FnMut(Walk)) {
+    // A blinking part (one frame of a frame-by-frame animation) shows for its share of each cycle, with what
+    // hangs on it, as `CosmeticPose.pose` hides it. Without this the preview drew every frame at once, still.
+    if p.anims.iter().any(|a| a.motion.is_none() && cycle(a, time) >= f64::from(a.amplitude)) {
+        return;
+    }
+    sink(Walk::Push);
+    let mut pos = p.pivot;
+    let mut rot = p.rotation.map(f32::to_radians);
+    for a in &p.anims {
+        let i = axis_index(a.axis);
+        match a.motion {
+            Some(Motion::Spin) => {
+                let degrees = (f64::from(a.speed) * time + f64::from(a.phase) * 360.0).rem_euclid(360.0);
+                rot[i] += (degrees as f32).to_radians();
+            }
+            Some(Motion::Swing) => {
+                rot[i] += (f64::from(a.amplitude) * (std::f64::consts::TAU * cycle(a, time)).sin()).to_radians() as f32;
+            }
+            Some(Motion::Bob) => {
+                pos[i] += (f64::from(a.amplitude) * (std::f64::consts::TAU * cycle(a, time)).sin()) as f32;
+            }
+            None => {}
+        }
+    }
+    sink(Walk::Transform { pos, rot });
+    if !p.cubes.is_empty() {
+        let cubes: Vec<PreviewCube> = p
+            .cubes
+            .iter()
+            .map(|c| PreviewCube { origin: c.origin, size: c.size, uv: c.uv, inflate: c.inflate, mirror: c.mirror })
+            .collect();
+        sink(Walk::Cubes(&cubes));
+    }
+    for child in &p.children {
+        walk_part(child, time, sink);
+    }
+    sink(Walk::Pop);
+}
+
+impl Model {
+    /// The texture size the model's UVs are on.
+    pub fn texture_size(&self) -> [f32; 2] {
+        self.texture
+    }
+
+    /// Walks the parts `side` wears at `time` seconds, as `CosmeticRenderer.render` does with no armour worn.
+    pub fn walk(&self, side: u8, time: f64, sink: &mut dyn FnMut(Walk)) {
+        let side = if side != 0 { side } else { self.default_side() };
+        for root in self.roots.iter().filter(|r| r.side == 0 || r.side == side) {
+            sink(Walk::Push);
+            sink(Walk::Root(root.bone));
+            walk_part(root, time, sink);
+            sink(Walk::Pop);
+        }
+    }
+
+    /// `CosmeticModel.coversHead`, for the preview (a hood hides the skin's hat layer).
+    pub fn hides_hat(&self) -> bool {
+        self.roots.iter().filter(|r| r.bone == Bone::Head).any(|r| wraps(r, glam::Mat4::IDENTITY))
+    }
+}
+
+enum Preview {
+    Loading,
+    Ready(Arc<Model>),
+    Failed(Instant),
+}
+
+fn previews() -> &'static Mutex<HashMap<String, Preview>> {
+    static MODELS: OnceLock<Mutex<HashMap<String, Preview>>> = OnceLock::new();
+    MODELS.get_or_init(Default::default)
+}
+
+/// A cosmetic's model for the Locker's preview; the first ask starts the download.
+pub fn preview_model(base: &str, hash: &str) -> Option<Arc<Model>> {
+    let mut cache = previews().lock().unwrap_or_else(|e| e.into_inner());
+    match cache.get(hash) {
+        Some(Preview::Ready(m)) => return Some(m.clone()),
+        Some(Preview::Loading) => return None,
+        Some(Preview::Failed(at)) if at.elapsed() < RETRY => return None,
+        _ => {}
+    }
+    cache.insert(hash.to_owned(), Preview::Loading);
+    let (base, hash) = (base.to_owned(), hash.to_owned());
+    let spawned = std::thread::Builder::new().name("Native cosmetic model".into()).spawn({
+        let (base, hash) = (base.clone(), hash.clone());
+        move || {
+            let model = fetch(&base, &hash, MAX_MODEL_BYTES).and_then(|b| Model::parse(&b).ok());
+            let state = model.map_or_else(|| Preview::Failed(Instant::now()), |m| Preview::Ready(Arc::new(m)));
+            previews().lock().unwrap_or_else(|e| e.into_inner()).insert(hash, state);
+        }
+    });
+    if spawned.is_err() {
+        cache.insert(hash, Preview::Failed(Instant::now()));
+    }
+    None
 }

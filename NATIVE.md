@@ -28,6 +28,14 @@ What this fork changes (and nothing else):
   the mod's own logo bitmaps (`packaging/native/native_marks.rs`, `tools/native/native_marks.py`);
 - Native 3D cosmetics: the mod's NCM models become the game's own cosmetic items and draw beside Horizon's
   (`packaging/native/native_cosmetics.rs`, `tools/native/native_cosmetics.py`);
+- the Native Client interface, ported from the Java mod: its drawing layer (`native_ui`), the HUD modules
+  (FPS, CPS, Keystrokes, Coordinates, status effects, armour, crosshair, Zoom, Freelook, Time and Weather
+  Changer, Scoreboard, Boss Bar, Now Playing, Discord RPC and the rest), the HUD editor, the Native menu
+  (mods, cosmetics wardrobe, settings, screenshots, music), the Relay chat (friends, groups, GIFs,
+  pictures, reactions) with message pop-ups, the pause menu and a music player
+  (`packaging/native/native_client`, `native_ui`, `tools/native/native_ui.py`, `native_tweaks.py` and
+  `native_client.py`). Each engine hook (`native_ui::tweaks`) is one line next to the code it overrides, and is
+  off until a module asks for it. Not ported yet: the Native title screen and server list, and voice chat;
 - `.github/workflows/native-build.yml` builds the newest upstream Nightly with those changes and publishes
   the client as the release `native-<date>-<commit>`; `.github/workflows/native-check.yml` compiles the same
   changes on every pull request.

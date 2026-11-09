@@ -1,0 +1,308 @@
+{
+  "family": "Native Module Icons",
+  "version": 1,
+  "license": "CC0-1.0",
+  "icons": [
+    {
+      "id": "fps",
+      "label": "FPS",
+      "codepoint": "F400",
+      "glyph": "native_fps",
+      "sha256": "9dd7f9a6ee307b2d4d73fa68915946c0df848fff03619709b2aa0fd2fcd659d1"
+    },
+    {
+      "id": "cps",
+      "label": "CPS",
+      "codepoint": "F401",
+      "glyph": "native_cps",
+      "sha256": "67e32d79f970ea8e264bb6cd0602dcfadb4cf9d2374bee265007e4f376a9013d"
+    },
+    {
+      "id": "keystrokes",
+      "label": "Keystrokes",
+      "codepoint": "F402",
+      "glyph": "native_keystrokes",
+      "sha256": "269aea454d42da403f7ab06821da4fdc1acde34e98a403237405ecff59c49e86"
+    },
+    {
+      "id": "coords",
+      "label": "Coordinates",
+      "codepoint": "F403",
+      "glyph": "native_coords",
+      "sha256": "46cae5f05dc181efdb6b7a6933d866c7a35f2690f7f4bf71df569008c9938e6c"
+    },
+    {
+      "id": "direction",
+      "label": "Direction",
+      "codepoint": "F404",
+      "glyph": "native_direction",
+      "sha256": "6119605ddcc67795209f36e70882cfde33a840b0b476fb27f8b1171e78182d27"
+    },
+    {
+      "id": "clock",
+      "label": "Clock",
+      "codepoint": "F405",
+      "glyph": "native_clock",
+      "sha256": "07cd86d47c86c54e736a4d35b18d57ba72dd12aa24d8dd1737b59e3b01ec2b9f"
+    },
+    {
+      "id": "memory",
+      "label": "Memory",
+      "codepoint": "F406",
+      "glyph": "native_memory",
+      "sha256": "e4c370147b4e49b9b018a56fbfbe317031e1b59c012e3444b22463fdc029c9a2"
+    },
+    {
+      "id": "ping",
+      "label": "Ping",
+      "codepoint": "F407",
+      "glyph": "native_ping",
+      "sha256": "1a56199a746f50e7fc477834ae5bde9db4ff5e8a928cacd857fb78efd74096d1"
+    },
+    {
+      "id": "server",
+      "label": "Server IP",
+      "codepoint": "F408",
+      "glyph": "native_server",
+      "sha256": "a1b19d4b5f0f83bc05cd89c2d8f5b5c478574d2716c8f307ad2c2b78363f3bae"
+    },
+    {
+      "id": "speed",
+      "label": "Speed",
+      "codepoint": "F409",
+      "glyph": "native_speed",
+      "sha256": "c0f326d04f7371f031cc999063a8c95c896cd6d7ca4d876beea06ac35b29515d"
+    },
+    {
+      "id": "scoreboard",
+      "label": "Scoreboard",
+      "codepoint": "F40A",
+      "glyph": "native_scoreboard",
+      "sha256": "fbae64c74a3cfcef445a39e5e571f077e077c584d5587dfec9dccf338974d5c0"
+    },
+    {
+      "id": "bossbar",
+      "label": "Boss Bar",
+      "codepoint": "F40B",
+      "glyph": "native_bossbar",
+      "sha256": "b44ed929cf7e986cd5e2ea391ff08667e38bf6a61158c75cc96f9e6a1a661873"
+    },
+    {
+      "id": "togglesprint",
+      "label": "Toggle Sprint",
+      "codepoint": "F40C",
+      "glyph": "native_togglesprint",
+      "sha256": "a4fc90c779617a0bf8d95eb57e43fb1419f005a976f0fd8ba6f879cfc4b40242"
+    },
+    {
+      "id": "zoom",
+      "label": "Zoom",
+      "codepoint": "F40D",
+      "glyph": "native_zoom",
+      "sha256": "1fee49c6760f91d6729f46250bb3c88a060b095a1928d9b760509365b7a72e05"
+    },
+    {
+      "id": "fullbright",
+      "label": "Fullbright",
+      "codepoint": "F40E",
+      "glyph": "native_fullbright",
+      "sha256": "a75ef4d39b617956638104207f77b27fc2725e72753f462da4b3ceb8c328e9ae"
+    },
+    {
+      "id": "bgfps",
+      "label": "Background FPS",
+      "codepoint": "F40F",
+      "glyph": "native_bgfps",
+      "sha256": "fee5b8bdda94767d65977558ab6cc9f371282520bc5e3abf0a724fe5a9fcef2e"
+    },
+    {
+      "id": "effects",
+      "label": "Potion Effects",
+      "codepoint": "F410",
+      "glyph": "native_effects",
+      "sha256": "d648e4ae905cab5206f6cf30191a4563238a3e8e64fca2386283fa60e6464e88"
+    },
+    {
+      "id": "armor",
+      "label": "Armor Status",
+      "codepoint": "F411",
+      "glyph": "native_armor",
+      "sha256": "c2dbd5dfed6a14ac15a4f1bd977a98f5e58dd130da672253163ba0c934ef8e03"
+    },
+    {
+      "id": "inventory",
+      "label": "Inventory",
+      "codepoint": "F412",
+      "glyph": "native_inventory",
+      "sha256": "0ac795c3036318b3c05f079a0581d89b64b7bb1e03f25d41acd279a50298df47"
+    },
+    {
+      "id": "crosshair",
+      "label": "Crosshair",
+      "codepoint": "F413",
+      "glyph": "native_crosshair",
+      "sha256": "1cde1b5cb234ecc31c470865af4965f0a37fe7c62dbdfb04380f6eda8abc2f06"
+    },
+    {
+      "id": "hitbox-colours",
+      "label": "Hitbox Colours",
+      "codepoint": "F414",
+      "glyph": "native_hitbox_colours",
+      "sha256": "3728bf0c1c2add4f958865af64db2a157d898f32de7f64a868607a5965f8d96d"
+    },
+    {
+      "id": "critical-colours",
+      "label": "Critical Colours",
+      "codepoint": "F415",
+      "glyph": "native_critical_colours",
+      "sha256": "67512304bb0abace0b0911ebee28dcf364a137e715ae9dd0de70a95279cadb12"
+    },
+    {
+      "id": "watermark",
+      "label": "Native Watermark",
+      "codepoint": "F416",
+      "glyph": "native_watermark",
+      "sha256": "5d921d149b4d707e4aa8efb4c449e8e318eebca9b87e7bfb93c64a4e9cc8282e"
+    },
+    {
+      "id": "voice",
+      "label": "Voice Chat",
+      "codepoint": "F417",
+      "glyph": "native_voice",
+      "sha256": "0386375181e48e88bf29ce19dc0f9906fb044e3230c10ce64357b556133b2b47"
+    },
+    {
+      "id": "voice-overlay",
+      "label": "Voice Overlay",
+      "codepoint": "F418",
+      "glyph": "native_voice_overlay",
+      "sha256": "1327351a7a43228bdf8c6fd9d75c75c5fe69a09861866d7c3ada0c1c88b0312c"
+    },
+    {
+      "id": "nether-coords",
+      "label": "Nether Coordinates",
+      "codepoint": "F419",
+      "glyph": "native_nether_coords",
+      "sha256": "2c738629c6b9ad98cc51144b74a182232847c74ec2c893014dfbc7b34a9b16e1"
+    },
+    {
+      "id": "moon-phase",
+      "label": "Moon Phase",
+      "codepoint": "F41A",
+      "glyph": "native_moon_phase",
+      "sha256": "b1359b6ca2b2515eae94b79cc32cc634223aac3d462015195abf270704f16e80"
+    },
+    {
+      "id": "day-night",
+      "label": "Day / Night Cycle",
+      "codepoint": "F41B",
+      "glyph": "native_day_night",
+      "sha256": "b19a92a6fc76c9f5d92f80cc4e611e2c136b5e25ab855d01a258e40333b002a2"
+    },
+    {
+      "id": "totem-counter",
+      "label": "Totem Counter",
+      "codepoint": "F41C",
+      "glyph": "native_totem_counter",
+      "sha256": "dbf04b1ba2664abdbebefb761a21c36c57031705dbc4668afa5f498cebc59c60"
+    },
+    {
+      "id": "item-counter",
+      "label": "Item Counter",
+      "codepoint": "F41D",
+      "glyph": "native_item_counter",
+      "sha256": "98180ffdb5285a203321b74fc57bb8a27e5c76068c2770378ab4d1d2e02604d1"
+    },
+    {
+      "id": "playtime",
+      "label": "Playtime",
+      "codepoint": "F41E",
+      "glyph": "native_playtime",
+      "sha256": "63407e3f1d2f2c1b1501e86b289f229996bc15e5cf33a85a9192343c60ecbdee"
+    },
+    {
+      "id": "reach",
+      "label": "Reach Display",
+      "codepoint": "F41F",
+      "glyph": "native_reach",
+      "sha256": "4584072968fb7c777c985a90449377c13552f35f5a5f55524ff8a26a33f3e99c"
+    },
+    {
+      "id": "low-fire",
+      "label": "Low Fire",
+      "codepoint": "F420",
+      "glyph": "native_low_fire",
+      "sha256": "18c57a824085ab34cce55d135d8d97d2c74de2d613c0736830558c1880f42ac0"
+    },
+    {
+      "id": "damage-tint",
+      "label": "Damage Tint",
+      "codepoint": "F421",
+      "glyph": "native_damage_tint",
+      "sha256": "02ed121564114a32d27184c4ce08ab1ca0567002145188cd91c69ebc89f144d4"
+    },
+    {
+      "id": "combo",
+      "label": "Combo Counter",
+      "codepoint": "F422",
+      "glyph": "native_combo",
+      "sha256": "d7c5b7a86b184208c5c574ac38366fda0abdad5e260d5e553bd43e2d5e2475b2"
+    },
+    {
+      "id": "cooldowns",
+      "label": "Item Cooldowns",
+      "codepoint": "F423",
+      "glyph": "native_cooldowns",
+      "sha256": "532f978d043de242de7fc667759159c2b1b78eff1d8cda0e04e011750e4c0799"
+    },
+    {
+      "id": "block-overlay",
+      "label": "Block Overlay",
+      "codepoint": "F424",
+      "glyph": "native_block_overlay",
+      "sha256": "d3c5a36e3a1001572b3dd8a106b4d4531770bd3498bb33f84e75a480c1eac576"
+    },
+    {
+      "id": "freelook",
+      "label": "Freelook",
+      "codepoint": "F425",
+      "glyph": "native_freelook",
+      "sha256": "092328e3fc612d8cb6e012577f1b71533a656dcb238576f6ec396352f6a795a0"
+    },
+    {
+      "id": "no-hurt-cam",
+      "label": "No Hurt Cam",
+      "codepoint": "F426",
+      "glyph": "native_no_hurt_cam",
+      "sha256": "117fc4f17dd666550504342923ac2ae7468f74cae36f681c35fe9039c617fd72"
+    },
+    {
+      "id": "time-changer",
+      "label": "Time Changer",
+      "codepoint": "F427",
+      "glyph": "native_time_changer",
+      "sha256": "b9267fa3358095f137e5b664ea8c7dc43296c1fd5beb0f14a3976655afacbc60"
+    },
+    {
+      "id": "weather-changer",
+      "label": "Weather Changer",
+      "codepoint": "F428",
+      "glyph": "native_weather_changer",
+      "sha256": "ab1b8c55a6d8edd2d785d012c1e2e71f52c386f7071bcbde1ba22c62a82fa179"
+    },
+    {
+      "id": "now-playing",
+      "label": "Now Playing",
+      "codepoint": "F429",
+      "glyph": "native_now_playing",
+      "sha256": "ffa3d5e47f286a640456d7d66bd53af156a832588250e3dff4026647a8207bfa"
+    },
+    {
+      "id": "motion-blur",
+      "label": "Motion Blur",
+      "codepoint": "F42A",
+      "glyph": "native_motion_blur",
+      "sha256": "4a78cebcc937fa801fa6c22373ebdae394d63523f329e6d40b707e69fdf901df"
+    }
+  ]
+}

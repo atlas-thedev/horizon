@@ -61,6 +61,9 @@ pub fn native_start() {
         Ok(_) => {}
         Err(e) => log::warn!("Native: session thread unavailable: {e}"),
     }
+    // Native players' skins: the directory is fetched from launch, not when the first player shows up, so a
+    // world opens with everyone's skin already known.
+    drop(crate::native_skins::directory());
 }
 
 /// What the player does now (the same [`Status`] the game sends Discord).
@@ -283,4 +286,9 @@ fn native_run() {
     if let (Some(found), Some(_)) = (session.as_ref(), verified.as_ref()) {
         let _ = native_push(found, Status::Off);
     }
+}
+
+/// Trusted launcher ticket, refreshed on disk by Native.
+pub fn native_emote_auth() -> Option<(String,String)> {
+    read_native_session().map(|s|(s.api,s.ticket))
 }
