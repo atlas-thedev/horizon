@@ -1097,8 +1097,19 @@ pub(super) fn native_title_active(title: &horizon_client::title::Title) -> bool 
     })
 }
 
-/// Draws the Native title (and Relay or the Native menu over it, opened from there), or the Native server list,
-/// into `batch`.
+/// Shades the panorama before the game's logo and the Native foreground are submitted.
+pub(super) fn native_title_background(batch: &mut HudBatch) {
+    with_state(|state| {
+        let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
+        let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
+        let c = &mut state.canvas;
+        c.begin(fb[0], fb[1], scale);
+        state.title.background(c);
+        c.finish(batch);
+    });
+}
+
+/// Draws only the Native foreground; the background pass precedes the game's logo.
 pub(super) fn native_title_frame(
     batch: &mut HudBatch,
     title: &horizon_client::title::Title,
@@ -1128,7 +1139,6 @@ pub(super) fn native_title_frame(
         }
         match overlay {
             5 => {
-                state.title.background(c);
                 if let Some(info) = dialog.as_ref()
                     && let Some(act) = state.servers_dialog.draw(&mut state.ui, c, info)
                 {
@@ -1146,7 +1156,6 @@ pub(super) fn native_title_frame(
                 }
             }
             1 => {
-                state.title.background(c);
                 let who = Some(player).filter(|n| !n.is_empty());
                 let action = state.menu.draw(&mut state.ui, c, &mut state.modules, &mut state.cfg, who, false);
                 match action {
@@ -1163,13 +1172,11 @@ pub(super) fn native_title_frame(
                 }
             }
             2 => {
-                state.title.background(c);
                 if state.relay.draw(&mut state.ui, c, &mut state.cfg, false) == relay_view::RelayAction::Close {
                     state.title_overlay = 0;
                 }
             }
             3 => {
-                state.title.background(c);
                 let g = module::GameView::sample();
                 match state.editor.draw(&mut state.ui, c, &mut state.modules, &g, false) {
                     menu::Action::Close => state.title_overlay = 0,

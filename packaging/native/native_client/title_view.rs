@@ -101,8 +101,7 @@ impl TitleView {
         hit && enabled
     }
 
-    /// The shading over the game's own title panorama (vanilla's background shows through; behind Relay and the
-    /// menu too when they open from the title), darker towards the top and bottom edges where the text sits.
+    /// The panorama shading, submitted before the Minecraft logo and all foreground UI.
     pub fn background(&self, c: &mut Canvas) {
         let (w, h) = (c.width(), c.height());
         c.fill(0.0, 0.0, w, h, 0x45000000);
@@ -114,7 +113,6 @@ impl TitleView {
         self.opened(ui);
         let (w_all, h_all) = (c.width(), c.height());
         let inn = ui.anim("title#in", 1.0, 4.0);
-        self.background(c);
         c.push_alpha(inn);
         let mut act = None;
 
