@@ -38,7 +38,7 @@ class EmotePatchEncoding(unittest.TestCase):
             apply()
             labels = json.loads(lang.read_bytes().decode('utf-8', errors='strict'))
             self.assertEqual(labels['existing'], '日本語 · café')
-            self.assertEqual(labels['native.emotes.hint'], 'Release to play · Scroll for pages · Esc to cancel')
+            self.assertEqual(labels['native.emotes.hint'], 'Click to play · Scroll for pages · Esc to close')
             self.assertIn('// 日本語 · café', (client / 'mobs/anim.rs').read_text(encoding='utf-8'))
             before = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
             apply()

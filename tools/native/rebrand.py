@@ -33,6 +33,10 @@ LANG_DIR = 'crates/horizon-client/assets/horizon/lang/'
 
 def fix_string(match):
     text = match.group(0)
+    # include_str! tests use comment text as source markers. The comments
+    # themselves are not rebranded, so their lookup strings must stay equal.
+    if text.startswith(('"//', 'b"//')):
+        return text
     if any(k in text for k in KEEP):
         return text
     return WORD.sub('Native', text)

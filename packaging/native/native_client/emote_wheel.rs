@@ -43,6 +43,16 @@ fn sector(c: &mut Canvas, cx: f32, cy: f32, inner: f32, outer: f32, a: f32, b: f
     }
 }
 impl Wheel {
+    pub fn key(&mut self, wheel_key: bool, escape: bool, pressed: bool, repeat: bool) -> bool {
+        if !self.open || (!wheel_key && !escape) {
+            return false;
+        }
+        if pressed && !repeat {
+            self.open = false;
+            self.selected = None;
+        }
+        true
+    }
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas) -> bool {
         let me = native_emotes::snapshot();
         let pages = me["usablePages"].as_u64().unwrap_or(1).max(1) as usize;
@@ -199,21 +209,59 @@ impl Wheel {
             0xff777c8a,
         );
         if ui.pressed && self.selected.is_some() {
-            self.release();
+            return self.select();
+        }
+        if ui.pressed && (ui.mx - cx).powi(2) + (ui.my - cy).powi(2) < inner * inner {
+            self.open = false;
+            self.selected = None;
             return true;
         }
         false
     }
-    pub fn release(&mut self) {
-        if let Some(slot) = self.selected.take() {
-            native_emotes::play(self.page, slot);
+    pub fn select(&mut self) -> bool {
+        if let Some(slot) = self.selected
+            && native_emotes::play(self.page, slot)
+        {
+            self.selected = None;
+            self.open = false;
+            return true;
         }
-        self.open = false;
+        false
     }
 }
 #[cfg(test)]
 mod tests {
-    use super::slot_at;
+    use super::{Wheel, slot_at};
+    #[test]
+    fn tap_release_and_repeat_leave_wheel_open_until_explicit_dismissal() {
+        let mut wheel = Wheel {
+            open: true,
+            selected: Some(2),
+            ..Default::default()
+        };
+        assert!(wheel.key(true, false, false, false));
+        assert!(wheel.open);
+        assert_eq!(wheel.selected, Some(2));
+        assert!(wheel.key(true, false, true, true));
+        assert!(wheel.open);
+        assert!(!wheel.key(false, false, true, false));
+        assert!(wheel.open);
+        assert!(wheel.key(true, false, true, false));
+        assert!(!wheel.open);
+        assert_eq!(wheel.selected, None);
+        wheel.open = true;
+        assert!(wheel.key(false, true, true, false));
+        assert!(!wheel.open);
+    }
+    #[test]
+    fn empty_selection_keeps_wheel_open() {
+        let mut wheel = Wheel {
+            open: true,
+            ..Default::default()
+        };
+        assert!(!wheel.select());
+        assert!(wheel.open);
+    }
     #[test]
     fn radial_selection_and_cancel_zone() {
         assert_eq!(slot_at(0., -100., 20., 200.), Some(0));

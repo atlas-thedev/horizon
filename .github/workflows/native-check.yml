@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - 'tests/test_native_emotes_patch.py'
+      - 'tests/test_native_rebrand_patch.py'
       - 'tools/native/**'
       - 'packaging/native/**'
       - '.github/workflows/native-*.yml'
@@ -31,6 +32,8 @@ jobs:
           path: native
       - name: Check emote patch encoding and idempotency
         run: python -m unittest discover -s native/tests -p test_native_emotes_patch.py
+      - name: Check branding preserves hook source markers
+        run: python -m unittest discover -s native/tests -p test_native_rebrand_patch.py
       - name: Find the upstream Nightly
         id: up
         run: |
