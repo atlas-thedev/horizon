@@ -30,8 +30,9 @@ if new not in s:
 p.write_text(s, encoding='utf-8')
 p = root/'crates/horizon-client/assets/horizon/lang/en_us.json'
 labels=json.loads(p.read_text(encoding='utf-8'))
-labels.update({'native.emotes.select':'Select an emote','native.emotes.page':'Page','native.emotes.key':'Emote wheel','native.emotes.title':'Emotes','native.emotes.empty':'Empty slot','native.emotes.signin':'Sign in through Native Client to use emotes.','native.emotes.hint':'Click to play · Scroll for pages · Esc to close'})
+labels.update({'native.emotes.select':'Select an emote','native.emotes.page':'Page','native.emotes.key':'Emote wheel','native.emotes.title':'Emotes','native.emotes.empty':'Empty slot','native.emotes.signin':'Sign in through Native Client to use emotes.','native.emotes.hint':'Click / 1–8 to play · Scroll / ← → for pages · Esc to close'})
 labels.update({
+    'native.emotes.cancel': 'Cancel',
     'native.emotes.description': 'Open the wheel or play a slot on its current page. Click a shortcut to change it; Backspace clears it.',
     'native.emotes.conflict': 'Conflict',
     'native.emotes.reserved.menu': 'Reserved: Native menu',

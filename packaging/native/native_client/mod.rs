@@ -10,6 +10,7 @@
 
 mod discord_module;
 mod emote_wheel;
+mod emote_camera;
 mod emotes_module;
 mod extra_modules;
 mod gameplay_modules;
@@ -111,6 +112,7 @@ struct State {
     pause_was: bool,
     relay_open: bool,
     emote_wheel: emote_wheel::Wheel,
+    emote_camera: emote_camera::Camera,
     /// The Native title: its view, what is open over it (0 nothing, 1 the menu, 2 Relay, 3 the HUD editor), whether
     /// it was drawn last frame and what it asked of the game.
     title: title_view::TitleView,
@@ -164,6 +166,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             pause_was: false,
             relay_open: false,
             emote_wheel: emote_wheel::Wheel::default(),
+            emote_camera: emote_camera::Camera::default(),
             title: title_view::TitleView::default(),
             title_overlay: 0,
             title_was: false,
@@ -333,6 +336,17 @@ impl Game<'_> {
             players.push((0,local.clone(),self.remote.as_ref().map(|r|format!("{:032x}",r.profile()))));
             let scope = if !g.in_world { String::new() } else if let Some(server)=self.server_address() { horizon_client::native_emotes::scope(server) } else { horizon_client::native_emotes::scope(&format!("local:{local}")) };
             horizon_client::native_emotes::tick(scope,players,&local,[g.x,g.y,g.z],g.down[4]||g.down[7]||g.down[8]);
+            {
+                use super::perspective::CameraType;
+                let perspective = match self.camera_type {
+                    CameraType::FirstPerson => 0,
+                    CameraType::ThirdPersonBack => 1,
+                    CameraType::ThirdPersonFront => 2,
+                };
+                if let Some(next) = state.emote_camera.update(g.in_world && horizon_client::native_emotes::is_playing(0), perspective) {
+                    self.camera_type = if next == 1 { CameraType::ThirdPersonBack } else { CameraType::FirstPerson };
+                }
+            }
             let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
             let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
             for m in &mut state.modules.all {
@@ -496,7 +510,8 @@ impl Game<'_> {
                 | if m.alt_key() { 4 } else { 0 } | if m.super_key() { 8 } else { 0 };
             let allowed = self.focused && self.screen == Screen::Playing && self.title.is_none() && self.native_mod_screen().is_none();
             if with_state(|s|s.emote_wheel.open) {
-                let consumed=with_state(|s|s.emote_wheel.key(glfw==Some(wheel_key),glfw==Some(256),key.state==ElementState::Pressed,key.repeat));
+                let consumed=with_state(|s|s.emote_wheel.key(glfw==Some(wheel_key),glfw==Some(256),key.state==ElementState::Pressed,key.repeat)
+                    || glfw.is_some_and(|key_code|s.emote_wheel.navigate(key_code,key.state==ElementState::Pressed,key.repeat)));
                 if consumed {if !with_state(|s|s.emote_wheel.open){self.native_mod_screen_close(MOD_ID);}return true;}
             } else if let Some(glfw) = glfw
                 && let Some(input) = with_state(|s| emotes_module::input(&s.modules, &s.cfg, glfw, modifiers, key.state == ElementState::Pressed, key.repeat, allowed)) {
