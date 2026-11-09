@@ -21,6 +21,12 @@ fn slot_at(dx: f32, dy: f32, inner: f32, outer: f32) -> Option<usize> {
             .rem_euclid(8) as usize,
     )
 }
+fn radius(width: f32, height: f32) -> f32 {
+    ((width - 32.0) / 2.0).min((height - 116.0) / 2.0).clamp(24.0, 220.0)
+}
+fn wrap_page(page: usize, delta: i32, pages: usize) -> usize {
+    (page as i32 + delta).rem_euclid(pages.max(1) as i32) as usize
+}
 fn sector(c: &mut Canvas, cx: f32, cy: f32, inner: f32, outer: f32, a: f32, b: f32, color: u32) {
     for n in 0..14 {
         let x = a + (b - a) * n as f32 / 14.0;
@@ -43,6 +49,24 @@ fn sector(c: &mut Canvas, cx: f32, cy: f32, inner: f32, outer: f32, a: f32, b: f
     }
 }
 impl Wheel {
+    fn change_page(&mut self, delta: i32, pages: usize) {
+        self.page = wrap_page(self.page.min(pages.saturating_sub(1)), delta, pages);
+        self.selected = None;
+    }
+    pub fn navigate(&mut self, key: i32, pressed: bool, repeat: bool) -> bool {
+        if !matches!(key, 49..=56 | 257 | 262 | 263) { return false; }
+        if pressed && !repeat {
+            match key {
+                49..=56 => { self.selected = Some((key - 49) as usize); self.select(); }
+                257 => { self.select(); }
+                _ => {
+                    let pages = native_emotes::snapshot()["usablePages"].as_u64().unwrap_or(1).max(1) as usize;
+                    self.change_page(if key == 263 { -1 } else { 1 }, pages);
+                }
+            }
+        }
+        true
+    }
     pub fn key(&mut self, wheel_key: bool, escape: bool, pressed: bool, repeat: bool) -> bool {
         if !self.open || (!wheel_key && !escape) {
             return false;
@@ -58,13 +82,12 @@ impl Wheel {
         let pages = me["usablePages"].as_u64().unwrap_or(1).max(1) as usize;
         self.page = self.page.min(pages - 1);
         if ui.scroll != 0.0 {
-            self.page = (self.page as i32 - if ui.scroll > 0.0 { 1 } else { -1 })
-                .rem_euclid(pages as i32) as usize;
+            self.change_page(if ui.scroll > 0.0 { -1 } else { 1 }, pages);
         }
-        let outer = (c.height() * 0.34).min(230.0);
-        let inner = outer * 0.19;
-        let (cx, cy) = (c.width() * 0.5, c.height() * 0.48);
-        c.fill(0.0, 0.0, c.width(), c.height(), 0x50000000);
+        let outer = radius(c.width(), c.height());
+        let inner = outer * 0.27;
+        let (cx, cy) = (c.width() * 0.5, c.height() * 0.5 - 4.0);
+        c.fill(0.0, 0.0, c.width(), c.height(), 0x28000000);
         self.selected = slot_at(ui.mx - cx, ui.my - cy, inner, outer);
         for slot in 0..8 {
             let angle = slot as f32 * std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2;
@@ -79,7 +102,7 @@ impl Wheel {
                 outer,
                 a,
                 b,
-                if active { 0xffb99ceb } else { 0xff292d36 },
+                if active { theme::TEXT_SECONDARY } else { theme::HAIRLINE_STRONG },
             );
             sector(
                 c,
@@ -89,7 +112,7 @@ impl Wheel {
                 outer - 1.3,
                 a + 0.005,
                 b - 0.005,
-                if active { 0xf22d253d } else { 0xef111319 },
+                if active { 0xf014171d } else { 0xd008090c },
             );
             let item = me["pages"][self.page][slot]
                 .as_str()
@@ -102,7 +125,7 @@ impl Wheel {
                 cx + angle.cos() * outer * 0.64,
                 cy + angle.sin() * outer * 0.64,
             );
-            let h = outer * 0.33;
+            let h = outer * 0.38;
             let w = h * 300.0 / 340.0;
             let mut drawn = false;
             if let Some(item) = item {
@@ -117,7 +140,7 @@ impl Wheel {
                     c.image(
                         &img,
                         x - w / 2.0,
-                        y - h * 0.72,
+                        y - h * 0.68,
                         w,
                         h,
                         [0.0, 0.0, 1.0, 1.0],
@@ -127,33 +150,38 @@ impl Wheel {
                 }
             }
             if !drawn {
-                let n = (slot + 1).to_string();
-                let fs = outer * 0.085;
-                let nw = c.text_width(font::SEMIBOLD, fs, &n);
-                c.text(font::SEMIBOLD, fs, &n, x - nw / 2.0, y - 15.0, 0xff5d536c);
+                c.icon(theme::I_SMILE, (outer * 0.13).min(24.0), x, y - 6.0, theme::TEXT_MUTED);
             }
-            let label = c.ellipsize(font::SEMIBOLD, 11.0, &label, outer * 0.49);
-            let tw = c.text_width(font::SEMIBOLD, 11.0, &label);
+            let fs = (outer * 0.065).min(11.0);
+            let label = c.ellipsize(font::SEMIBOLD, fs, &label, outer * 0.46);
+            let tw = c.text_width(font::SEMIBOLD, fs, &label);
             c.text(
                 font::SEMIBOLD,
-                11.0,
+                fs,
                 &label,
                 x - tw / 2.0,
-                y + h * 0.33,
-                if active { 0xfff1e8ff } else { 0xffb6b9c3 },
+                y + h * 0.38,
+                if active { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY },
             );
+            c.text(font::REGULAR, 9.0, &(slot + 1).to_string(),
+                cx + angle.cos() * outer * 0.90 - 3.0,
+                cy + angle.sin() * outer * 0.90 - 5.0, theme::TEXT_MUTED);
         }
-        let title = horizon_client::lang::get("native.emotes.select");
-        let tw = c.text_width(font::SEMIBOLD, 18.0, &title);
+        let title = horizon_client::lang::get("native.emotes.title");
+        let tw = c.text_width(font::SEMIBOLD, 16.0, &title);
         c.text(
             font::SEMIBOLD,
-            18.0,
+            16.0,
             &title,
             cx - tw / 2.0,
-            cy - outer - 38.0,
+            cy - outer - 29.0,
             theme::TEXT_STRONG,
         );
-        c.icon(theme::I_X, 14.0, cx, cy, 0xff7b7f8c);
+        c.circle(cx, cy, inner - 7.0, 0xb008090c);
+        c.icon(theme::I_X, 14.0, cx, cy - 7.0, theme::TEXT_SECONDARY);
+        let cancel = horizon_client::lang::get("native.emotes.cancel");
+        let cw = c.text_width(font::REGULAR, 10.0, &cancel);
+        c.text(font::REGULAR, 10.0, &cancel, cx - cw / 2.0, cy + 7.0, theme::TEXT_MUTED);
         let count = format!(
             "{} {} / {}",
             horizon_client::lang::get("native.emotes.page"),
@@ -168,30 +196,16 @@ impl Wheel {
             &count,
             cx - tw / 2.0,
             footer,
-            0xffdfdfe8,
+            theme::TEXT,
         );
         if pages > 1 {
-            c.text(
-                font::SEMIBOLD,
-                20.0,
-                "‹",
-                cx - 76.0,
-                footer - 4.0,
-                0xffc3aedf,
-            );
-            c.text(
-                font::SEMIBOLD,
-                20.0,
-                "›",
-                cx + 67.0,
-                footer - 4.0,
-                0xffc3aedf,
-            );
+            c.icon(theme::I_CHEVRON_LEFT, 15.0, cx - 72.0, footer + 7.0, theme::TEXT_SECONDARY);
+            c.icon(theme::I_CHEVRON_RIGHT, 15.0, cx + 72.0, footer + 7.0, theme::TEXT_SECONDARY);
             if ui.clicked(c, "emote:prev", cx - 88.0, footer - 6.0, 32.0, 28.0) {
-                self.page = (self.page + pages - 1) % pages;
+                self.change_page(-1, pages);
             }
             if ui.clicked(c, "emote:next", cx + 56.0, footer - 6.0, 32.0, 28.0) {
-                self.page = (self.page + 1) % pages;
+                self.change_page(1, pages);
             }
         }
         let hint = horizon_client::lang::get(if me.is_null() {
@@ -199,6 +213,7 @@ impl Wheel {
         } else {
             "native.emotes.hint"
         });
+        let hint = c.ellipsize(font::REGULAR, 10.0, &hint, c.width() - 32.0);
         let tw = c.text_width(font::REGULAR, 10.0, &hint);
         c.text(
             font::REGULAR,
@@ -206,7 +221,7 @@ impl Wheel {
             &hint,
             cx - tw / 2.0,
             footer + 26.0,
-            0xff777c8a,
+            theme::TEXT_MUTED,
         );
         if ui.pressed && self.selected.is_some() {
             return self.select();
@@ -231,7 +246,25 @@ impl Wheel {
 }
 #[cfg(test)]
 mod tests {
-    use super::{Wheel, slot_at};
+    use super::{Wheel, slot_at, radius, wrap_page};
+    #[test]
+    fn fits_short_and_narrow_windows() {
+        for (w, h) in [(320.0, 240.0), (500.0, 550.0), (1920.0, 1080.0), (240.0, 500.0)] {
+            let r = radius(w, h);
+            assert!(r * 2.0 <= w - 32.0);
+            assert!(r * 2.0 <= h - 116.0);
+        }
+    }
+    #[test]
+    fn paging_wraps_and_clears_selection() {
+        assert_eq!(wrap_page(0, -1, 2), 1);
+        assert_eq!(wrap_page(1, 1, 2), 0);
+        assert_eq!(wrap_page(0, 1, 0), 0);
+        let mut wheel = Wheel { selected: Some(2), ..Default::default() };
+        wheel.change_page(1, 2);
+        assert_eq!(wheel.page, 1);
+        assert_eq!(wheel.selected, None);
+    }
     #[test]
     fn tap_release_and_repeat_leave_wheel_open_until_explicit_dismissal() {
         let mut wheel = Wheel {

@@ -141,6 +141,7 @@ fn connect_pose(p: &mut [[f32; 6]; 6]) {
 struct Playback {
     hash: String,
     uuid: Option<String>,
+    server_start: i64,
     start: Instant,
     end: Instant,
 }
@@ -276,19 +277,18 @@ pub fn apply(id: u32, rest: [Option<[f32; 9]>; 6], p: &mut crate::mobs::anim::Po
             *p.get(PARTS[i]) = v;
         }
     }
-    for (outer, inner) in [
-        ("hat", "head"),
-        ("jacket", "body"),
-        ("right_sleeve", "right_arm"),
-        ("left_sleeve", "left_arm"),
-        ("right_pants", "right_leg"),
-        ("left_pants", "left_leg"),
-    ] {
-        if p.has(outer) && p.has(inner) {
-            let v = *p.get(inner);
-            *p.get(outer) = v;
-        }
+    // 26.x skin layers are children of their body parts. Keep their local
+    // poses: copying the parent here applies its transform a second time.
+}
+
+fn record_playback(s: &mut State, name: String, next: Playback) {
+    if s.playing.get(&name).is_some_and(|old| {
+        old.server_start > next.server_start
+            || (old.server_start == next.server_start && old.hash == next.hash && old.uuid == next.uuid)
+    }) {
+        return;
     }
+    s.playing.insert(name, next);
 }
 fn request(
     agent: &ureq::Agent,
@@ -393,13 +393,15 @@ fn adopt(
         {
             continue;
         }
-        s.playing.insert(
+        record_playback(
+            &mut s,
             name,
             Playback {
                 hash: hash.into(),
                 uuid: e["minecraftUuid"]
                     .as_str()
                     .map(|u| u.replace('-', "").to_lowercase()),
+                server_start: e["startedAt"].as_i64().unwrap_or(0),
                 start: Instant::now() - Duration::from_secs_f64(elapsed / 1000.0),
                 end: Instant::now() + Duration::from_secs_f64(remaining / 1000.0),
             },
@@ -491,6 +493,57 @@ fn run() {
 mod tests {
     use super::*;
     #[test]
+    fn polling_preserves_the_clock_and_ignores_older_events() {
+        let mut s = State::default();
+        let now = Instant::now();
+        let playback = |server_start, start| Playback {
+            hash: "timing_probe".into(), uuid: None, server_start,
+            start, end: now + Duration::from_secs(5),
+        };
+        record_playback(&mut s, "probe".into(), playback(1000, now));
+        record_playback(&mut s, "probe".into(), playback(1000, now - Duration::from_millis(100)));
+        assert_eq!(s.playing["probe"].start, now);
+        record_playback(&mut s, "probe".into(), playback(900, now - Duration::from_millis(200)));
+        assert_eq!(s.playing["probe"].server_start, 1000);
+        record_playback(&mut s, "probe".into(), playback(2000, now));
+        assert_eq!(s.playing["probe"].server_start, 2000);
+    }
+    #[test]
+    fn nested_skin_layers_keep_their_local_pose() {
+        use crate::mobs::{Part, anim::Poses};
+        let id = 700008;
+        let name = "nested_skin_probe".to_string();
+        let hash = "nested_skin_clip".to_string();
+        let mut sleeve_pose = [0.0; 9];
+        sleeve_pose[0] = 0.25;
+        sleeve_pose[6..].fill(1.0);
+        let model = Part {
+            name: "root".into(), pose: [0.0; 9], polygons: vec![], children: vec![Part {
+                name: "right_arm".into(), pose: [0.0,2.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0], polygons: vec![],
+                children: vec![Part {name:"right_sleeve".into(),pose:sleeve_pose,polygons:vec![],children:vec![]}],
+            }],
+        };
+        let mut p = Poses::default();
+        p.reset(&model);
+        let rest = PARTS.map(|n| p.has(n).then(|| *p.get(n)));
+        let mut pose = [[0.0; 6]; 6];
+        pose[2][0] = 1.5;
+        pose[2][4] = 4.0;
+        let now = Instant::now();
+        {
+            let mut s = lock();
+            s.names.insert(id, (name.clone(), None));
+            s.playing.insert(name.clone(), Playback {hash:hash.clone(),uuid:None,server_start:0,start:now,end:now+Duration::from_secs(5)});
+            s.clips.insert(hash.clone(), Clip {duration:1000.0,looping:true,connected:false,frames:vec![(0.0,pose),(1000.0,pose)]});
+        }
+        apply(id, rest, &mut p);
+        assert_eq!(p.get("right_arm")[3], 1.5);
+        assert_eq!(p.get("right_arm")[1], 6.0);
+        assert_eq!(*p.get("right_sleeve"), sleeve_pose);
+        let mut s = lock();
+        s.names.remove(&id); s.playing.remove(&name); s.clips.remove(&hash);
+    }
+    #[test]
     fn interpolation_loop_and_validation() {
         let pose = |n: f64| {
             BONES
@@ -527,6 +580,7 @@ mod tests {
                 Playback {
                     hash: hash.clone(),
                     uuid: None,
+                    server_start: 0,
                     start: now,
                     end: now + Duration::from_secs(10),
                 },
