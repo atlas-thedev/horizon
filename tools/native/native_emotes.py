@@ -30,6 +30,6 @@ if new not in s:
 p.write_text(s, encoding='utf-8')
 p = root/'crates/horizon-client/assets/horizon/lang/en_us.json'
 labels=json.loads(p.read_text(encoding='utf-8'))
-labels.update({'native.emotes.key':'Emote wheel (hold)','native.emotes.title':'Emotes','native.emotes.empty':'Empty slot','native.emotes.signin':'Sign in through Native Client to use emotes.','native.emotes.hint':'Release to play · Scroll for pages · Esc to cancel'})
+labels.update({'native.emotes.select':'Select an emote','native.emotes.page':'Page','native.emotes.key':'Emote wheel (hold)','native.emotes.title':'Emotes','native.emotes.empty':'Empty slot','native.emotes.signin':'Sign in through Native Client to use emotes.','native.emotes.hint':'Release to play · Scroll for pages · Esc to cancel'})
 p.write_text(json.dumps(labels,ensure_ascii=False,indent=2)+'\n', encoding='utf-8')
 print('native_emotes: authenticated wheel and player animation applied')
