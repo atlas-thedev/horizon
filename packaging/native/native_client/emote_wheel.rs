@@ -11,6 +11,7 @@ pub struct Wheel {
     pub open: bool,
     pub page: usize,
     pub selected: Option<usize>,
+    hover_started: f64,
     bounds: HashMap<u64, [f32; 4]>,
 }
 fn poster_url(item: &serde_json::Value, api: &str) -> Option<String> {
@@ -183,6 +184,11 @@ fn sector(c: &mut Canvas, cx: f32, cy: f32, inner: f32, outer: f32, a: f32, b: f
     }
 }
 impl Wheel {
+    fn hover(&mut self, slot: Option<usize>, now: f64) -> f64 {
+        if slot != self.selected { self.hover_started = now; }
+        self.selected = slot;
+        (now - self.hover_started).max(0.0)
+    }
     fn change_page(&mut self, delta: i32, pages: usize) {
         self.page = wrap_page(self.page.min(pages.saturating_sub(1)), delta, pages);
         self.selected = None;
@@ -223,7 +229,7 @@ impl Wheel {
         let (cx, cy) = (c.width() * 0.5, c.height() * 0.5 - 4.0);
         let api = net::api();
         c.fill(0.0, 0.0, c.width(), c.height(), 0x28000000);
-        self.selected = slot_at(ui.mx - cx, ui.my - cy, inner, outer);
+        let hover_elapsed = self.hover(slot_at(ui.mx - cx, ui.my - cy, inner, outer), ui.now);
         let (skin, slim) = preview3d::wheel_skin(&native_emotes::local_name());
         for slot in 0..8 {
             let angle = slot as f32 * std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2;
@@ -265,7 +271,7 @@ impl Wheel {
             let label_y = y + h0 * 0.38;
             let mut drawn = false;
             if let Some(hash) = item.and_then(|i| i["hash"].as_str())
-                && let Some(pose) = native_emotes::preview_pose(hash, if active { Some(ui.now) } else { None })
+                && let Some(pose) = native_emotes::preview_pose(hash, if active { Some(hover_elapsed) } else { None })
             {
                 let rect = fit_poster([0.,0.,1.,1.], 0.75, cx, cy, inner, outer, angle, label_y);
                 preview3d::draw_wheel(c, &skin, slim, pose, rect);
@@ -407,6 +413,15 @@ mod tests {
         Image, Wheel, fit_poster, inside_sector, opaque_bounds, poster_url, radius, slot_at,
         wrap_page,
     };
+    #[test]
+    fn each_hover_starts_its_own_preview_clock() {
+        let mut wheel = Wheel::default();
+        assert_eq!(wheel.hover(Some(1), 1000.0), 0.0);
+        assert_eq!(wheel.hover(Some(1), 2250.0), 1250.0);
+        assert_eq!(wheel.hover(Some(2), 2300.0), 0.0);
+        wheel.hover(None, 2400.0);
+        assert_eq!(wheel.hover(Some(2), 2500.0), 0.0);
+    }
     #[test]
     fn poster_urls_request_v2_and_preserve_explicit_versions() {
         let hash = "a".repeat(64);

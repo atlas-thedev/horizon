@@ -165,6 +165,14 @@ struct State {
     command_gen: u64,
     pending: bool,
 }
+// Gameplay always traverses the clip once. Retain the server event until it
+// expires so polling the same event cannot restart a completed animation.
+fn playback_visible(s: &State, name: &str, now: Instant) -> bool {
+    let Some(p) = s.playing.get(name) else { return false };
+    let Some(clip) = s.clips.get(&p.hash) else { return false };
+    !s.waiting.contains(name) && now < p.end
+        && now.saturating_duration_since(p.start).as_secs_f64() * 1000.0 < clip.duration
+}
 fn state() -> &'static Mutex<State> {
     static S: OnceLock<Mutex<State>> = OnceLock::new();
     S.get_or_init(|| Mutex::new(State::default()))
@@ -218,10 +226,12 @@ pub fn tick(
         .map(|(id, n, u)| (id, (n.to_lowercase(), u)))
         .collect();
     s.local = local.to_lowercase();
-    if (cancel || moved) && s.playing.contains_key(&local.to_lowercase()) {
+    let local_name = local.to_lowercase();
+    let active = playback_visible(&s, &local_name, Instant::now()) || s.waiting.contains(&local_name);
+    if (cancel || moved) && active {
         stop_locked(&mut s);
     }
-    if !s.playing.contains_key(&local.to_lowercase()) {
+    if !playback_visible(&s, &local_name, Instant::now()) && !s.waiting.contains(&local_name) {
         s.position = Some(position);
     }
 }
@@ -284,8 +294,7 @@ pub fn is_playing(id: u32) -> bool {
         return false;
     };
     s.playing.get(name).is_some_and(|p| {
-        !s.waiting.contains(name) && p.end > Instant::now()
-            && s.clips.contains_key(&p.hash)
+        playback_visible(&s, name, Instant::now())
             && identity_matches(id, uuid.as_deref(), p.uuid.as_deref())
     })
 }
@@ -294,10 +303,11 @@ pub fn prop_frame(id: u32) -> Option<(String, Arc<PropClip>, u64)> {
     let s = lock();
     let (name, uuid) = s.names.get(&id)?;
     let active = s.playing.get(name)?;
-    if s.waiting.contains(name) || Instant::now() >= active.end ||
+    let now = Instant::now();
+    if !playback_visible(&s, name, now) ||
         !identity_matches(id, uuid.as_deref(), active.uuid.as_deref()) { return None; }
     let props = s.props.get(&active.hash)?.clone();
-    Some((active.hash.clone(), props, active.start.elapsed().as_millis().min(u64::MAX as u128) as u64))
+    Some((active.hash.clone(), props, now.saturating_duration_since(active.start).as_millis().min(u64::MAX as u128) as u64))
 }
 fn parsed_props(value: &Value, clip: &Clip) -> Option<Option<Arc<PropClip>>> {
     match value.get("props") {
@@ -318,7 +328,8 @@ pub fn apply(id: u32, rest: [Option<[f32; 9]>; 6], p: &mut crate::mobs::anim::Po
     let Some(active) = s.playing.get(name) else {
         return;
     };
-    if s.waiting.contains(name) || Instant::now() >= active.end {
+    let now = Instant::now();
+    if !playback_visible(&s, name, now) {
         return;
     }
     // The local model is trusted from our own ticket; nearby premium players must match UUIDs.
@@ -328,7 +339,7 @@ pub fn apply(id: u32, rest: [Option<[f32; 9]>; 6], p: &mut crate::mobs::anim::Po
     let Some(clip) = s.clips.get(&active.hash) else {
         return;
     };
-    let pose = clip.sample(active.start.elapsed().as_secs_f64() * 1000.0);
+    let pose = clip.sample(now.saturating_duration_since(active.start).as_secs_f64() * 1000.0);
     for i in 0..6 {
         if let Some(mut v) = rest[i] {
             for j in 0..3 {
@@ -471,16 +482,27 @@ fn save_me(ticket: &str, me: &Value) {
     }
 }
 pub fn local_name() -> String { lock().local.clone() }
+// Hover previews repeat for every clip, regardless of its gameplay loop flag.
+// Static previews keep their selected poster time. Both body and props call
+// this function, so they always sample the same point in the animation.
+fn preview_time(s: &State, hash: &str, elapsed: Option<f64>) -> Option<f64> {
+    let clip = s.clips.get(hash)?;
+    let time = match elapsed {
+        Some(t) if t.is_finite() => t.max(0.0) % clip.duration,
+        Some(_) => return None,
+        None => *s.preview_times.get(hash).unwrap_or(&0.0),
+    };
+    time.is_finite().then_some(time.max(0.0))
+}
 pub fn preview_pose(hash: &str, elapsed: Option<f64>) -> Option<[[f32; 6]; 6]> {
-    let s = lock(); let clip = s.clips.get(hash)?;
-    let time = elapsed.unwrap_or_else(|| *s.preview_times.get(hash).unwrap_or(&0.0)); Some(clip.sample(time))
+    let s = lock();
+    Some(s.clips.get(hash)?.sample(preview_time(&s, hash, elapsed)?))
 }
 /// The wheel samples props at exactly the same time as `preview_pose`.
 pub fn preview_props(hash:&str,elapsed:Option<f64>)->Option<(String,Arc<PropClip>,u64)> {
     let s=lock();let props=s.props.get(hash)?.clone();
-    let time=elapsed.unwrap_or_else(||*s.preview_times.get(hash).unwrap_or(&0.0));
-    if !time.is_finite() {return None;}
-    Some((hash.to_owned(),props,time.max(0.0) as u64))
+    let time=preview_time(&s,hash,elapsed)?;
+    Some((hash.to_owned(),props,time as u64))
 }
 fn prefetch(api: &str, me: &Value) {
     if let (Some(pages), Some(items)) = (me["pages"].as_array(), me["catalog"].as_array()) {
@@ -658,6 +680,27 @@ mod tests {
         assert_eq!(s.playing["probe"].server_start, 1000);
         record_playback(&mut s, "probe".into(), playback(2000, now));
         assert_eq!(s.playing["probe"].server_start, 2000);
+    }
+    #[test]
+    fn gameplay_finishes_once_but_hover_previews_repeat_every_clip() {
+        let mut s = State::default();
+        let now = Instant::now();
+        let make_clip = |looping| Clip { duration:1000.0, looping, connected:false,
+            frames:vec![(0.0,[[0.0;6];6]),(1000.0,[[1.0;6];6])] };
+        for looping in [false,true] {
+            let hash=if looping {"looping"} else {"once"};
+            s.clips.insert(hash.into(),make_clip(looping));
+            s.preview_times.insert(hash.into(),600.0);
+            s.playing.insert(hash.into(),Playback {hash:hash.into(),uuid:None,server_start:1,
+                start:now-Duration::from_millis(999),end:now+Duration::from_secs(30)});
+            assert!(playback_visible(&s,hash,now));
+            assert!(!playback_visible(&s,hash,now+Duration::from_millis(1)));
+            assert!(s.playing.contains_key(hash),"keep event identity after playback");
+            assert_eq!(preview_time(&s,hash,Some(1250.0)),Some(250.0));
+            assert_eq!(preview_time(&s,hash,None),Some(600.0));
+            assert!(preview_time(&s,hash,Some(f64::NAN)).is_none());
+            assert!((s.clips[hash].sample(preview_time(&s,hash,Some(1250.0)).unwrap())[0][0]-0.25).abs()<1e-6);
+        }
     }
     #[test]
     fn nested_skin_layers_keep_their_local_pose() {

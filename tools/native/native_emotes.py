@@ -67,7 +67,7 @@ if marker not in s:
     p.write_text(s,encoding='utf-8')
 install(client/'game/native_client/emote_wheel.rs',
         '                preview3d::draw_wheel(c, &skin, slim, pose, rect);',
-        '                preview3d::draw_wheel(c, &skin, slim, pose, rect, native_emotes::preview_props(hash, if active { Some(ui.now) } else { None }));',
+        '                preview3d::draw_wheel(c, &skin, slim, pose, rect, native_emotes::preview_props(hash, if active { Some(hover_elapsed) } else { None }));',
         'preview3d::draw_wheel(c, &skin, slim, pose, rect, native_emotes::preview_props')
 
 install(client/'game.rs', 'mod native_cosmetics;', 'mod native_cosmetics;\nmod native_emote_renderer;', 'mod native_emote_renderer;')
