@@ -26,6 +26,7 @@ class EmotePatchEncoding(unittest.TestCase):
 ''', encoding='utf-8')
             # Match the upstream hooks after native_client.py and native_cosmetics.py.
             files = {
+                'mobs/render.rs': '    let mut body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * alpha;\n',
                 'game.rs': 'mod native_cosmetics;\n    fn render_frame(&mut self) -> Result<bool> {\n',
                 'game/native_cosmetics.rs': '// cosmetics source\n',
                 'game/creatures.rs': '            let layers = horizon_client::mobs::render::layers_shown(mob);\n',
@@ -56,6 +57,9 @@ class EmotePatchEncoding(unittest.TestCase):
             self.assertEqual(labels['native.emotes.hint'], 'Click / 1–8 to play · Scroll / ← → for pages · Esc to close')
             self.assertEqual(labels['native.emotes.cancel'], 'Cancel')
             self.assertIn('// 日本語 · café', (client / 'mobs/anim.rs').read_text(encoding='utf-8'))
+            render = (client / 'mobs/render.rs').read_text(encoding='utf-8')
+            self.assertIn('if avatar(m) && crate::native_emotes::is_playing(m.id)', render)
+            self.assertIn('facing_yaw(m.previous_head_yaw, m.head_yaw, alpha)', render)
             before = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
             apply()
             self.assertEqual(before, {p: p.read_bytes() for p in before})

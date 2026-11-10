@@ -287,6 +287,12 @@ pub fn play(page: usize, slot: usize) -> bool {
 fn identity_matches(id: u32, rendered: Option<&str>, authenticated: Option<&str>) -> bool {
     id == 0 || rendered.is_none_or(|u| u.chars().nth(12) == Some('3') || Some(u) == authenticated)
 }
+/// Render an active emote facing the player's interpolated look direction.
+/// Only horizontal yaw is used: looking up or down must not tilt the whole model.
+pub fn facing_yaw(previous_head: f32, head: f32, alpha: f32) -> f32 {
+    previous_head + crate::mobs::living::wrap(head - previous_head) * alpha
+}
+
 /// True only while a validated, loaded emote actually poses this rendered player.
 pub fn is_playing(id: u32) -> bool {
     let s = lock();
@@ -680,6 +686,14 @@ mod tests {
         assert_eq!(s.playing["probe"].server_start, 1000);
         record_playback(&mut s, "probe".into(), playback(2000, now));
         assert_eq!(s.playing["probe"].server_start, 2000);
+    }
+    #[test]
+    fn facing_follows_horizontal_look_using_shortest_interpolated_turn() {
+        assert_eq!(facing_yaw(10.0, 70.0, 0.0), 10.0);
+        assert_eq!(facing_yaw(10.0, 70.0, 0.5), 40.0);
+        assert_eq!(facing_yaw(10.0, 70.0, 1.0), 70.0);
+        assert_eq!(facing_yaw(179.0, -179.0, 0.5), 180.0);
+        assert_eq!(facing_yaw(-179.0, 179.0, 0.5), -180.0);
     }
     #[test]
     fn gameplay_finishes_once_but_hover_previews_repeat_every_clip() {

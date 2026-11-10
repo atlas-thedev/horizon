@@ -87,6 +87,15 @@ install(client/'game/perspective.rs',
         '                let base = horizon_client::mobs::render::base_transform(m, alpha as f32, camera);\n'
         '                self.native_emote_props_geometry(0, base, packed, out);\n'
         '            }', 'self.native_emote_props_geometry(0,')
+# Rotate the common player root, not individual limbs. This keeps skin, armour,
+# cosmetics and emote props together for local and remote players. Inactive
+# players retain vanilla body orientation; pitch is deliberately unchanged.
+install(client/'mobs/render.rs',
+        '    let mut body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * alpha;',
+        '    let mut body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * alpha;\n'
+        '    if avatar(m) && crate::native_emotes::is_playing(m.id) {\n'
+        '        body = crate::native_emotes::facing_yaw(m.previous_head_yaw, m.head_yaw, alpha);\n'
+        '    }', 'body = crate::native_emotes::facing_yaw(')
 p = client/'client_lib.rs'
 s = p.read_text(encoding='utf-8')
 if 'pub mod native_emotes;' not in s:
