@@ -2,7 +2,8 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use crate::native_emote_props::PropClip;
 use std::time::{Duration, Instant};
 const BONES: [&str; 6] = ["head", "body", "rightArm", "leftArm", "rightLeg", "leftLeg"];
 const PARTS: [&str; 6] = [
@@ -150,6 +151,7 @@ struct State {
     scope: String,
     names: HashMap<u32, (String, Option<String>)>,
     clips: HashMap<String, Clip>,
+    props: HashMap<String, Arc<PropClip>>,
     playing: HashMap<String, Playback>,
     commands: VecDeque<Value>,
     me: Value,
@@ -287,6 +289,27 @@ pub fn is_playing(id: u32) -> bool {
             && identity_matches(id, uuid.as_deref(), p.uuid.as_deref())
     })
 }
+/// Shared validated prop clip and the same elapsed clock used by the body pose.
+pub fn prop_frame(id: u32) -> Option<(String, Arc<PropClip>, u64)> {
+    let s = lock();
+    let (name, uuid) = s.names.get(&id)?;
+    let active = s.playing.get(name)?;
+    if s.waiting.contains(name) || Instant::now() >= active.end ||
+        !identity_matches(id, uuid.as_deref(), active.uuid.as_deref()) { return None; }
+    let props = s.props.get(&active.hash)?.clone();
+    Some((active.hash.clone(), props, active.start.elapsed().as_millis().min(u64::MAX as u128) as u64))
+}
+fn parsed_props(value: &Value, clip: &Clip) -> Option<Option<Arc<PropClip>>> {
+    match value.get("props") {
+        None => Some(None),
+        Some(v) => {
+            let mut props=PropClip::parse(v, clip.duration as u32, clip.looping)?;
+            // PNG decoding is bounded by the validated dimensions and runs on the asset worker.
+            props.decode_textures(|png| crate::hud::decode_bytes(png).ok())?;
+            Some(Some(Arc::new(props)))
+        },
+    }
+}
 pub fn apply(id: u32, rest: [Option<[f32; 9]>; 6], p: &mut crate::mobs::anim::Poses) {
     let s = lock();
     let Some((name, uuid)) = s.names.get(&id) else {
@@ -392,14 +415,15 @@ fn load_clip(api: &str, hash: &str) {
             }
         }
         let mut loaded = false;
-        if let Some(raw) = raw && let Ok(value) = serde_json::from_slice::<Value>(&raw) && let Some(clip) = Clip::parse(&value) {
+        if let Some(raw) = raw && let Ok(value) = serde_json::from_slice::<Value>(&raw) && let Some(clip) = Clip::parse(&value) && let Some(props) = parsed_props(&value, &clip) {
             if let Some(path) = path && let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent); let _ = std::fs::write(path, raw);
             }
-            let preview_time = clip.frames.iter().max_by(|a, b| {
+            let mut preview_time = clip.frames.iter().max_by(|a, b| {
                 let score = |p: &[[f32; 6]; 6]| p.iter().flatten().map(|n| n*n).sum::<f32>();
                 score(&a.1).total_cmp(&score(&b.1))
             }).map(|frame| frame.0.min(clip.duration - 0.001)).unwrap_or(0.0);
+            if let Some(props)=&props {preview_time=props.preview_time(preview_time.max(0.0) as u64) as f64;}
             let mut s = lock();
             let names: Vec<String> = s.waiting.iter().filter(|name| s.playing.get(*name).is_some_and(|p| p.hash == hash)).cloned().collect();
             let now = Instant::now();
@@ -407,7 +431,21 @@ fn load_clip(api: &str, hash: &str) {
                 s.waiting.remove(&name);
                 if let Some(p) = s.playing.get_mut(&name) { p.start = now; p.end = now + Duration::from_millis(if clip.looping { 30000 } else { clip.duration as u64 }); }
             }
-            if s.clips.len() >= 256 { if let Some(key) = s.clips.keys().find(|key| !s.playing.values().any(|p| &p.hash == *key)).cloned() { s.clips.remove(&key); s.preview_times.remove(&key); } }
+            if s.clips.len() >= 256 { if let Some(key) = s.clips.keys().find(|key| !s.playing.values().any(|p| &p.hash == *key)).cloned() { s.clips.remove(&key); s.props.remove(&key); s.preview_times.remove(&key); } }
+            // Keep decoded prop textures bounded. Evict inactive entries first; if every
+            // slot is active, preserve body playback and omit the newest props rather than
+            // allowing an unbounded crowd of uploads to exhaust memory.
+            const PROP_BUDGET: usize = 64 * 1024 * 1024;
+            if let Some(props) = props {
+                let bytes=props.decoded_bytes();
+                while s.props.values().map(|p| p.decoded_bytes()).sum::<usize>() + bytes > PROP_BUDGET {
+                    let Some(old)=s.props.keys().find(|key| !s.playing.values().any(|p| &p.hash==*key && p.end>now)).cloned() else { break; };
+                    s.props.remove(&old); s.clips.remove(&old); s.preview_times.remove(&old);
+                }
+                if s.props.values().map(|p| p.decoded_bytes()).sum::<usize>() + bytes <= PROP_BUDGET {
+                    s.props.insert(hash.clone(),props);
+                }
+            } else { s.props.remove(&hash); }
             s.preview_times.insert(hash.clone(), preview_time);
             s.clips.insert(hash.clone(), clip);
             loaded = true;
@@ -436,6 +474,13 @@ pub fn local_name() -> String { lock().local.clone() }
 pub fn preview_pose(hash: &str, elapsed: Option<f64>) -> Option<[[f32; 6]; 6]> {
     let s = lock(); let clip = s.clips.get(hash)?;
     let time = elapsed.unwrap_or_else(|| *s.preview_times.get(hash).unwrap_or(&0.0)); Some(clip.sample(time))
+}
+/// The wheel samples props at exactly the same time as `preview_pose`.
+pub fn preview_props(hash:&str,elapsed:Option<f64>)->Option<(String,Arc<PropClip>,u64)> {
+    let s=lock();let props=s.props.get(hash)?.clone();
+    let time=elapsed.unwrap_or_else(||*s.preview_times.get(hash).unwrap_or(&0.0));
+    if !time.is_finite() {return None;}
+    Some((hash.to_owned(),props,time.max(0.0) as u64))
 }
 fn prefetch(api: &str, me: &Value) {
     if let (Some(pages), Some(items)) = (me["pages"].as_array(), me["catalog"].as_array()) {

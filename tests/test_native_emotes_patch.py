@@ -24,6 +24,21 @@ class EmotePatchEncoding(unittest.TestCase):
     };
     emote(playing, s.age, rest, p);
 ''', encoding='utf-8')
+            # Match the upstream hooks after native_client.py and native_cosmetics.py.
+            files = {
+                'game.rs': 'mod native_cosmetics;\n    fn render_frame(&mut self) -> Result<bool> {\n',
+                'game/native_cosmetics.rs': '// cosmetics source\n',
+                'game/creatures.rs': '            let layers = horizon_client::mobs::render::layers_shown(mob);\n',
+                'game/perspective.rs': '        if horizon_client::mobs::render::layers_shown(m) {\n',
+                'game/native_client/mod.rs': 'mod emote_wheel;\n',
+                'game/native_client/boxes.rs': '    quads: Vec<Quad>,\n            quads: Vec::with_capacity(4096),\n        self.quads.clear();\n',
+                'game/native_client/preview3d.rs': 'pub fn draw_wheel(c: &mut Canvas, skin: &Arc<Image>, slim: bool, p: [[f32; 6]; 6], rect: [f32; 4]) {\n    let [rx,ry,rw,rh] = rect;\n    let unit = 0;\n    b.end(c);\n}\n',
+                'game/native_client/emote_wheel.rs': '                preview3d::draw_wheel(c, &skin, slim, pose, rect);\n',
+            }
+            for name, content in files.items():
+                path = client / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding='utf-8')
             lang = root / 'crates/horizon-client/assets/horizon/lang/en_us.json'
             lang.parent.mkdir(parents=True)
             lang.write_text(json.dumps({'existing': '日本語 · café'}, ensure_ascii=False), encoding='utf-8')
