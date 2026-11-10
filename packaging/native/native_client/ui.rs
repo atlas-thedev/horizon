@@ -74,7 +74,7 @@ pub struct Ui {
     pending_tooltip: Option<String>,
     /// `Ui.now`: milliseconds on the canvas's clock, refreshed each frame.
     pub now: f64,
-    /// The system clipboard's text, read when a paste shortcut came in this frame.
+    /// The system clipboard's text, read on a paste shortcut or explicit paste click.
     pub clip_in: String,
     /// Text to put on the system clipboard after this frame.
     pub clip_out: Option<String>,
@@ -198,6 +198,28 @@ impl Ui {
             m |= MOD_SUPER;
         }
         m
+    }
+
+    /// Check queued events the same way `begin` tracks modifiers, including a
+    /// modifier key-down and paste in the same frame when event flags lag.
+    pub fn wants_paste(&self, events: &[Event]) -> bool {
+        let mut held = self.held_keys;
+        for event in events {
+            match event {
+                Event::Key { code, mods, pressed } => {
+                    if (340..=347).contains(code) {
+                        let bit = 1 << (code - 340);
+                        if *pressed { held |= bit; } else { held &= !bit; }
+                    }
+                    let ctrl = held & (0x22 | 0x88) != 0 || mods & (MOD_CONTROL | MOD_SUPER) != 0;
+                    let shift = held & 0x11 != 0 || mods & MOD_SHIFT != 0;
+                    if *pressed && ((*code == 86 && ctrl) || (*code == 260 && shift)) { return true; }
+                }
+                Event::Char(ch) if *ch as u32 >= 32 => held &= !(0x22 | 0x88),
+                _ => {}
+            }
+        }
+        false
     }
 
     /// Forgets which modifier keys were down (their key-ups never arrived).
@@ -395,6 +417,21 @@ mod tests {
         ui.end();
         ui.begin(&[Event::Move { x: 50.0, y: 50.0 }, Event::Button { button: 0, pressed: false }], 1.0);
         assert!(!ui.clicked(&c, "b", 0.0, 0.0, 20.0, 20.0));
+    }
+
+    #[test]
+    fn clipboard_shortcuts_follow_event_modifiers_and_held_keys() {
+        let mut ui = Ui::default();
+        let key = |code, mods, pressed| Event::Key { code, mods, pressed };
+        assert!(ui.wants_paste(&[key(86, MOD_CONTROL, true)]));
+        assert!(ui.wants_paste(&[key(86, MOD_SUPER, true)]));
+        assert!(ui.wants_paste(&[key(260, MOD_SHIFT, true)]));
+        assert!(!ui.wants_paste(&[key(86, 0, true)]));
+        assert!(ui.wants_paste(&[key(341, 0, true), key(86, 0, true)]));
+        ui.begin(&[key(341, 0, true)], 1.0);
+        assert!(ui.wants_paste(&[key(86, 0, true)]));
+        assert!(!ui.wants_paste(&[key(341, 0, false), key(86, 0, true)]));
+        assert!(!ui.wants_paste(&[Event::Char('x'), key(86, 0, true)]));
     }
 
     #[test]

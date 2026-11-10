@@ -894,11 +894,9 @@ impl State {
 
     /// A paste shortcut is waiting in the input queue.
     fn wants_paste(&self) -> bool {
-        self.events.iter().any(|e| {
-            matches!(e, Event::Key { code: 86, mods, pressed: true } if mods & (ui::MOD_CONTROL | ui::MOD_SUPER) != 0)
-                || matches!(e, Event::Key { code: 260, mods, pressed: true } if mods & ui::MOD_SHIFT != 0)
-        })
+        self.ui.wants_paste(&self.events)
     }
+
 }
 
 impl Game<'_> {
@@ -1116,16 +1114,23 @@ pub(super) fn native_title_frame(
     player: &str,
     atlas: &horizon_client::hud::HudAtlas,
     item_renderer: Option<&horizon_client::item_render::ItemRenderer>,
+    clipboard: &mut dyn horizon_client::clipboard::Clipboard,
 ) {
     let allows_multiplayer = title.allows_multiplayer;
     let servers = servers_view::info(title);
     let dialog = servers_dialogs::dialog_info(title);
-    with_state(|state| {
+    // Button actions fire on release. Read only on a paste shortcut or a
+    // dialog click, never continuously while a title screen is open.
+    let wants_clip = with_state(|s| s.wants_paste() || (dialog.is_some() && s.events.iter().any(|e|
+        matches!(e, Event::Button { button: 0, pressed: false }))));
+    let clip = if wants_clip { clipboard.get() } else { String::new() };
+    let copied = with_state(|state| {
         let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
         let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
         let c = &mut state.canvas;
         c.begin(fb[0], fb[1], scale);
         let events = std::mem::take(&mut state.events);
+        state.ui.clip_in = clip;
         state.ui.begin(&events, scale);
         if !state.title_was {
             state.title_was = true;
@@ -1225,7 +1230,9 @@ pub(super) fn native_title_frame(
         if let Some(action) = deferred {
             state.apply(&action);
         }
+        state.ui.clip_out.take()
     });
+    if let Some(text) = copied { clipboard.set(&text); }
 }
 
 struct TitleItemEnv<'a>(&'a horizon_client::item_render::ItemRenderer);

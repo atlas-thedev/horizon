@@ -68,6 +68,15 @@ impl TextField {
         self.anchor = self.caret;
     }
 
+    /// Replace an address with clipboard text, without accepting controls or exceeding the field limit.
+    pub fn paste_replace(&mut self, text: &str) {
+        let cleaned = clean(text);
+        let trimmed = cleaned.trim();
+        if trimmed.is_empty() { return; }
+        self.set("");
+        self.insert(trimmed);
+    }
+
     pub fn clear(&mut self) {
         self.set("");
     }
@@ -392,6 +401,40 @@ mod tests {
         f.delete_selection();
         assert_eq!(f.value(), "hello, ");
         assert_eq!(f.word_left(7), 0);
+    }
+
+    #[test]
+    fn clipboard_shortcuts_replace_selection_and_copy_it() {
+        let mut f = TextField::new("address");
+        let mut ui = Ui::default();
+        f.set("old");
+        f.select_all();
+        ui.clip_in = "play.example.net".into();
+        ui.keys = vec![(KEY_V, ui::MOD_CONTROL)];
+        f.edit(&mut ui);
+        assert_eq!(f.value(), "play.example.net");
+        f.select_all();
+        ui.keys = vec![(KEY_C, ui::MOD_CONTROL)];
+        f.edit(&mut ui);
+        assert_eq!(ui.clip_out.as_deref(), Some("play.example.net"));
+        ui.clip_in = "new.example".into();
+        ui.keys = vec![(KEY_INSERT, ui::MOD_SHIFT)];
+        f.edit(&mut ui);
+        assert_eq!(f.value(), "new.example");
+    }
+
+    #[test]
+    fn paste_button_replaces_text_cleans_controls_and_respects_limit() {
+        let mut f = TextField::new("address");
+        f.max_length = 12;
+        f.set("old");
+        f.paste_replace("  example.org\r\n");
+        assert_eq!(f.value(), "example.org");
+        f.paste_replace("  \t ");
+        assert_eq!(f.value(), "example.org");
+        f.paste_replace("1234567890123456");
+        assert_eq!(f.value(), "123456789012");
+        assert_eq!(f.caret, 12);
     }
 
     #[test]

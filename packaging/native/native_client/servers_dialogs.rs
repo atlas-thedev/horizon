@@ -49,14 +49,24 @@ impl Default for ServerDialog {
     }
 }
 
-fn dialog_box(ui: &mut Ui, c: &mut Canvas, f: &mut TextField, x: f32, y: f32, w: f32, placeholder: &str) -> bool {
+fn dialog_box(ui: &mut Ui, c: &mut Canvas, f: &mut TextField, x: f32, y: f32, w: f32, placeholder: &str, paste: bool) -> bool {
     let h = 38.0;
     let focused = f.focused(ui);
     let fa = ui.anim_on(&format!("{}#box", f.id), focused, 14.0);
     let over = ui.hover(c, x, y, w, h);
     c.round(x, y, w, h, 8.0, theme::SUBTLE);
     c.outline(x, y, w, h, 8.0, 1.0, theme::mix(if over { theme::HAIRLINE_STRONG } else { theme::HAIRLINE }, theme::BORDER_HOVER, fa));
-    f.draw(ui, c, x, y, w, h, placeholder, 13.5)
+    let button_width = if paste { 74.0f32.min((w - 40.0).max(0.0)) } else { 0.0 };
+    if paste && button_width > 8.0 {
+        let label = tr("native.servers.paste", "Paste");
+        if ui.button(c, &format!("{}#paste", f.id), x + w - button_width + 3.0, y + 5.0,
+                     button_width - 8.0, 28.0, &label, 0, ui::BTN_GLASS) {
+            f.paste_replace(&ui.clip_in);
+            f.focus(ui);
+            ui.focus_claimed = true;
+        }
+    }
+    f.draw(ui, c, x, y, w - button_width, h, placeholder, 13.5)
 }
 
 fn packs_label(packs: Option<bool>) -> String {
@@ -150,7 +160,7 @@ impl ServerDialog {
                 }
                 c.text(font::SEMIBOLD, 10.5, &tr("addServer.enterName", "Server Name").to_uppercase(), x + 20.0, fy, theme::TEXT_MUTED);
                 let placeholder = tr("selectServer.defaultName", "Minecraft Server");
-                if dialog_box(ui, c, &mut self.name, x + 20.0, fy + 16.0, w - 40.0, &placeholder) {
+                if dialog_box(ui, c, &mut self.name, x + 20.0, fy + 16.0, w - 40.0, &placeholder, false) {
                     if self.address.is_empty() {
                         self.address.focus(ui);
                     } else {
@@ -160,7 +170,7 @@ impl ServerDialog {
                 fy += 66.0;
             }
             c.text(font::SEMIBOLD, 10.5, &tr("addServer.enterIp", "Server Address").to_uppercase(), x + 20.0, fy, theme::TEXT_MUTED);
-            if dialog_box(ui, c, &mut self.address, x + 20.0, fy + 16.0, w - 40.0, "play.example.net") {
+            if dialog_box(ui, c, &mut self.address, x + 20.0, fy + 16.0, w - 40.0, "play.example.net", true) {
                 submit = true;
             }
             if edit {
@@ -210,5 +220,63 @@ impl ServerDialog {
             });
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::ui::Event;
+
+    fn canvas() -> Canvas {
+        let mut canvas = horizon_client::native_ui::canvas();
+        canvas.begin(800, 600, 1.0);
+        canvas
+    }
+
+    #[test]
+    fn address_paste_button_replaces_for_direct_and_saved_server_forms() {
+        for info in [DialogInfo::Direct { address: "old.example".into() },
+                     DialogInfo::Edit { add: true, name: "Server".into(), address: "old.example".into(), packs: None }] {
+            let mut dialog = ServerDialog::default();
+            let mut ui = Ui::default();
+            let mut c = canvas();
+            // At 800x600 the button is at x=519..585; address y differs by dialog.
+            let y = if matches!(info, DialogInfo::Direct { .. }) { 291.0 } else { 290.0 };
+            ui.begin(&[], 1.0);
+            dialog.draw(&mut ui, &mut c, &info);
+            ui.end();
+            ui.begin(&[Event::Move { x: 530.0, y }, Event::Button { button: 0, pressed: true }], 1.0);
+            dialog.draw(&mut ui, &mut c, &info);
+            ui.end();
+            ui.clip_in = "  play.example.net:25565\r\n".into();
+            ui.begin(&[Event::Button { button: 0, pressed: false }], 1.0);
+            dialog.draw(&mut ui, &mut c, &info);
+            ui.end();
+            assert_eq!(dialog.address.value(), "play.example.net:25565");
+            assert!(dialog.address.focused(&ui));
+        }
+    }
+
+    #[test]
+    fn ctrl_v_pastes_into_the_focused_name_or_address() {
+        let mut dialog = ServerDialog::default();
+        let mut ui = Ui::default();
+        let mut c = canvas();
+        let info = DialogInfo::Edit { add: true, name: "Old".into(), address: "old.example".into(), packs: None };
+        ui.begin(&[], 1.0);
+        dialog.draw(&mut ui, &mut c, &info);
+        ui.end();
+        ui.clip_in = "new.example".into();
+        ui.begin(&[Event::Key {code: 86, mods: ui::MOD_CONTROL, pressed: true}], 1.0);
+        dialog.draw(&mut ui, &mut c, &info);
+        ui.end();
+        assert_eq!(dialog.address.value(), "new.example");
+        dialog.name.focus(&mut ui);
+        dialog.name.select_all();
+        ui.clip_in = "My server".into();
+        ui.begin(&[Event::Key {code: 86, mods: ui::MOD_CONTROL, pressed: true}], 1.0);
+        dialog.draw(&mut ui, &mut c, &info);
+        assert_eq!(dialog.name.value(), "My server");
     }
 }
