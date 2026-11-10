@@ -320,7 +320,9 @@ impl Game<'_> {
     /// Once a frame, over the game's HUD and screens: the Native UI.
     pub(super) fn native_ui_frame(&mut self, batch: &mut HudBatch) {
         use horizon_client::clipboard::Clipboard;
-        let open = self.native_mod_screen() == Some(MOD_ID);
+        // The connection/terrain screen owns the whole frame, even if a
+        // pause or Native menu was open when loading began.
+        let open = !self.remote_screen_up() && self.native_mod_screen() == Some(MOD_ID);
         let paused = self.native_pause_active();
         let pause_info = if paused { Some(self.native_pause_info()) } else { None };
         // The clipboard is read only when a paste shortcut came in.
@@ -501,6 +503,12 @@ impl Game<'_> {
     /// UI took it (the game then never sees it).
     pub(super) fn native_window_event(&mut self, event: &WindowEvent) -> bool {
         self.native_track_input(event);
+        // The game's connection/loading screen (and any prompt over it) owns
+        // input. Do not feed a hidden Native menu; releases and Cancel still
+        // reach the normal game handler.
+        if self.remote_screen_up() {
+            return false;
+        }
         if let WindowEvent::KeyboardInput { event:key, .. }=event
             && let PhysicalKey::Code(code)=key.physical_key {
             let glfw=keys::glfw(code);
@@ -980,7 +988,7 @@ impl Game<'_> {
 impl Game<'_> {
     /// The pause menu is up and Native draws it (Custom pause menu).
     fn native_pause_active(&self) -> bool {
-        self.screen == Screen::Paused && self.pause_menu && with_state(|s| s.cfg.custom_pause)
+        !self.remote_screen_up() && self.screen == Screen::Paused && self.pause_menu && with_state(|s| s.cfg.custom_pause)
     }
 
     fn native_pause_info(&self) -> pause_view::PauseInfo {

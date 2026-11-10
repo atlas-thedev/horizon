@@ -57,6 +57,23 @@ patch(GAME, '        self.draw_debug_overlay(&mut batch, size);\n',
 TRACE = '        // Who caused it, before the event is handled: the trace wants the\n'
 patch(GAME, TRACE, '        if self.native_window_event(&event) {\n            return;\n        }\n' + TRACE)
 
+# A level-loading/connection screen takes precedence over a pause left open by
+# focus loss or a transition. Do not pause the integrated server while its
+# terrain is still loading, and do not auto-open pause over that screen.
+POINTER = CLIENT / 'game/pointer_capture.rs'
+patch(POINTER,
+      '        self.has_singleplayer_server()\n            && !self.is_published()\n',
+      '        self.has_singleplayer_server()\n            && !self.remote_screen_up()\n            && !self.is_published()\n')
+patch(POINTER,
+      '            && self.control.is_none()\n            && self.screen == Screen::Playing\n            && self.player.is_some()\n',
+      '            && self.control.is_none()\n            && self.screen == Screen::Playing\n            && !self.remote_screen_up()\n            && self.player.is_some()\n')
+
+# The shared Escape path is used by keyboard and controller. Do not open a
+# pause screen on top of loading; an already-open pause can still be closed.
+patch(GAME,
+      '                Screen::Playing => {\n                    if self.studio_replay.is_some() && self.captured {\n',
+      '                Screen::Playing => {\n                    if self.remote_screen_up() {\n                        return Ok(());\n                    }\n                    if self.studio_replay.is_some() && self.captured {\n')
+
 # The Native title screen: its page instead of the title's own (the world lists, the server list and the options
 # stay the game's), on the boot menu and on the title a world returns to. What it asks for goes through the
 # game's own title actions.
