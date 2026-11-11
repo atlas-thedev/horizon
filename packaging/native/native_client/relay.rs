@@ -1653,6 +1653,9 @@ fn handle(kind: &str, p: &Value) {
                 open(&key);
             }
         }
+        // Nearby players' emotes, pushed live so they start without waiting for a poll.
+        "emote:play" => horizon_client::native_emotes::pushed_play(p),
+        "emote:stop" => horizon_client::native_emotes::pushed_stop(p),
         "presence" => {
             let id = str_of(p, "userId").unwrap_or_default();
             let mut s = lock();

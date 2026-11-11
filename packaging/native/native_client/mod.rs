@@ -337,7 +337,7 @@ impl Game<'_> {
             let mut players: Vec<_> = self.remote_player_names().into_iter().map(|(id,n)| (id,n,self.remote_player_uuid(id).map(|u|format!("{u:032x}")))).collect();
             players.push((0,local.clone(),self.remote.as_ref().map(|r|format!("{:032x}",r.profile()))));
             let scope = if !g.in_world { String::new() } else if let Some(server)=self.server_address() { horizon_client::native_emotes::scope(server) } else { horizon_client::native_emotes::scope(&format!("local:{local}")) };
-            horizon_client::native_emotes::tick(scope,players,&local,[g.x,g.y,g.z],g.down[4]||g.down[7]||g.down[8]);
+            horizon_client::native_emotes::tick(scope,players,&local,[g.x,g.y,g.z],[g.down[0],g.down[1],g.down[2],g.down[3],g.down[4],g.down[7],g.down[8]]);
             {
                 use super::perspective::CameraType;
                 let perspective = match self.camera_type {

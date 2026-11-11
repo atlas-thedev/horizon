@@ -140,6 +140,8 @@ fn connect_pose(p: &mut [[f32; 6]; 6]) {
 }
 #[derive(Clone)]
 struct Playback {
+    /// Server event id; `None` for our own optimistic playback.
+    id: Option<String>,
     hash: String,
     uuid: Option<String>,
     server_start: i64,
@@ -164,6 +166,31 @@ struct State {
     waiting: HashSet<String>,
     command_gen: u64,
     pending: bool,
+    /// Cancel controls seen released since the local emote began (see `cancel_pressed`).
+    armed: [bool; CANCEL_CONTROLS],
+    played_at: Option<Instant>,
+    last_play_sent: Option<Instant>,
+    /// Event ids a pushed stop ended, so an older poll answer cannot bring them back.
+    ended: HashMap<String, Instant>,
+}
+/// Forward, left, back, right, jump, attack, use: pressing one ends the local emote.
+pub const CANCEL_CONTROLS: usize = 7;
+/// Walking momentum dies out within this time after an emote starts; sliding never cancels.
+const MOMENTUM_GRACE: Duration = Duration::from_millis(500);
+/// The server refuses plays closer together than 250 ms; stay just above that.
+const MIN_PLAY_GAP: Duration = Duration::from_millis(300);
+/// A control cancels only after it has been seen released since the emote began, so the
+/// mouse button that picked a wheel slot (still held as the wheel closes) does not stop it.
+fn cancel_pressed(down: &[bool; CANCEL_CONTROLS], armed: &mut [bool; CANCEL_CONTROLS]) -> bool {
+    let mut cancel = false;
+    for (held, armed) in down.iter().zip(armed.iter_mut()) {
+        if !*held { *armed = true; } else if *armed { cancel = true; }
+    }
+    cancel
+}
+/// Knockback, teleports, falling or walking off: more than a small nudge from the anchor.
+fn moved_away(d: [f64; 3]) -> bool {
+    d[0] * d[0] + d[2] * d[2] > 0.25 * 0.25 || d[1].abs() > 0.6
 }
 // Gameplay always traverses the clip once. Retain the server event until it
 // expires so polling the same event cannot restart a completed animation.
@@ -184,9 +211,23 @@ fn commands_ready() -> &'static Condvar {
 fn lock() -> std::sync::MutexGuard<'static, State> {
     state().lock().unwrap_or_else(|e| e.into_inner())
 }
+/// Same key as the Java mod (`PresenceService.normalizeAddress`): lower-case host without a
+/// trailing dot, and the port only when it is not 25565. Both editions must agree, or players
+/// on the two clients never see each other's emotes.
 pub fn scope(address: &str) -> String {
     let address = address.trim().to_lowercase();
-    let normalized = address.strip_suffix(":25565").unwrap_or(&address);
+    let (host, port) = match address.split_once(':') {
+        Some((h, p)) if !address.starts_with('[') && !p.contains(':') => (h, Some(p.trim())),
+        _ => match address.strip_suffix(":25565") {
+            Some(h) if address.starts_with('[') => (h, None),
+            _ => (address.as_str(), None),
+        },
+    };
+    let host = host.strip_suffix('.').unwrap_or(host);
+    let normalized = match port {
+        Some(p) if !p.is_empty() && p != "25565" => format!("{host}:{p}"),
+        _ => host.to_owned(),
+    };
     format!("{:x}", Sha256::digest(format!("server:{normalized}")))
 }
 pub fn tick(
@@ -194,7 +235,7 @@ pub fn tick(
     names: Vec<(u32, String, Option<String>)>,
     local: &str,
     position: [f64; 3],
-    cancel: bool,
+    controls: [bool; CANCEL_CONTROLS],
 ) {
     static START: std::sync::Once = std::sync::Once::new();
     START.call_once(|| {
@@ -214,25 +255,57 @@ pub fn tick(
         s.position = None;
         s.scope = scope;
     }
-    let moved = s.position.is_some_and(|p| {
-        p.iter()
-            .zip(position)
-            .map(|(a, b)| (a - b) * (a - b))
-            .sum::<f64>()
-            > 0.0016
-    });
     s.names = names
         .into_iter()
         .map(|(id, n, u)| (id, (n.to_lowercase(), u)))
         .collect();
     s.local = local.to_lowercase();
     let local_name = local.to_lowercase();
-    let active = playback_visible(&s, &local_name, Instant::now()) || s.waiting.contains(&local_name);
-    if (cancel || moved) && active {
-        stop_locked(&mut s);
-    }
-    if !playback_visible(&s, &local_name, Instant::now()) && !s.waiting.contains(&local_name) {
+    let now = Instant::now();
+    let active = playback_visible(&s, &local_name, now) || s.waiting.contains(&local_name);
+    if !active {
         s.position = Some(position);
+        return;
+    }
+    // Follow the player while walking momentum dies out, then hold the spot.
+    if s.position.is_none() || s.played_at.is_some_and(|t| now.duration_since(t) < MOMENTUM_GRACE) {
+        s.position = Some(position);
+    }
+    let pressed = cancel_pressed(&controls, &mut s.armed);
+    let moved = s.position.is_some_and(|p| moved_away(std::array::from_fn(|i| position[i] - p[i])));
+    if pressed || moved {
+        stop_locked(&mut s);
+        s.position = Some(position);
+    }
+}
+/// A nearby player's emote pushed over the mod event stream (`emote:play`), so it starts as
+/// soon as they pick it instead of on the next poll. Polling stays as the fallback.
+pub fn pushed_play(p: &Value) {
+    let Some(ev) = p.get("event") else { return };
+    let Some(name) = ev["name"].as_str().map(str::to_lowercase) else { return };
+    let scope = {
+        let s = lock();
+        if s.scope.is_empty() || p["scope"].as_str() != Some(s.scope.as_str()) || name == s.local {
+            return;
+        }
+        s.scope.clone()
+    };
+    let Some((api, _)) = crate::discord_presence::native_emote_auth() else { return };
+    let server = p["serverTime"].as_f64().or_else(|| ev["startedAt"].as_f64()).unwrap_or(0.0);
+    adopt_events(&serde_json::json!({"event": ev, "serverTime": server}), &api, &scope, Instant::now());
+}
+/// A nearby player stopped (`emote:stop`): end it now rather than on the next poll.
+pub fn pushed_stop(p: &Value) {
+    let mut s = lock();
+    let Some(name) = p["name"].as_str().map(str::to_lowercase) else { return };
+    if s.scope.is_empty() || p["scope"].as_str() != Some(s.scope.as_str()) || name == s.local {
+        return;
+    }
+    let id = p["id"].as_str().map(str::to_owned);
+    if let Some(id) = &id { s.ended.insert(id.clone(), Instant::now()); }
+    if s.playing.get(&name).is_some_and(|old| id.is_none() || old.id == id) {
+        s.playing.remove(&name);
+        s.waiting.remove(&name);
     }
 }
 fn stop_locked(s: &mut State) {
@@ -272,8 +345,10 @@ pub fn play(page: usize, slot: usize) -> bool {
             let now = Instant::now();
             let duration = s.clips.get(&hash).map(|c| if c.looping { 30000.0 } else { c.duration });
             if duration.is_none() { s.waiting.insert(local.clone()); } else { s.waiting.remove(&local); }
-            s.playing.insert(local, Playback { hash, uuid: None, server_start: 0,
+            s.playing.insert(local, Playback { id: None, hash, uuid: None, server_start: 0,
                 start: now, end: now + Duration::from_millis(duration.unwrap_or(30000.0) as u64) });
+            s.armed = [false; CANCEL_CONTROLS];
+            s.played_at = Some(now);
         }
     }
     let scope = s.scope.clone();
@@ -385,6 +460,16 @@ fn request(
     path: &str,
     body: Option<&Value>,
 ) -> Option<Value> {
+    request_status(agent, api, ticket, path, body).ok()
+}
+/// Like `request`, but a refusal keeps its HTTP status (0 for network or parse failures).
+fn request_status(
+    agent: &ureq::Agent,
+    api: &str,
+    ticket: &str,
+    path: &str,
+    body: Option<&Value>,
+) -> Result<Value, u16> {
     use std::io::Read;
     let url = format!("{api}{path}");
     let req = if body.is_some() {
@@ -399,16 +484,19 @@ fn request(
     } else {
         req.call()
     }
-    .ok()?;
+    .map_err(|e| match e {
+        ureq::Error::Status(code, _) => code,
+        _ => 0,
+    })?;
     let mut bytes = Vec::new();
     res.into_reader()
         .take(2 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)
-        .ok()?;
+        .map_err(|_| 0u16)?;
     if bytes.len() > 2 * 1024 * 1024 {
-        return None;
+        return Err(0);
     }
-    serde_json::from_slice(&bytes).ok()
+    serde_json::from_slice(&bytes).map_err(|_| 0)
 }
 fn cache_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("NATIVE_GAME_DIR").map(std::path::PathBuf::from)
@@ -518,14 +606,7 @@ fn prefetch(api: &str, me: &Value) {
     }
 }
 
-fn adopt(
-    v: &Value,
-    agent: &ureq::Agent,
-    api: &str,
-    _ticket: &str,
-    scope: &str,
-    requested: Instant,
-) {
+fn adopt_events(v: &Value, api: &str, scope: &str, requested: Instant) {
     let server = v["serverTime"].as_f64().unwrap_or(0.0);
     let events: Vec<Value> = v["events"]
         .as_array()
@@ -558,8 +639,10 @@ fn adopt(
             .max(0.0)
             .min(30000.0);
         let remaining = (e["expiresAt"].as_f64().unwrap_or(0.0) - server).clamp(0.0, 30000.0);
+        let id = e["id"].as_str().map(str::to_owned);
         let mut s = lock();
         if s.scope != scope
+            || id.as_ref().is_some_and(|id| s.ended.contains_key(id))
             || (v["events"].is_array() && s.pending && name == s.local)
             || remaining <= 0.0
             || s.canceled.get(&name).is_some_and(|t| {
@@ -573,6 +656,7 @@ fn adopt(
             &mut s,
             name,
             Playback {
+                id,
                 hash: hash.into(),
                 uuid: e["minecraftUuid"]
                     .as_str()
@@ -595,12 +679,30 @@ fn run_commands() {
         let Some((api, ticket)) = crate::discord_presence::native_emote_auth() else {
             let mut s = lock(); if s.command_gen == generation { s.pending = false; } continue;
         };
-        let when = Instant::now(); let stop = command["stop"] == true;
-        let result = request(&agent, &api, &ticket, if stop { "/v1/mod/emotes/stop" } else { "/v1/mod/emotes/play" }, Some(&command));
-        let current = { let s = lock(); s.command_gen == generation && s.scope == scope }
+        let stop = command["stop"] == true;
+        let still_current = || { let s = lock(); s.command_gen == generation && s.scope == scope }
             && crate::discord_presence::native_emote_auth().is_some_and(|(_, current)| current == ticket);
+        let mut when = Instant::now();
+        let mut result = None;
+        // Two quick picks used to hit the server's throttle (429), and the emote already playing
+        // locally was then replaced by the previous one. Space plays out and retry a refusal.
+        for attempt in 0..3 {
+            if !stop {
+                let wait = lock().last_play_sent.map_or(Duration::ZERO, |t| MIN_PLAY_GAP.saturating_sub(t.elapsed()));
+                if !wait.is_zero() { std::thread::sleep(wait); }
+                if !still_current() { break; }
+                lock().last_play_sent = Some(Instant::now());
+            }
+            when = Instant::now();
+            match request_status(&agent, &api, &ticket, if stop { "/v1/mod/emotes/stop" } else { "/v1/mod/emotes/play" }, Some(&command)) {
+                Ok(v) => { result = Some(v); break; }
+                Err(429) if !stop && attempt < 2 => continue,
+                Err(_) => break,
+            }
+        }
+        let current = still_current();
         if current && !stop {
-            if let Some(v) = result { adopt(&v, &agent, &api, &ticket, &scope, when); }
+            if let Some(v) = result { adopt_events(&v, &api, &scope, when); }
             let mut s = lock(); if s.command_gen == generation { s.pending = false; }
         }
     }
@@ -651,13 +753,14 @@ fn run() {
                     ),
                     None,
                 ) {
-                    adopt(&v, &agent, &api, &ticket, &scope, when);
+                    adopt_events(&v, &api, &scope, when);
                 }
             }
             let mut s = lock();
             s.playing.retain(|_, p| p.end > Instant::now());
             s.canceled
                 .retain(|_, t| t.elapsed() < Duration::from_secs(35));
+            s.ended.retain(|_, t| t.elapsed() < Duration::from_secs(35));
         } else {
             let mut s = lock();
             s.me = Value::Null;
@@ -676,7 +779,7 @@ mod tests {
         let mut s = State::default();
         let now = Instant::now();
         let playback = |server_start, start| Playback {
-            hash: "timing_probe".into(), uuid: None, server_start,
+            id: None, hash: "timing_probe".into(), uuid: None, server_start,
             start, end: now + Duration::from_secs(5),
         };
         record_playback(&mut s, "probe".into(), playback(1000, now));
@@ -705,7 +808,7 @@ mod tests {
             let hash=if looping {"looping"} else {"once"};
             s.clips.insert(hash.into(),make_clip(looping));
             s.preview_times.insert(hash.into(),600.0);
-            s.playing.insert(hash.into(),Playback {hash:hash.into(),uuid:None,server_start:1,
+            s.playing.insert(hash.into(),Playback {id:None,hash:hash.into(),uuid:None,server_start:1,
                 start:now-Duration::from_millis(999),end:now+Duration::from_secs(30)});
             assert!(playback_visible(&s,hash,now));
             assert!(!playback_visible(&s,hash,now+Duration::from_millis(1)));
@@ -741,7 +844,7 @@ mod tests {
         {
             let mut s = lock();
             s.names.insert(id, (name.clone(), None));
-            s.playing.insert(name.clone(), Playback {hash:hash.clone(),uuid:None,server_start:0,start:now,end:now+Duration::from_secs(5)});
+            s.playing.insert(name.clone(), Playback {id:None,hash:hash.clone(),uuid:None,server_start:0,start:now,end:now+Duration::from_secs(5)});
             s.clips.insert(hash.clone(), Clip {duration:1000.0,looping:true,connected:false,frames:vec![(0.0,pose),(1000.0,pose)]});
         }
         apply(id, rest, &mut p);
@@ -786,6 +889,7 @@ mod tests {
             s.playing.insert(
                 name.clone(),
                 Playback {
+                    id: None,
                     hash: hash.clone(),
                     uuid: None,
                     server_start: 0,
@@ -833,5 +937,37 @@ mod tests {
     fn scope_normalizes_default_port() {
         assert_eq!(scope("Example.org:25565"), scope("example.org"));
         assert_ne!(scope("example.org:25566"), scope("example.org"));
+        // Matches the Java mod's key, so the two editions see each other's emotes.
+        assert_eq!(scope("Example.org.:25565"), scope("example.org"));
+        assert_eq!(scope(" example.org. "), scope("example.org"));
+        assert_eq!(scope("example.org.:25566"), scope("example.org:25566"));
+        assert_eq!(scope("[::1]:25565"), scope("[::1]"));
+        assert_eq!(scope("example.org"), format!("{:x}", Sha256::digest("server:example.org")));
+    }
+    #[test]
+    fn the_button_that_picked_the_slot_does_not_cancel_until_pressed_again() {
+        let mut armed = [false; CANCEL_CONTROLS];
+        let mut down = [false; CANCEL_CONTROLS];
+        down[5] = true; // attack, still held from clicking the wheel
+        assert!(!cancel_pressed(&down, &mut armed));
+        assert!(!cancel_pressed(&down, &mut armed));
+        down[5] = false;
+        assert!(!cancel_pressed(&down, &mut armed));
+        down[5] = true;
+        assert!(cancel_pressed(&down, &mut armed));
+        for control in 0..CANCEL_CONTROLS {
+            let mut armed = [false; CANCEL_CONTROLS];
+            let mut down = [false; CANCEL_CONTROLS];
+            assert!(!cancel_pressed(&down, &mut armed));
+            down[control] = true;
+            assert!(cancel_pressed(&down, &mut armed));
+        }
+    }
+    #[test]
+    fn small_nudges_stay_but_walking_off_or_knockback_cancels() {
+        assert!(!moved_away([0.05, 0.0, 0.05]));
+        assert!(!moved_away([0.1, 0.4, -0.1]));
+        assert!(moved_away([0.3, 0.0, 0.0]));
+        assert!(moved_away([0.0, -1.0, 0.0]));
     }
 }
