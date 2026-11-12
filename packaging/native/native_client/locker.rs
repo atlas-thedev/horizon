@@ -10,7 +10,26 @@ use super::ui::{self, Ui};
 use super::wardrobe::{self, Item, SLOT_NAMES, SLOTS, State};
 use horizon_client::native_ui::{Canvas, font, theme};
 
-const SLOT_ICONS: [u32; 6] = [theme::I_LAYERS, theme::I_HAT, theme::I_GLASSES, theme::I_BACKPACK, theme::I_FOOTPRINTS, theme::I_HAND];
+/// One per wardrobe slot; `BALLOON_ICON` is drawn by hand (the icon font has no balloon).
+const BALLOON_ICON: u32 = 0;
+const SLOT_ICONS: [u32; 8] = [theme::I_LAYERS, theme::I_HAT, theme::I_GLASSES, theme::I_BACKPACK, theme::I_FOOTPRINTS, theme::I_HAND, theme::I_SPARKLES, BALLOON_ICON];
+
+/// A slot's icon; the balloon is a round balloon, its knot and a wavy string.
+fn slot_icon(c: &mut Canvas, icon: u32, size: f32, cx: f32, cy: f32, color: u32) {
+    if icon != BALLOON_ICON {
+        c.icon(icon, size, cx, cy, color);
+        return;
+    }
+    let r = size * 0.3;
+    let by = cy - size * 0.16;
+    c.circle(cx, by, r, color);
+    c.fill(cx - size * 0.06, by + r - 0.5, size * 0.12, size * 0.08, color);
+    let (sy, step) = (by + r + size * 0.06, size * 0.11);
+    for i in 0..3 {
+        let dx = if i % 2 == 0 { 0.0 } else { size * 0.06 };
+        c.fill(cx + dx - 0.5, sy + i as f32 * step, 1.0, step, theme::alpha(color, 0.75));
+    }
+}
 
 pub struct Locker {
     slot: usize,
@@ -29,7 +48,7 @@ impl Default for Locker {
 }
 
 fn singular(slot: usize) -> &'static str {
-    ["cape", "hat", "glasses", "back item", "shoes", "hand item"][slot]
+    ["cape", "hat", "glasses", "back item", "shoes", "hand item", "aura", "balloon"][slot]
 }
 
 impl Locker {
@@ -146,7 +165,7 @@ impl Locker {
                 c.outline(tx, ty, tw, 30.0, 15.0, 1.0, theme::alpha(theme::HAIRLINE, 1.0 - on));
             }
             let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::SOLID_FG, on);
-            c.icon(SLOT_ICONS[i], 13.0, tx + 19.0, ty + 15.0, fg);
+            slot_icon(c, SLOT_ICONS[i], 13.0, tx + 19.0, ty + 15.0, fg);
             let lh = c.line_height(font::SEMIBOLD, 11.5);
             c.text(font::SEMIBOLD, 11.5, &label, tx + 32.0, ty + (30.0 - lh) / 2.0, fg);
             tx += tw + 6.0;
@@ -244,7 +263,7 @@ impl Locker {
                     c.image(&img, ix + (iw - dw) / 2.0, iy + (ih - dh) / 2.0, dw, dh, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
                 }
                 Some(Pic::Loading) => ui.dots(c, ix + iw / 2.0, iy + ih / 2.0, theme::TEXT_MUTED),
-                _ => c.icon(SLOT_ICONS[self.slot], 22.0, ix + iw / 2.0, iy + ih / 2.0, theme::TEXT_MUTED),
+                _ => slot_icon(c, SLOT_ICONS[self.slot], 22.0, ix + iw / 2.0, iy + ih / 2.0, theme::TEXT_MUTED),
             },
         }
         if let Some(item) = it
