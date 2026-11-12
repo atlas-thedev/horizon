@@ -191,7 +191,7 @@ pub fn critical(enchanted: bool) -> Option<[f32; 3]> {
 
 static PHRASE: Mutex<Option<String>> = Mutex::new(None);
 
-/// Discord RPC: the words to show instead of "Multiplayer" while on a server.
+/// Discord RPC: the custom status Discord shows on top (menus, worlds and servers alike).
 pub fn set_discord_phrase(phrase: Option<String>) {
     *PHRASE.lock().unwrap_or_else(|e| e.into_inner()) = phrase;
 }

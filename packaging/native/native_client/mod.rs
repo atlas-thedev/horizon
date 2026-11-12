@@ -122,6 +122,8 @@ struct State {
     /// The Native multiplayer screen, and whether the game's own was asked for (until the title shows again).
     servers: servers_view::ServersView,
     servers_dialog: servers_dialogs::ServerDialog,
+    /// The list as last shown: an open dialog draws over it (the game's dialog screens do not carry the list).
+    servers_last: Option<servers_view::ServersInfo>,
     servers_classic: bool,
     /// The chat to open the Relay screen on (from a toast).
     relay_select: Option<String>,
@@ -173,6 +175,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             title_pending: None,
             servers: servers_view::ServersView::default(),
             servers_dialog: servers_dialogs::ServerDialog::default(),
+            servers_last: None,
             servers_classic: false,
             relay_select: None,
             toasts: toasts::Toasts::default(),
@@ -1092,7 +1095,7 @@ pub(super) fn native_title_active(title: &horizon_client::title::Title) -> bool 
             s.servers.closed();
             s.cfg.custom_title
         }
-        // The server list itself (Add, Edit, Direct Connection and Delete stay the game's screens).
+        // The server list and its Add, Edit, Direct Connection and Delete screens (Native dialogs answer those).
         Mode::Multiplayer(
             horizon_client::multiplayer::Screen::List { .. }
             | horizon_client::multiplayer::Screen::Edit { .. }
@@ -1152,6 +1155,9 @@ pub(super) fn native_title_frame(
         }
         match overlay {
             5 => {
+                if let Some(list) = state.servers_last.as_ref() {
+                    state.servers.draw_behind(&mut state.ui, c, list);
+                }
                 if let Some(info) = dialog.as_ref()
                     && let Some(act) = state.servers_dialog.draw(&mut state.ui, c, info)
                 {
@@ -1159,6 +1165,7 @@ pub(super) fn native_title_frame(
                 }
             }
             4 => {
+                state.servers_last = servers.clone();
                 let escape = state.ui.keys.iter().any(|(k, _)| *k == ui::KEY_ESCAPE);
                 let mut act = servers.as_ref().and_then(|list| state.servers.draw(&mut state.ui, c, list));
                 if escape && act.is_none() {

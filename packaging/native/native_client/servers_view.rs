@@ -5,7 +5,8 @@
 //! The list holds, top to bottom: the servers Native features (`/v1/site/spotlight`, pinned), the servers the
 //! Horizon project partners with (its official server and partners, which the game adds to the player's list) and
 //! the player's own servers.dat. Every row pings live. Click selects, double-click joins; hovering a row's icon
-//! shows vanilla's play and move arrows. Add, Edit, Direct Connection and Delete open the game's own screens.
+//! shows vanilla's play and move arrows. Add, Edit, Direct Connection and Delete open the game's own screens,
+//! which Native draws as its own dialogs over this list (servers_dialogs.rs).
 //!
 //! Keyboard: Up / Down select, Shift+Up / Down move a server, Enter joins, Del removes. Typing anywhere filters the
 //! list; Ctrl+F search, Ctrl+N add, Ctrl+D direct connect, Ctrl+E edit, Ctrl+R refresh.
@@ -331,6 +332,17 @@ impl ServersView {
     fn selected_saved(&self) -> Option<usize> {
         let sel = self.selected.as_deref()?;
         self.order.iter().find(|(a, _)| a.eq_ignore_ascii_case(sel)).and_then(|(_, i)| *i)
+    }
+
+    /// The list as it was, under an open Add / Edit / Direct Connection / Delete dialog (as the Java mod draws them):
+    /// it sees no mouse, keys or typing, so only the dialog answers this frame.
+    pub fn draw_behind(&mut self, ui: &mut Ui, c: &mut Canvas, info: &ServersInfo) {
+        let input = (ui.interactive, ui.down, ui.pressed, ui.released, ui.right_pressed, ui.scroll);
+        let typed = (std::mem::take(&mut ui.chars), std::mem::take(&mut ui.keys));
+        (ui.interactive, ui.down, ui.pressed, ui.released, ui.right_pressed, ui.scroll) = (false, false, false, false, false, 0.0);
+        let _ = self.draw(ui, c, info);
+        (ui.interactive, ui.down, ui.pressed, ui.released, ui.right_pressed, ui.scroll) = input;
+        (ui.chars, ui.keys) = typed;
     }
 
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, info: &ServersInfo) -> Option<TitleAct> {

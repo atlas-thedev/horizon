@@ -201,18 +201,82 @@ patch(DRAGON,
       '            ),\n'
       '        );\n')
 
-# Discord RPC: the module switches the game's Rich Presence off, and words what a server shows as.
+# Discord RPC: the module switches the game's Rich Presence off, and its custom status is the top line everywhere
+# (menus, singleplayer, servers, hosting), with what the player does moved under it, as in the Java mod.
 patch(CLIENT / 'game/discord.rs',
       '        if !self.settings.extras.discord_presence {\n',
       '        if !self.settings.extras.discord_presence || horizon_client::native_ui::tweaks::get().discord_off {\n')
 patch(CLIENT / 'discord_presence.rs',
-      '    let mut a = json!({"details": details, "assets": assets});\n',
       '    let mut a = json!({"details": details, "assets": assets});\n'
-      '    if let Status::World { play: Play::Multiplayer, .. } = status\n'
-      '        && let Some(phrase) = crate::native_ui::tweaks::discord_phrase()\n'
-      '    {\n'
-      '        a["details"] = phrase.into();\n'
+      '    if let Some(state) = state {\n'
+      '        a["state"] = state.into();\n'
+      '    }\n',
+      '    let mut a = json!({"details": details, "assets": assets});\n'
+      '    if let Some(state) = state {\n'
+      '        a["state"] = state.into();\n'
+      '    }\n'
+      '    if let Some(status) = crate::native_ui::tweaks::discord_phrase() {\n'
+      '        with_status(&mut a, &status);\n'
       '    }\n')
+patch(CLIENT / 'discord_presence.rs',
+      '/// The activity Discord shows for `status`; `None` clears it.\n',
+      '/// Native: the custom `status` on top and what the player does under it ("Singleplayer · In the Nether").\n'
+      '/// Discord refuses a line shorter than two characters, so such a status is left out.\n'
+      'fn with_status(a: &mut Value, status: &str) {\n'
+      '    let doing = a["details"].as_str().unwrap_or_default().trim_start_matches("Playing ").to_owned();\n'
+      '    if status.chars().count() < 2 || doing == status {\n'
+      '        return;\n'
+      '    }\n'
+      '    let line = match a.get("state").and_then(Value::as_str) {\n'
+      '        Some(place) => format!("{doing} · {place}"),\n'
+      '        None => doing,\n'
+      '    };\n'
+      '    a["details"] = status.into();\n'
+      '    a["state"] = line.into();\n'
+      '}\n'
+      '\n'
+      '/// The activity Discord shows for `status`; `None` clears it.\n')
+# An edited status reaches Discord within seconds, not at the next minute's refresh: the thread looks every 2 s.
+patch(CLIENT / 'discord_presence.rs',
+      '        let due = sent.is_none_or(|(w, at)| w != wanted || now - at >= REFRESH);\n'
+      '        if !due {\n'
+      '            let (_, at) = sent.expect("sent");\n'
+      '            std::thread::park_timeout(REFRESH - (now - at));\n',
+      '        let phrase = crate::native_ui::tweaks::discord_phrase();\n'
+      '        let due = sent_phrase != phrase || sent.is_none_or(|(w, at)| w != wanted || now - at >= REFRESH);\n'
+      '        if !due {\n'
+      '            let (_, at) = sent.expect("sent");\n'
+      '            std::thread::park_timeout((REFRESH - (now - at)).min(Duration::from_secs(2)));\n')
+patch(CLIENT / 'discord_presence.rs',
+      '    let mut sent: Option<(Wanted, Instant)> = None;\n',
+      '    let mut sent: Option<(Wanted, Instant)> = None;\n'
+      '    let mut sent_phrase: Option<String> = None;\n')
+patch(CLIENT / 'discord_presence.rs',
+      '            Ok(()) => sent = Some((wanted, now)),\n',
+      '            Ok(()) => {\n'
+      '                sent = Some((wanted, now));\n'
+      '                sent_phrase = phrase;\n'
+      '            }\n')
+patch(CLIENT / 'discord_presence.rs',
+      '    #[test]\n'
+      '    fn time_counts_from_entering_the_world() {\n',
+      '    #[test]\n'
+      '    fn a_custom_status_is_the_top_line_and_keeps_what_the_player_does() {\n'
+      '        let mut menus = json!({"details": "In the menus"});\n'
+      '        with_status(&mut menus, "Grinding bedwars");\n'
+      '        assert_eq!(menus["details"], "Grinding bedwars");\n'
+      '        assert_eq!(menus["state"], "In the menus");\n'
+      '        let mut single = json!({"details": "Playing Singleplayer", "state": "In the Nether"});\n'
+      '        with_status(&mut single, "Speedrunning");\n'
+      '        assert_eq!(single["details"], "Speedrunning");\n'
+      '        assert_eq!(single["state"], "Singleplayer · In the Nether");\n'
+      '        let mut short = json!({"details": "Playing Multiplayer", "state": "In the End"});\n'
+      '        with_status(&mut short, "x");\n'
+      '        assert_eq!(short["details"], "Playing Multiplayer");\n'
+      '    }\n'
+      '\n'
+      '    #[test]\n'
+      '    fn time_counts_from_entering_the_world() {\n')
 
 # Custom pause menu: Native draws it, so the game's own is left out while it is on.
 patch(CLIENT / 'game.rs',

@@ -1,7 +1,7 @@
-//! `DiscordRpcModule`: the switch and the words for the game's Discord Rich
-//! Presence. The presence itself is the game's own (it never shows a server
-//! address); this module turns it on and off and lets the player choose what
-//! is shown in place of "Multiplayer".
+//! `DiscordRpcModule`: the switch and the custom status for the game's Discord
+//! Rich Presence. The presence itself is the game's own (it never shows a server
+//! address); this module turns it on and off and lets the player set a status
+//! that Discord shows on top everywhere, with what they do under it.
 
 use super::module::*;
 use super::setting::Setting;
@@ -17,7 +17,7 @@ pub fn all() -> Vec<Module> {
         true,
         vec![
             Setting::bool("hideserver", "Hide server address", false),
-            Setting::text("customtext", "Custom phrase", "", "Playing Multiplayer", 48),
+            Setting::text("customtext", "Custom status", "", "Shown on Discord", 48),
         ],
         None,
         Box::new(DiscordRpc),
