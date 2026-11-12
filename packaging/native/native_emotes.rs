@@ -352,12 +352,29 @@ pub fn play(page: usize, slot: usize) -> bool {
         }
     }
     let scope = s.scope.clone();
+    let player = self_profile(&s);
     s.command_gen = s.command_gen.wrapping_add(1);
     s.pending = true;
     s.commands.clear();
-    s.commands.push_back(serde_json::json!({"page":page,"slot":slot,"scope":scope}));
+    s.commands.push_back(serde_json::json!({"page":page,"slot":slot,"scope":scope,"player":player}));
     commands_ready().notify_one();
     true
+}
+/// A Minecraft player name (the only kind the server accepts in `me` and `player.name`).
+fn valid_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 16 && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+}
+/// Who we are in game (name and profile UUID, id 0 in `names`): the other players' clients match our emote to this
+/// player, so it must be what they see, not the Native account name.
+fn self_profile(s: &State) -> Value {
+    let mut o = serde_json::Map::new();
+    if valid_name(&s.local) {
+        o.insert("name".into(), s.local.clone().into());
+    }
+    if let Some((_, Some(uuid))) = s.names.get(&0) {
+        o.insert("uuid".into(), uuid.clone().into());
+    }
+    Value::Object(o)
 }
 fn identity_matches(id: u32, rendered: Option<&str>, authenticated: Option<&str>) -> bool {
     id == 0 || rendered.is_none_or(|u| u.chars().nth(12) == Some('3') || Some(u) == authenticated)
@@ -735,7 +752,7 @@ fn run() {
                 refresh = Instant::now();
             }
             let current_me = { lock().me.clone() }; prefetch(&api, &current_me);
-            let (scope, names) = { let s = lock(); (s.scope.clone(), s.names.values().map(|(n, _)| n.clone()).collect::<Vec<_>>()) };
+            let (scope, names, me) = { let s = lock(); (s.scope.clone(), s.names.values().map(|(n, _)| n.clone()).collect::<Vec<_>>(), s.local.clone()) };
             if !scope.is_empty() && !names.is_empty() {
                 let when = Instant::now();
                 if let Some(v) = request(
@@ -743,13 +760,15 @@ fn run() {
                     &api,
                     &ticket,
                     &format!(
-                        "/v1/mod/emotes/events?scope={scope}&players={}",
+                        "/v1/mod/emotes/events?scope={scope}&players={}{}",
                         names
                             .into_iter()
                             .filter(|n| n.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_'))
                             .take(64)
                             .collect::<Vec<_>>()
-                            .join(",")
+                            .join(","),
+                        // our own in-game name: a friend who typed another address for this server still sees us
+                        if valid_name(&me) { format!("&me={me}") } else { String::new() }
                     ),
                     None,
                 ) {
@@ -867,6 +886,18 @@ mod tests {
         assert!((c.sample(1250.0)[0][0] - 0.5).abs() < 1e-6);
         v["frames"][1]["t"] = serde_json::json!(0);
         assert!(Clip::parse(&v).is_none());
+    }
+    #[test]
+    fn plays_say_who_we_are_in_game() {
+        let mut s = State::default();
+        s.local = "steve_2".into();
+        s.names.insert(0, ("steve_2".into(), Some("0123456789abcdef0123456789abcdef".into())));
+        let p = self_profile(&s);
+        assert_eq!(p["name"], "steve_2");
+        assert_eq!(p["uuid"], "0123456789abcdef0123456789abcdef");
+        s.local = "not a name!".into();
+        assert!(self_profile(&s).get("name").is_none());
+        assert!(valid_name("Notch") && !valid_name("") && !valid_name("seventeen_chars_x"));
     }
     #[test]
     fn identity_cannot_impersonate_a_nearby_premium_player() {
