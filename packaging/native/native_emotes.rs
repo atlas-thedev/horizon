@@ -172,6 +172,12 @@ struct State {
     last_play_sent: Option<Instant>,
     /// Event ids a pushed stop ended, so an older poll answer cannot bring them back.
     ended: HashMap<String, Instant>,
+    /// The Emotes page is saving the wheel or claiming an emote.
+    saving: bool,
+    /// Why the last save or claim did not go through (shown on the Emotes page).
+    save_error: Option<String>,
+    /// Ask the server for `me` again on the next poll (the Emotes page opened, or a save was refused).
+    refresh_now: bool,
 }
 /// Forward, left, back, right, jump, attack, use: pressing one ends the local emote.
 pub const CANCEL_CONTROLS: usize = 7;
@@ -324,6 +330,167 @@ pub fn stop() {
 }
 pub fn snapshot() -> Value {
     lock().me.clone()
+}
+
+/// One wheel page: eight slots of emote ids.
+pub type WheelPage = [Option<String>; 8];
+
+/// The wheel pages in `me` (always at least one).
+pub fn pages_of(me: &Value) -> Vec<WheelPage> {
+    let mut out: Vec<WheelPage> = me["pages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|row| std::array::from_fn(|i| row[i].as_str().map(str::to_owned)))
+        .collect();
+    if out.is_empty() {
+        out.push(Default::default());
+    }
+    out
+}
+
+/// `id` into `slot` of `page`; it leaves any other slot of that page (an emote is on a page once).
+pub fn equip(pages: &[WheelPage], page: usize, slot: usize, id: Option<&str>) -> Vec<WheelPage> {
+    let mut out = pages.to_vec();
+    if let Some(row) = out.get_mut(page).filter(|_| slot < 8) {
+        for (i, s) in row.iter_mut().enumerate() {
+            if i == slot {
+                *s = id.map(str::to_owned);
+            } else if id.is_some() && s.as_deref() == id {
+                *s = None;
+            }
+        }
+    }
+    out
+}
+
+/// Swaps two slots of a page (or moves an emote into an empty one).
+pub fn swap(pages: &[WheelPage], page: usize, from: usize, to: usize) -> Vec<WheelPage> {
+    let mut out = pages.to_vec();
+    if let Some(row) = out.get_mut(page).filter(|_| from < 8 && to < 8) {
+        row.swap(from, to);
+    }
+    out
+}
+
+/// One more empty page (Native Plus), unless the account has them all.
+pub fn with_new_page(pages: &[WheelPage], limit: usize) -> Vec<WheelPage> {
+    let mut out = pages.to_vec();
+    if out.len() < limit {
+        out.push(Default::default());
+    }
+    out
+}
+
+/// What the Emotes page says when the server refused a save.
+fn save_failure(status: u16) -> &'static str {
+    match status {
+        409 => "Your emotes changed on another device. Here is the newest wheel.",
+        401 => "Sign in with Native in the launcher to change your wheel.",
+        400 => "That wheel could not be saved: equip only emotes in your locker.",
+        _ => "Could not save the wheel. Check your connection and try again.",
+    }
+}
+
+pub fn saving() -> bool {
+    lock().saving
+}
+
+pub fn save_error() -> Option<String> {
+    lock().save_error.clone()
+}
+
+/// Fetches `me` again on the next poll (the Emotes page was opened).
+pub fn request_refresh() {
+    lock().refresh_now = true;
+}
+
+/// Downloads an emote's clip for a preview (a no-op once it is here or on its way).
+pub fn want_clip(hash: &str) {
+    if let Some((api, _)) = crate::discord_presence::native_emote_auth() {
+        load_clip(&api, hash);
+    }
+}
+
+/// Saves the wheel. It shows at once; the server's answer replaces it, and a refusal brings back what was there.
+pub fn save_loadout(next: Vec<WheelPage>) {
+    let Some((api, ticket)) = crate::discord_presence::native_emote_auth() else {
+        lock().save_error = Some(save_failure(401).to_owned());
+        return;
+    };
+    let (body, before) = {
+        let mut s = lock();
+        if s.saving || !s.me.is_object() {
+            return;
+        }
+        let limit = s.me["pageLimit"].as_u64().unwrap_or(1).max(1) as usize;
+        let rows: Vec<Value> = next
+            .iter()
+            .take(limit)
+            .map(|row| Value::Array(row.iter().map(|id| id.clone().map_or(Value::Null, Value::String)).collect()))
+            .collect();
+        let body = serde_json::json!({"revision": s.me["revision"].as_i64().unwrap_or(0), "pages": rows});
+        let before = s.me.clone();
+        let usable = rows.len().clamp(1, limit);
+        s.me["pages"] = Value::Array(rows);
+        s.me["usablePages"] = usable.into();
+        s.saving = true;
+        s.save_error = None;
+        (body, before)
+    };
+    send_edit(api, ticket, "/v1/mod/emotes/loadout", body, move |s, status| {
+        s.me = before;
+        s.save_error = Some(save_failure(status).to_owned());
+        s.refresh_now = true;
+    });
+}
+
+/// Puts a free emote in the locker.
+pub fn claim(id: &str, label: &str) {
+    let Some((api, ticket)) = crate::discord_presence::native_emote_auth() else { return };
+    {
+        let mut s = lock();
+        if s.saving {
+            return;
+        }
+        s.saving = true;
+        s.save_error = None;
+    }
+    let label = label.to_owned();
+    send_edit(api, ticket, "/v1/mod/emotes/claim", serde_json::json!({"itemId": id}), move |s, status| {
+        s.save_error = Some(if status == 403 { format!("Get {label} in the Native Store first.") } else { format!("Could not add {label}. Try again.") });
+    });
+}
+
+/// Posts an edit off the render thread; the reply (the account's `me`) replaces the local one.
+fn send_edit(api: String, ticket: String, path: &'static str, body: Value, failed: impl FnOnce(&mut State, u16) + Send + 'static) {
+    let spawned = std::thread::Builder::new().name("Native emote edit".into()).spawn(move || {
+        let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).build();
+        let result = request_status(&agent, &api, &ticket, path, Some(&body));
+        let current = crate::discord_presence::native_emote_auth().is_some_and(|(_, t)| t == ticket);
+        match result {
+            Ok(me) if current && me.is_object() => {
+                save_me(&ticket, &me);
+                prefetch(&api, &me);
+                let mut s = lock();
+                s.me = me;
+                s.saving = false;
+            }
+            Ok(_) => lock().saving = false,
+            Err(status) => {
+                let mut s = lock();
+                if current {
+                    failed(&mut s, status);
+                }
+                s.saving = false;
+            }
+        }
+    });
+    if spawned.is_err() {
+        let mut s = lock();
+        s.saving = false;
+        s.save_error = Some(save_failure(0).to_owned());
+    }
 }
 pub fn play(page: usize, slot: usize) -> bool {
     let mut s = lock();
@@ -743,10 +910,13 @@ fn run() {
                 drop(s);
                 if let Some(me) = cached_me(&ticket) { prefetch(&api, &me); lock().me = me; }
             }
-            if refresh.elapsed() > Duration::from_secs(15) {
+            let wanted = std::mem::take(&mut lock().refresh_now);
+            if wanted || refresh.elapsed() > Duration::from_secs(15) {
                 if let Some(v) = request(&agent, &api, &ticket, "/v1/mod/emotes/me", None) {
                     if crate::discord_presence::native_emote_auth().is_some_and(|(_, current)| current == ticket) {
-                        save_me(&ticket, &v); prefetch(&api, &v); lock().me = v;
+                        save_me(&ticket, &v); prefetch(&api, &v);
+                        // a save in flight shows the new wheel; its own reply replaces it
+                        let mut s = lock(); if !s.saving { s.me = v; }
                     }
                 }
                 refresh = Instant::now();
@@ -793,6 +963,32 @@ fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn row(ids: &[Option<&str>]) -> WheelPage {
+        std::array::from_fn(|i| ids.get(i).copied().flatten().map(str::to_owned))
+    }
+    #[test]
+    fn wheel_edits_keep_an_emote_once_per_page_and_leave_other_pages() {
+        let pages = vec![row(&[Some("wave"), None, Some("dance")]), row(&[Some("wave")])];
+        let moved = equip(&pages, 0, 1, Some("dance"));
+        assert_eq!(moved[0], row(&[Some("wave"), Some("dance"), None]));
+        assert_eq!(moved[1], pages[1]);
+        let cleared = equip(&pages, 0, 0, None);
+        assert_eq!(cleared[0], row(&[None, None, Some("dance")]));
+        let swapped = swap(&pages, 0, 0, 2);
+        assert_eq!(swapped[0], row(&[Some("dance"), None, Some("wave")]));
+        assert_eq!(equip(&pages, 5, 0, Some("x")), pages);
+        assert_eq!(with_new_page(&pages, 2).len(), 2);
+        assert_eq!(with_new_page(&pages, 3)[2], WheelPage::default());
+    }
+    #[test]
+    fn pages_are_read_from_me_with_at_least_one() {
+        assert_eq!(pages_of(&Value::Null), vec![WheelPage::default()]);
+        let me = serde_json::json!({"pages": [["a", null, "c"], []]});
+        let pages = pages_of(&me);
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0], row(&[Some("a"), None, Some("c")]));
+        assert_eq!(pages[1], WheelPage::default());
+    }
     #[test]
     fn polling_preserves_the_clock_and_ignores_older_events() {
         let mut s = State::default();

@@ -14,7 +14,7 @@ pub struct Wheel {
     hover_started: f64,
     bounds: HashMap<u64, [f32; 4]>,
 }
-fn poster_url(item: &serde_json::Value, api: &str) -> Option<String> {
+pub(super) fn poster_url(item: &serde_json::Value, api: &str) -> Option<String> {
     let raw = item["posterUrl"]
         .as_str()
         .map(str::to_string)

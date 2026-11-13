@@ -10,7 +10,7 @@ use super::ui::{self, Ui};
 use super::wardrobe::{self, Item, SLOT_NAMES, SLOTS, State};
 use horizon_client::native_ui::{Canvas, font, theme};
 
-/// One per wardrobe slot; `BALLOON_ICON` is drawn by hand (the icon font has no balloon).
+/// One per wardrobe slot, for item cards without a picture; `BALLOON_ICON` is drawn by hand (the icon font has no balloon).
 const BALLOON_ICON: u32 = 0;
 const SLOT_ICONS: [u32; 8] = [theme::I_LAYERS, theme::I_HAT, theme::I_GLASSES, theme::I_BACKPACK, theme::I_FOOTPRINTS, theme::I_HAND, theme::I_SPARKLES, BALLOON_ICON];
 
@@ -143,8 +143,9 @@ impl Locker {
         // Slot tabs.
         let (mut tx, mut ty) = (lx, y);
         for i in 0..SLOTS.len() {
-            let label = SLOT_NAMES[i].replace("Wings & Backpacks", "Back").replace("Hand Items", "Hand");
-            let tw = c.text_width(font::SEMIBOLD, 11.5, &label) + 44.0;
+            // text only, like the launcher's tabs
+            let label = SLOT_NAMES[i].replace("Hand Items", "Hand");
+            let tw = c.text_width(font::SEMIBOLD, 11.5, &label) + 28.0;
             if tx + tw > lx + lw {
                 tx = lx;
                 ty += 36.0;
@@ -165,9 +166,8 @@ impl Locker {
                 c.outline(tx, ty, tw, 30.0, 15.0, 1.0, theme::alpha(theme::HAIRLINE, 1.0 - on));
             }
             let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::SOLID_FG, on);
-            slot_icon(c, SLOT_ICONS[i], 13.0, tx + 19.0, ty + 15.0, fg);
             let lh = c.line_height(font::SEMIBOLD, 11.5);
-            c.text(font::SEMIBOLD, 11.5, &label, tx + 32.0, ty + (30.0 - lh) / 2.0, fg);
+            c.text(font::SEMIBOLD, 11.5, &label, tx + 14.0, ty + (30.0 - lh) / 2.0, fg);
             tx += tw + 6.0;
         }
         let items = wardrobe::owned_in(&l, SLOTS[self.slot]);

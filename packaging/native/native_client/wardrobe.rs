@@ -10,7 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 pub const SLOTS: [&str; 8] = ["capes", "hats", "glasses", "back", "shoes", "hand", "auras", "balloons"];
-pub const SLOT_NAMES: [&str; 8] = ["Capes", "Hats", "Glasses", "Wings & Backpacks", "Shoes", "Hand Items", "Auras", "Balloons"];
+pub const SLOT_NAMES: [&str; 8] = ["Capes", "Hats", "Glasses", "Backs", "Shoes", "Hand Items", "Auras", "Balloons"];
 const BACK: &str = "back";
 const CAPES: &str = "capes";
 
@@ -141,6 +141,12 @@ fn text(o: &Value, k: &str) -> Option<String> {
     o.get(k).and_then(Value::as_str).map(str::to_owned)
 }
 
+/// Capes and cosmetics only. The store also sells emotes (kind "emote") and bundles: they have no slot, so they landed
+/// among the capes as empty cards. Emotes have their own page in the Native menu.
+fn wearable(o: &Value) -> bool {
+    o.is_object() && matches!(o.get("kind").and_then(Value::as_str), None | Some("cape") | Some("cosmetic"))
+}
+
 fn parse_item(o: &Value) -> Item {
     let partner = o.get("partner").filter(|p| p.is_object());
     let accent = partner
@@ -178,7 +184,7 @@ fn string_map(o: &Value, key: &str) -> HashMap<String, String> {
 /// Reads `/v1/store/me` (or an equip reply) into the locker.
 fn apply(l: &mut Locker, me: &Value) {
     if let Some(hidden) = me.get("ownedHidden").and_then(Value::as_array) {
-        for e in hidden.iter().filter(|e| e.is_object()) {
+        for e in hidden.iter().filter(|e| wearable(e)) {
             let item = parse_item(e);
             if !item.id.is_empty() && !l.catalog.iter().any(|i| i.id == item.id) {
                 l.catalog.push(item);
@@ -249,7 +255,7 @@ pub fn refresh(force: bool) {
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .filter(|e| e.is_object())
+                .filter(|e| wearable(e))
                 .map(parse_item)
                 .collect();
             lock().catalog = items;
@@ -439,6 +445,14 @@ mod tests {
         assert_eq!(cape.frame(0.5), 0);
         assert_eq!(cape.frame(1.0), 0);
         assert_eq!(cape.frame(0.3), 2);
+    }
+
+    #[test]
+    fn emotes_and_bundles_stay_out_of_the_locker() {
+        assert!(wearable(&json!({"id": "c"})) && wearable(&json!({"id": "c", "kind": "cape"})));
+        assert!(wearable(&json!({"id": "h", "kind": "cosmetic", "slot": "hats"})));
+        assert!(!wearable(&json!({"id": "emote-hi", "kind": "emote"})));
+        assert!(!wearable(&json!({"id": "set", "kind": "bundle"})));
     }
 
     #[test]

@@ -10,6 +10,7 @@
 
 mod discord_module;
 mod emote_wheel;
+mod emotes_view;
 mod emote_camera;
 mod emotes_module;
 mod extra_modules;

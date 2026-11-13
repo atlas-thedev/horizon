@@ -5,6 +5,7 @@
 
 use super::module::{GameView, Module, label};
 use super::modules::Modules;
+use super::emotes_view::EmotesView;
 use super::locker::Locker;
 use super::screenshots::Screenshots;
 use super::music_view::MusicView;
@@ -18,12 +19,13 @@ use horizon_client::native_ui::{Canvas, Image, assets, font, icons, theme};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub const TABS: [&str; 5] = ["Mods", "Cosmetics", "Settings", "Screenshots", "Music"];
+pub const TABS: [&str; 6] = ["Mods", "Cosmetics", "Emotes", "Settings", "Screenshots", "Music"];
 pub const TAB_MODS: usize = 0;
 pub const TAB_COSMETICS: usize = 1;
-pub const TAB_SETTINGS: usize = 2;
-pub const TAB_SHOTS: usize = 3;
-pub const TAB_MUSIC: usize = 4;
+pub const TAB_EMOTES: usize = 2;
+pub const TAB_SETTINGS: usize = 3;
+pub const TAB_SHOTS: usize = 4;
+pub const TAB_MUSIC: usize = 5;
 const RAIL: f32 = 54.0;
 /// Corner radius of the floating top bars, squared off a little so square avatars sit well.
 const PILL_R: f32 = 13.0;
@@ -80,6 +82,9 @@ pub struct Menu {
     shots: Screenshots,
     music: MusicView,
     locker: Locker,
+    emotes: EmotesView,
+    /// The menu is over a world (the Emotes page can play an emote there).
+    in_world: bool,
     who: String,
     /// The instance folder (screenshots live under it).
     pub game_dir: Option<std::path::PathBuf>,
@@ -136,6 +141,8 @@ impl Menu {
             shots: Screenshots::new(),
             music: MusicView::new(),
             locker: Locker::new(),
+            emotes: EmotesView::new(),
+            in_world: false,
             who: String::new(),
             game_dir: None,
             s_title: Setting::bool("title", "Native title screen", true),
@@ -177,6 +184,9 @@ impl Menu {
             self.confirm_reset = false;
             return true;
         }
+        if self.tab == TAB_EMOTES && self.emotes.escape(ui) {
+            return true;
+        }
         if self.tab == TAB_SHOTS && self.shots.escape() {
             return true;
         }
@@ -215,6 +225,9 @@ impl Menu {
         if t == TAB_COSMETICS {
             self.locker.opened();
         }
+        if t == TAB_EMOTES {
+            self.emotes.opened(now);
+        }
         self.selected = None;
         self.widgets.listening = None;
         self.confirm_reset = false;
@@ -226,6 +239,7 @@ impl Menu {
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &mut UiConfig, who: Option<&str>, in_world: bool) -> Action {
         let mut action = Action::None;
         self.who = who.unwrap_or("").to_owned();
+        self.in_world = in_world;
         let (w_all, h_all) = (c.width(), c.height());
         let e = ease(clamp01(((ui.now - self.shown_at) / 260.0) as f32));
         if in_world {
@@ -246,7 +260,7 @@ impl Menu {
         c.fill(x0 + 16.0, y0 + 60.0, rw - 32.0, 1.0, theme::HAIRLINE);
         let rx = x0 + (rw - RAIL) / 2.0;
         let mut ty = y0 + 74.0;
-        let tab_icons = [theme::I_NAV_MODS, theme::I_NAV_LOCKER, theme::I_NAV_SETTINGS, icons::CAMERA, icons::MUSIC];
+        let tab_icons = [theme::I_NAV_MODS, theme::I_NAV_LOCKER, theme::I_SMILE, theme::I_NAV_SETTINGS, icons::CAMERA, icons::MUSIC];
         for (i, label) in TABS.iter().enumerate() {
             if rail_tile(ui, c, &format!("menu:tab:{i}"), rx, ty, tab_icons[i], label, self.tab == i) {
                 self.set_tab(i, ui.now);
@@ -317,7 +331,7 @@ impl Menu {
                     c.pop_alpha();
                 }
             }
-            TAB_COSMETICS | TAB_SHOTS | TAB_MUSIC => {
+            TAB_COSMETICS | TAB_EMOTES | TAB_SHOTS | TAB_MUSIC => {
                 header(c, TABS[self.tab], mx, py, hh);
                 if self.tab == TAB_COSMETICS {
                     let store = "Get more in the Native Store";
@@ -360,6 +374,11 @@ impl Menu {
         if self.tab == TAB_COSMETICS {
             self.locker.draw(ui, c, &self.who, self.page_at, x, y, w, h);
             return Action::None;
+        }
+        if self.tab == TAB_EMOTES {
+            // an emote played in the world: close the menu so it can be seen
+            let who = self.who.clone();
+            return if self.emotes.draw(ui, c, &who, x, y, w, h, self.in_world) { Action::Close } else { Action::None };
         }
         empty(c, x, y, w, h.min(260.0), theme::I_SPARKLES, "Coming soon", "This page is still being ported to the Rust Edition.");
         Action::None
