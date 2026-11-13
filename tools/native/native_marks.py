@@ -14,6 +14,7 @@ instead of shipping a client that silently has no Native marks. Safe to run agai
 import pathlib
 import shutil
 import sys
+from native_moved import relocate
 
 root = pathlib.Path(sys.argv[1]).resolve()
 native = pathlib.Path(sys.argv[2]).resolve()
@@ -23,6 +24,7 @@ CLIENT = root / 'crates/horizon-client/src'
 
 def patch(path, old, new):
     """Replace `old` (exactly once) with `new`; fine if it was done already."""
+    path = relocate(path, old, new)
     text = path.read_text(encoding='utf-8')
     if new in text:
         return
@@ -46,10 +48,19 @@ patch(FONT, '        providers(&self.root, id, 0, &mut all);\n',
       '        if id == DEFAULT || id == "minecraft:uniform" {\n'
       '            all.splice(0..0, crate::native_marks::font_providers());\n'
       '        }\n')
-patch(FONT, '        None => match crate::hud::decode(&root.join(resource_path(file, "textures", ""))) {\n',
-      '        None => match crate::native_marks::sheet(file)\n'
-      '            .unwrap_or_else(|| crate::hud::decode(&root.join(resource_path(file, "textures", ""))))\n'
-      '        {\n')
+SHEET = '            let sheet = crate::hud::decode(&root.join(&path)).or_else(|first| {\n'
+if SHEET in FONT.read_text(encoding='utf-8') or 'crate::native_marks::sheet(file)\n                .unwrap_or_else' \
+        in FONT.read_text(encoding='utf-8'):
+    # Since 2026-11-13 a sheet the pack lacks is looked for in the default resources too.
+    patch(FONT, SHEET,
+          '            let sheet = crate::native_marks::sheet(file)\n'
+          '                .unwrap_or_else(|| crate::hud::decode(&root.join(&path)))\n'
+          '                .or_else(|first| {\n')
+else:
+    patch(FONT, '        None => match crate::hud::decode(&root.join(resource_path(file, "textures", ""))) {\n',
+          '        None => match crate::native_marks::sheet(file)\n'
+          '            .unwrap_or_else(|| crate::hud::decode(&root.join(resource_path(file, "textures", ""))))\n'
+          '        {\n')
 
 # The tab list row's name (NameTags.tab).
 patch(RENDER / 'tab_list.rs', '            let name = name_for_display(p, i.board).resolve_legacy();\n',

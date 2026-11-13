@@ -17,7 +17,7 @@ use super::textfield::TextField;
 use super::title_view::TitleAct;
 use super::ui::{self, Ui};
 use crate::native_ui::{Canvas, Image, font, theme};
-use horizon_client::multiplayer::{OFFICIAL_SERVER, PARTNER_SERVERS, Ping};
+use horizon_client::multiplayer::Ping;
 use horizon_client::title::{Mode, Title};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -150,10 +150,14 @@ fn key(address: &str) -> String {
     a.strip_suffix(":25565").map(str::to_owned).unwrap_or(a)
 }
 
+/// Horizon's official server and its partner (Afri-Network). Upstream keeps them in the engine up to Nightly
+/// 2026-11-08 and in its horizon-official-servers crate after; the official address is the telemetry's on both.
+const HORIZON_SERVERS: [&str; 2] = [horizon_telemetry::server_status::OFFICIAL_ADDRESS, "afri-network.co.za"];
+
 /// The servers the Horizon project partners with: its official server and the partners it adds to the list.
 fn horizon_partner(address: &str) -> bool {
     let k = key(address);
-    key(OFFICIAL_SERVER.1) == k || PARTNER_SERVERS.iter().any(|(_, a)| key(a) == k)
+    HORIZON_SERVERS.iter().any(|a| key(a) == k)
 }
 
 // ── Featured by Native ───────────────────────────────────────────────────
@@ -909,8 +913,8 @@ mod tests {
 
     #[test]
     fn horizon_partners_are_told_apart_from_the_players_servers() {
-        assert!(horizon_partner(OFFICIAL_SERVER.1));
-        assert!(horizon_partner(&format!("{}:25565", PARTNER_SERVERS[0].1.to_uppercase())));
+        assert!(horizon_partner(horizon_telemetry::server_status::OFFICIAL_ADDRESS));
+        assert!(horizon_partner("AFRI-NETWORK.CO.ZA:25565"));
         assert!(!horizon_partner("mc.hypixel.net"));
     }
 

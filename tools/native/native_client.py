@@ -11,6 +11,7 @@ from Game::hud and lets it see window events first. native_ui.py must run first.
 Every change names the exact text it replaces and the build FAILS when upstream changed it,
 instead of shipping a client that silently has no Native modules. Safe to run again.
 """
+from native_moved import relocate
 import pathlib
 import shutil
 import sys
@@ -22,6 +23,7 @@ CLIENT = root / 'crates/horizon-client/src'
 
 def patch(path, old, new):
     """Replace `old` (exactly once) with `new`; fine if it was done already."""
+    path = relocate(path, old, new)
     text = path.read_text(encoding='utf-8')
     if new in text:
         return
@@ -38,6 +40,17 @@ target = CLIENT / 'game/native_client'
 if target.exists():
     shutil.rmtree(target)
 shutil.copytree(native / 'packaging/native/native_client', target)
+
+# Since 2026-11-13 the title's Connect action says whether the Realms screen asked for it; Native's never does.
+if 'realm: bool,' in (CLIENT / 'title.rs').read_text(encoding='utf-8'):
+    menu = target / 'mod.rs'
+    text = menu.read_text(encoding='utf-8')
+    for old in ('Action::Connect { address, lan: false }', 'Action::Connect { address, lan }'):
+        if text.count(old) != 1:
+            raise SystemExit(f'native_client: expected one {old!r} in packaging/native/native_client/mod.rs; '
+                             'update tools/native/native_client.py.')
+        text = text.replace(old, old[:-2] + ', realm: false }')
+    menu.write_text(text, encoding='utf-8')
 
 # Native Music decodes songs with symphonia and plays them through cpal. The lock file learns the new
 # packages when the build resolves them, so the builds run without --locked.
@@ -65,14 +78,20 @@ patch(POINTER,
       '        self.has_singleplayer_server()\n            && !self.is_published()\n',
       '        self.has_singleplayer_server()\n            && !self.remote_screen_up()\n            && !self.is_published()\n')
 patch(POINTER,
-      '            && self.control.is_none()\n            && self.screen == Screen::Playing\n            && self.player.is_some()\n',
-      '            && self.control.is_none()\n            && self.screen == Screen::Playing\n            && !self.remote_screen_up()\n            && self.player.is_some()\n')
+      '            && self.control.is_none()\n            && self.screen == Screen::Playing\n',
+      '            && self.control.is_none()\n            && self.screen == Screen::Playing\n            && !self.remote_screen_up()\n')
 
 # The shared Escape path is used by keyboard and controller. Do not open a
 # pause screen on top of loading; an already-open pause can still be closed.
-patch(GAME,
-      '                Screen::Playing => {\n                    if self.studio_replay.is_some() && self.captured {\n',
-      '                Screen::Playing => {\n                    if self.remote_screen_up() {\n                        return Ok(());\n                    }\n                    if self.studio_replay.is_some() && self.captured {\n')
+# (In game/play_keys.rs since 2026-11-13, where a replay playing asks `self.replay.playing()`.)
+for replay in ('self.replay.playing()', 'self.studio_replay.is_some()'):
+    escape = f'                Screen::Playing => {{\n                    if {replay} && self.captured {{\n'
+    done = (f'                Screen::Playing => {{\n                    if self.remote_screen_up() {{\n'
+            f'                        return Ok(());\n                    }}\n                    if {replay} && self.captured {{\n')
+    if any(escape in f.read_text(encoding='utf-8') or done in f.read_text(encoding='utf-8')
+           for f in [GAME, *sorted((CLIENT / 'game').rglob('*.rs'))]):
+        break
+patch(GAME, escape, done)
 
 # The Native title screen: its page instead of the title's own (the world lists, the server list and the options
 # stay the game's), on the boot menu and on the title a world returns to. What it asks for goes through the
@@ -191,13 +210,17 @@ patch(CLIENT / 'multiplayer.rs', '\ntype Icons = Arc<Mutex<HashMap<String, Arc<V
 
 # The Windows executable says it is Native Client (Task Manager, the firewall prompt): its version strings, in the
 # resource upstream's build.rs already compiles with the icon (also on the Linux cross build) (native_exe.rs).
-shutil.copyfile(native / 'packaging/native/native_exe.rs', CLIENT / '../native_exe.rs')
-patch(CLIENT / '../build.rs', '        resource.set_icon(&resource_icon);\n',
+# Since 2026-11-13 the resource is compiled in packaging/windows/exe.rs, which horizon-client's and horizon-official's
+# build.rs both include: the strings go there, for both executables.
+build_rs = root / 'packaging/windows/exe.rs'
+if not (build_rs.is_file() and 'resource.set_icon(&resource_icon);' in build_rs.read_text(encoding='utf-8')):
+    build_rs = CLIENT / '../build.rs'
+shutil.copyfile(native / 'packaging/native/native_exe.rs', build_rs.parent / 'native_exe.rs')
+patch(build_rs, '        resource.set_icon(&resource_icon);\n',
       '        resource.set_icon(&resource_icon);\n'
       '        for (k, v) in NATIVE_EXE_STRINGS {\n'
       '            resource.set(k, v);\n'
       '        }\n')
-build_rs = (CLIENT / '../build.rs')
 if 'include!("native_exe.rs");' not in build_rs.read_text(encoding='utf-8'):
     with open(build_rs, 'a', encoding='utf-8') as build:
         build.write('\ninclude!("native_exe.rs");\n')

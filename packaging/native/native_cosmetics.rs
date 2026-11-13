@@ -449,6 +449,7 @@ fn wraps(part: &NcmPart, parent: glam::Mat4) -> bool {
 pub const GLOW: &str = "#glow";
 
 /// The light a cosmetic item is drawn with: full brightness for the glowing parts.
+#[allow(dead_code)] // game/cosmetics.rs up to Nightly 2026-11-08 (Look::lit after, native_cosmetics_draw.rs)
 pub fn light_of(item: &Item, light: u32) -> u32 {
     if item.id.starts_with("native:") && item.id.ends_with(GLOW) { horizon_client::mobs::render::FULL_BRIGHT } else { light }
 }
@@ -907,10 +908,13 @@ pub fn drawn(location: &str) {
 
 /// The size of the atlas region an item's texture fills, in texels: a Native texture has a region of exactly its
 /// own size, a Horizon item the top-left of a 64×64 skin slot.
+// Asked by game/cosmetics.rs up to Nightly 2026-11-08; drawn through the player hooks after, Native items need neither.
+#[allow(dead_code)]
 pub fn slot_width(item: &Item) -> f32 {
     if item.id.starts_with("native:") { item.texture.width.max(1) as f32 } else { 64.0 }
 }
 
+#[allow(dead_code)] // (as slot_width)
 pub fn slot_height(item: &Item) -> f32 {
     if item.id.starts_with("native:") { item.texture.height.max(1) as f32 } else { 64.0 }
 }

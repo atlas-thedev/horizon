@@ -30,7 +30,12 @@ git -C native fetch -q origin "$BRANCH"
 git -C native checkout -q -B "$BRANCH" "origin/$BRANCH"
 echo "patches: $(git -C native log -1 --format='%h %s')"
 
-# The newest upstream Nightly, the same way the workflow names it.
+# The newest upstream Nightly, the same way the workflow names it. NATIVE_NIGHTLY="<date> <short sha>" builds that one
+# instead: the last one the patches support, while upstream's newest needs them updated.
+if [ -n "${NATIVE_NIGHTLY:-}" ]; then
+  read -r DATE SHORT <<< "$NATIVE_NIGHTLY"
+  NAME="Nightly $DATE · $SHORT"
+else
 read -r DATE SHORT NAME < <(curl -fsS "https://api.github.com/repos/$UPSTREAM/releases/tags/nightly" | python3 -c '
 import json, re, sys
 name = json.load(sys.stdin)["name"]
@@ -40,6 +45,7 @@ if not m:
 print(m.group(1), m.group(2), name.replace(" ", "_"))
 ')
 NAME="${NAME//_/ }"
+fi
 TAG="native-$DATE-$SHORT"
 echo "nightly: $NAME -> $TAG"
 
@@ -70,10 +76,19 @@ cd src
 export RUSTFLAGS="-C target-feature=+crt-static"
 export HORIZON_VERSION="nightly-$DATE"
 export HORIZON_NIGHTLY="$DATE $SHORT"
+# Since Nightly 2026-11-13 the game players get is horizon-official: horizon-client's game with Horizon's own parts
+# plugged in (Discord presence among them; horizon-client's own executable has none). Upstream's release ships it
+# under horizon-client's name (game-build.yml), and so does this.
+BIN=horizon-client
+PKG=horizon-client
+if [ -d crates/horizon-official ]; then
+  BIN=horizon-official
+  PKG=horizon-official
+fi
 nice -n 15 cargo build --release -j "$JOBS" --target "$TARGET" \
-  -p horizon-client -p horizon-client-lib --bin horizon-client
+  -p "$PKG" -p horizon-client-lib --bin "$BIN"
 
-EXE="target/$TARGET/release/horizon-client.exe"
+EXE="target/$TARGET/release/$BIN.exe"
 python3 tools/check_imports.py "$EXE"
 
 cd "$WORK"

@@ -16,6 +16,7 @@ import base64
 import pathlib
 import shutil
 import sys
+from native_moved import relocate
 
 root = pathlib.Path(sys.argv[1]).resolve()
 native = pathlib.Path(sys.argv[2]).resolve()
@@ -24,6 +25,7 @@ RENDER = root / 'crates/horizon-client-render/src'
 
 def patch(path, old, new):
     """Replace `old` (exactly once) with `new`; fine if it was done already."""
+    path = relocate(path, old, new)
     text = path.read_text(encoding='utf-8')
     if new in text:
         return
@@ -72,17 +74,20 @@ patch(HUD, '                inline_profiles: Vec::new(),\n            };\n',
 patch(HUD, '    pub zoom: f32,\n}\nimpl HudRenderer {\n',
       '    pub zoom: f32,\n    native: NativePages,\n}\nimpl HudRenderer {\n')
 # First in the literal: `layout` and `uniform` move into their own fields after it.
-patch(HUD, '        Ok(Self {\n            atlas_texture: None,\n',
-      '        Ok(Self {\n'
+# (Since 2026-11-13 `pictures: HashMap::new()` comes first there; `native` still goes before the fields that move.)
+patch(HUD, '            atlas_texture: None,\n',
       '            native: NativePages::new(&layout, &uniform, &sampler, &linear_sampler, glint_view, glint_sampler),\n'
       '            atlas_texture: None,\n')
 insert_after(HUD, '        self.upload_patches(uploads, encoder, &batch.patches);\n',
              '        self.native.upload(device, uploads, encoder, &batch.native);\n')
+# Since 2026-11-13 each HUD pipeline has a plain and a coverage variant (gfx/hud_coverage.rs).
+ALPHA = ('self.pipeline.get(coverage.is_some())'
+         if 'use crate::gfx::hud_coverage::{self, Pipeline};' in HUD.read_text(encoding='utf-8') else '&self.pipeline')
 patch(HUD, '                    Blend::CitGlint(blend) => {\n                        if let Some(cit) = &self.cit_glint {\n',
       '                    Blend::Native(page) => {\n'
       '                        if let Some(group) = self.native.group(*page) {\n'
       '                            pass.set_bind_group(0, group, &[]);\n'
-      '                            pass.set_pipeline(&self.pipeline);\n'
+      f'                            pass.set_pipeline({ALPHA});\n'
       '                            pass.draw(range.clone(), 0..1);\n'
       '                            pass.set_bind_group(0, &self.group, &[]);\n'
       '                        } else {\n'

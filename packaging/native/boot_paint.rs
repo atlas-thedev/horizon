@@ -48,17 +48,17 @@ fn ease(t: f32) -> f32 {
 /// `semibold` and `mono` are the faces' TTF bytes, which must outlive the process: `AddFontMemResourceEx` keeps
 /// referencing them. `_logs` is the console's recent lines, which this screen does not show. Repainting is
 /// safe and cheap (a background thread calls this about 30 times a second).
-pub fn paint(hwnd: isize, semibold: &[u8], mono: &[u8], _logs: &[String]) {
+pub fn paint(hwnd: isize, semibold: &'static [u8], mono: &'static [u8], _logs: &[String]) {
     let hwnd = hwnd as HWND;
     FACES.call_once(|| {
         for font in [semibold, mono] {
-            let count = 0u32;
+            let mut count = 0u32;
             unsafe {
                 AddFontMemResourceEx(
                     font.as_ptr().cast(),
                     font.len() as u32,
                     std::ptr::null(),
-                    &count,
+                    (&raw mut count).cast_const(),
                 );
             }
         }

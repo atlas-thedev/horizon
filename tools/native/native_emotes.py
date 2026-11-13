@@ -4,6 +4,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from native_moved import relocate
 native = Path(__file__).resolve().parents[2]
 root = Path(sys.argv[1]).resolve() if len(sys.argv)>1 else Path.cwd()
 client = root/'crates/horizon-client/src'
@@ -19,6 +20,7 @@ if marker not in s:
 p.write_text(s, encoding='utf-8')
 
 def install(path, old, new, marker):
+    path = relocate(path, old, marker)
     s = path.read_text(encoding='utf-8')
     if marker not in s:
         if s.count(old) != 1: raise SystemExit(f'Native emotes: expected one renderer hook in {path}')
@@ -90,9 +92,12 @@ install(client/'game/perspective.rs',
 # Rotate the common player root, not individual limbs. This keeps skin, armour,
 # cosmetics and emote props together for local and remote players. Inactive
 # players retain vanilla body orientation; pitch is deliberately unchanged.
-install(client/'mobs/render.rs',
-        '    let mut body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * alpha;',
-        '    let mut body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * alpha;\n'
+# (Since 2026-11-13 the body's yaw is `anim::body_rot`, which a rider takes from its vehicle.)
+BODY = '    let mut body = anim::body_rot(m, alpha);'
+if BODY not in (client/'mobs/render.rs').read_text(encoding='utf-8'):
+    BODY = '    let mut body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * alpha;'
+install(client/'mobs/render.rs', BODY,
+        BODY + '\n'
         '    if avatar(m) && crate::native_emotes::is_playing(m.id) {\n'
         '        body = crate::native_emotes::facing_yaw(m.previous_head_yaw, m.head_yaw, alpha);\n'
         '    }', 'body = crate::native_emotes::facing_yaw(')
@@ -114,9 +119,14 @@ new = '''    let native_rest = ["head","body","right_arm","left_arm","right_leg"
         crate::native_emotes::apply(m.id, native_rest, p);
         return;
     };'''
+over = 'emote(playing, s.age, rest, p);'
+if old not in s and new not in s:
+    # Since 2026-11-13 the emote is a pose laid over the body through a hook (`anim::BodyPose`).
+    old, new = (x.replace('Some(playing)', 'Some(over)') for x in (old, new))
+    over = 'body_pose(&**over, s.age, rest, p);'
 if new not in s:
     if old not in s: raise SystemExit('Native emotes: upstream animation hook changed')
-    s = s.replace(old,new,1).replace('    emote(playing, s.age, rest, p);','    emote(playing, s.age, rest, p);\n    crate::native_emotes::apply(m.id, native_rest, p);',1)
+    s = s.replace(old,new,1).replace(f'    {over}',f'    {over}\n    crate::native_emotes::apply(m.id, native_rest, p);',1)
 p.write_text(s, encoding='utf-8')
 p = root/'crates/horizon-client/assets/horizon/lang/en_us.json'
 labels=json.loads(p.read_text(encoding='utf-8'))

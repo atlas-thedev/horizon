@@ -14,6 +14,7 @@ instead of shipping a client that silently shows no Native cosmetics. Safe to ru
 import pathlib
 import shutil
 import sys
+from native_moved import relocate
 
 root = pathlib.Path(sys.argv[1]).resolve()
 native = pathlib.Path(sys.argv[2]).resolve()
@@ -22,6 +23,7 @@ CLIENT = root / 'crates/horizon-client/src'
 
 def patch(path, old, new):
     """Replace `old` (exactly once) with `new`; fine if it was done already."""
+    path = relocate(path, old, new)
     text = path.read_text(encoding='utf-8')
     if new in text:
         return
@@ -83,56 +85,91 @@ patch(root / 'crates/horizon-cosmetics/src/item.rs',
       '    /// Reads and checks an item file.\n')
 
 COSMETICS = CLIENT / 'game/cosmetics.rs'
-# What the avatar wears: Horizon's items (and an emote's props), then Native's.
-patch(COSMETICS,
-      '        let worn = self.worn(m, own);\n',
-      '        let worn = self.worn(m, own);\n'
-      '        let native = self.native_cosmetics_worn(m, own);\n')
-patch(COSMETICS,
-      '        if worn.is_none() && emote.is_none() || horizon_client::mobs::trader::is_invisible(m) {\n',
-      '        if worn.is_none() && native.is_empty() && emote.is_none() || horizon_client::mobs::trader::is_invisible(m) {\n')
-patch(COSMETICS,
-      '        let worn_items = worn.iter().flat_map(|w| w.iter()).map(|i| (i, None));\n',
-      '        let worn_items = worn.iter().flat_map(|w| w.iter()).chain(native.iter()).map(|i| (i, None));\n')
-patch(COSMETICS,
-      '        for (item, emoting) in worn_items.chain(emote_items) {\n'
-      '            if emoting.is_none() && !bodies {\n',
-      '        for (item, emoting) in worn_items.chain(emote_items) {\n'
-      '            // A blinking part is off for part of its cycle (the Java mod skips it).\n'
-      '            if !super::native_cosmetics::shown(item, ticks) {\n'
-      '                continue;\n'
-      '            }\n'
-      '            let light = super::native_cosmetics::light_of(item, light);\n'
-      '            // Native items are not Horizon\'s "others\' cosmetics", which show only to a Horizon owner.\n'
-      '            if emoting.is_none() && !bodies && !item.id.starts_with("native:") {\n')
+PLAYER_HOOKS = CLIENT / 'game/player_hooks.rs'
+# Since 2026-11-13 Horizon's cosmetics draw through the player hooks (game/player_hooks.rs, `PlayerDraw`), whose
+# sprites are 64×64 skin slots: Native's are drawn from there too, after the crates' layers (native_cosmetics_draw.rs).
+HOOKED = PLAYER_HOOKS.is_file() and 'fn player_layers_geometry(' in PLAYER_HOOKS.read_text(encoding='utf-8')
+if HOOKED:
+    shutil.copyfile(native / 'packaging/native/native_cosmetics_draw.rs', CLIENT / 'game/native_cosmetics_draw.rs')
+    hooks_text = PLAYER_HOOKS.read_text(encoding='utf-8')
+    if 'include!("native_cosmetics_draw.rs");' not in hooks_text:
+        PLAYER_HOOKS.write_text(hooks_text.rstrip('\n') + '\n\ninclude!("native_cosmetics_draw.rs");\n', encoding='utf-8')
+    patch(PLAYER_HOOKS,
+          '        engine::player_layers(&model, &mut draw);\n        draw.bounds\n',
+          '        engine::player_layers(&model, &mut draw);\n        draw.native_cosmetics(false);\n        draw.bounds\n')
+    patch(PLAYER_HOOKS,
+          '        engine::player_layers(&model, &mut draw);\n    }\n',
+          '        engine::player_layers(&model, &mut draw);\n        draw.native_cosmetics(true);\n    }\n')
+    patch(PLAYER_HOOKS,
+          '        engine::frame(&frame, &mut HookStore(self));\n',
+          '        engine::frame(&frame, &mut HookStore(self));\n        self.native_cosmetics_frame();\n')
+    # Gear hides a Native item's slot as it hides Horizon's; "other players' cosmetics" is the cosmetics' setting now.
+    patch(COSMETICS, '\nfn covered(gear: Gear, slot: Slot) -> bool {\n', '\npub(super) fn covered(gear: Gear, slot: Slot) -> bool {\n')
+    cosmetics_text = COSMETICS.read_text(encoding='utf-8')
+    if 'fn native_others_shown(' not in cosmetics_text:
+        COSMETICS.write_text(cosmetics_text.rstrip('\n') + '\n\n'
+                             '/// Native: whether other players\' cosmetics show in full (game/native_cosmetics.rs: a hood replaces\n'
+                             '/// the hat layer only then).\n'
+                             'pub(super) fn native_others_shown() -> bool {\n'
+                             '    service(|s| s.others() == Others::Shown)\n'
+                             '}\n', encoding='utf-8')
+    NATIVE_FILE = CLIENT / 'game/native_cosmetics.rs'
+    OTHERS = 'self.settings.extras.effective_others() == horizon_cosmetics::prefs::Others::Shown'
+    native_text = NATIVE_FILE.read_text(encoding='utf-8')
+    if native_text.count(OTHERS) != 1:
+        raise SystemExit('native_cosmetics: packaging/native/native_cosmetics.rs no longer asks effective_others once; '
+                         'update tools/native/native_cosmetics.py.')
+    NATIVE_FILE.write_text(native_text.replace(OTHERS, 'super::cosmetics::native_others_shown()'), encoding='utf-8')
+else:
+    # What the avatar wears: Horizon's items (and an emote's props), then Native's.
+    patch(COSMETICS,
+          '        let worn = self.worn(m, own);\n',
+          '        let worn = self.worn(m, own);\n'
+          '        let native = self.native_cosmetics_worn(m, own);\n')
+    patch(COSMETICS,
+          '        if worn.is_none() && emote.is_none() || horizon_client::mobs::trader::is_invisible(m) {\n',
+          '        if worn.is_none() && native.is_empty() && emote.is_none() || horizon_client::mobs::trader::is_invisible(m) {\n')
+    patch(COSMETICS,
+          '        let worn_items = worn.iter().flat_map(|w| w.iter()).map(|i| (i, None));\n',
+          '        let worn_items = worn.iter().flat_map(|w| w.iter()).chain(native.iter()).map(|i| (i, None));\n')
+    patch(COSMETICS,
+          '        for (item, emoting) in worn_items.chain(emote_items) {\n'
+          '            if emoting.is_none() && !bodies {\n',
+          '        for (item, emoting) in worn_items.chain(emote_items) {\n'
+          '            // A blinking part is off for part of its cycle (the Java mod skips it).\n'
+          '            if !super::native_cosmetics::shown(item, ticks) {\n'
+          '                continue;\n'
+          '            }\n'
+          '            let light = super::native_cosmetics::light_of(item, light);\n'
+          '            // Native items are not Horizon\'s "others\' cosmetics", which show only to a Horizon owner.\n'
+          '            if emoting.is_none() && !bodies && !item.id.starts_with("native:") {\n')
 
 # Native cosmetics keep their texture's resolution: one 2048×2048 area of the atlas, each texture packed at its own size.
 RENDER = root / 'crates/horizon-client-render/src'
-patch(RENDER / 'hud.rs',
-      '        for i in 0..SKIN_SLOTS {\n'
-      '            images.push((format!("horizon/skin{i}"), 64, 64, vec![0; 64 * 64 * 4]));\n'
-      '        }\n',
-      '        for i in 0..SKIN_SLOTS {\n'
-      '            images.push((format!("horizon/skin{i}"), 64, 64, vec![0; 64 * 64 * 4]));\n'
-      '        }\n'
+# (Since 2026-11-13 a blank slot is an empty buffer, f2c108108; the area is blank the same way.)
+SLOTS = '        for i in 0..SKIN_SLOTS {\n            images.push((format!("horizon/skin{i}"), 64, 64, %s));\n        }\n'
+BLANK = 'Vec::new()' if SLOTS % 'Vec::new()' in (RENDER / 'hud.rs').read_text(encoding='utf-8') else None
+patch(RENDER / 'hud.rs', SLOTS % (BLANK or 'vec![0; 64 * 64 * 4]'),
+      SLOTS % (BLANK or 'vec![0; 64 * 64 * 4]') +
       '        // Native cosmetic textures (game/native_cosmetics.rs), packed at their own size.\n'
-      '        images.push(("native/cosmetics".into(), 2048, 2048, vec![0; 2048 * 2048 * 4]));\n')
-patch(COSMETICS,
-      '                self.store_skin(location, slot_image(&item));\n',
-      '                if item.id.starts_with("native:") {\n'
-      '                    self.store_native_cosmetic(&location, &item);\n'
-      '                } else {\n'
-      '                    self.store_skin(location, slot_image(&item));\n'
-      '                }\n')
-patch(COSMETICS,
-      '            item.texture.width as f32 / 64.0,\n'
-      '            item.texture.height as f32 / 64.0,\n',
-      '            item.texture.width as f32 / super::native_cosmetics::slot_width(item),\n'
-      '            item.texture.height as f32 / super::native_cosmetics::slot_height(item),\n')
-patch(COSMETICS,
-      '            self.skin_downloads.borrow_mut().drawn(&b.location);\n',
-      '            self.skin_downloads.borrow_mut().drawn(&b.location);\n'
-      '            super::native_cosmetics::drawn(&b.location);\n')
+      '        images.push(("native/cosmetics".into(), 2048, 2048, %s));\n' % (BLANK or 'vec![0; 2048 * 2048 * 4]'))
+if not HOOKED:
+    patch(COSMETICS,
+          '                self.store_skin(location, slot_image(&item));\n',
+          '                if item.id.starts_with("native:") {\n'
+          '                    self.store_native_cosmetic(&location, &item);\n'
+          '                } else {\n'
+          '                    self.store_skin(location, slot_image(&item));\n'
+          '                }\n')
+    patch(COSMETICS,
+          '            item.texture.width as f32 / 64.0,\n'
+          '            item.texture.height as f32 / 64.0,\n',
+          '            item.texture.width as f32 / super::native_cosmetics::slot_width(item),\n'
+          '            item.texture.height as f32 / super::native_cosmetics::slot_height(item),\n')
+    patch(COSMETICS,
+          '            self.skin_downloads.borrow_mut().drawn(&b.location);\n',
+          '            self.skin_downloads.borrow_mut().drawn(&b.location);\n'
+          '            super::native_cosmetics::drawn(&b.location);\n')
 
 # HD capes (native_hd_capes.rs): the full picture of a cape larger than 64x32 is kept beside the skin slot's 64x32
 # copy and drawn from the atlas's Native area at its own size.

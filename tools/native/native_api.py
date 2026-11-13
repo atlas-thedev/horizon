@@ -5,7 +5,9 @@ Usage: native_api.py <checkout> <native-checkout>
 
 Adds crates/horizon-client/src/native_api.rs (the launcher's game ticket is checked against
 /v1/mod/me and the player's activity is reported to /v1/mod/presence) and hooks it into the
-existing Discord presence module, which already knows when the player is in a menu or a world.
+existing Discord presence module, which already knows when the player is in a menu or a world. Since upstream
+moved Discord presence into the horizon-discord crate (2026-11-09), the session is a module of its own
+(packaging/native/native_presence.rs, installed under the old name) on the same platform hooks.
 
 Every change names the exact text it replaces and the build FAILS when upstream changed it,
 instead of shipping a client that silently has no Native account. Safe to run again.
@@ -13,6 +15,7 @@ instead of shipping a client that silently has no Native account. Safe to run ag
 import pathlib
 import shutil
 import sys
+from native_moved import relocate
 
 root = pathlib.Path(sys.argv[1]).resolve()
 native = pathlib.Path(sys.argv[2]).resolve()
@@ -21,6 +24,7 @@ CLIENT = root / 'crates/horizon-client/src'
 
 def patch(path, old, new):
     """Replace `old` (exactly once) with `new`; fine if it was done already."""
+    path = relocate(path, old, new)
     text = path.read_text(encoding='utf-8')
     if new in text:
         return
@@ -39,12 +43,31 @@ def include(path, name):
 shutil.copyfile(native / 'packaging/native/native_api.rs', CLIENT / 'native_api.rs')
 
 presence = CLIENT / 'discord_presence.rs'
-patch(presence, 'pub fn start(enabled: bool, automated: bool) {',
-      'pub fn start(enabled: bool, automated: bool) {\n    if !automated {\n        native_start();\n    }')
-patch(presence, 'pub fn set(status: Status) {',
-      'pub fn set(status: Status) {\n    native_set(status);')
-patch(presence, 'pub fn stop() {',
-      'pub fn stop() {\n    native_stop();')
-include(presence, 'native_api.rs')
+SHIM = native / 'packaging/native/native_presence.rs'
+if presence.is_file() and 'pub use horizon_hooks::Play;' not in presence.read_text(encoding='utf-8'):
+    # The engine's own Discord presence (Nightlies up to 2026-11-08): the session rides on its start/set/stop.
+    patch(presence, 'pub fn start(enabled: bool, automated: bool) {',
+          'pub fn start(enabled: bool, automated: bool) {\n    if !automated {\n        native_start();\n    }')
+    patch(presence, 'pub fn set(status: Status) {',
+          'pub fn set(status: Status) {\n    native_set(status);')
+    patch(presence, 'pub fn stop() {',
+          'pub fn stop() {\n    native_stop();')
+    include(presence, 'native_api.rs')
+elif (root / 'crates/horizon-discord').is_dir():
+    # Discord presence is the horizon-discord crate now, on the platform hooks (upstream 01343707a): the session gets
+    # a module of its own under the old name, on the same hooks, registered by the engine with its own parts.
+    shutil.copyfile(SHIM, presence)
+    patch(CLIENT / 'client_lib.rs', 'pub mod dialog_screen;\n',
+          'pub mod dialog_screen;\n'
+          '/// Native: the Native session and friend presence (the name it had inside the engine\'s Discord presence).\n'
+          'pub mod discord_presence;\n')
+    patch(CLIENT / 'entry.rs', '    game::player_hooks::register();\n',
+          '    game::player_hooks::register();\n'
+          '    if let Err(e) = horizon_hooks::register(&horizon_client::discord_presence::NATIVE_HOOKS) {\n'
+          '        log::warn!("Native: the session did not register: {e}");\n'
+          '    }\n')
+else:
+    raise SystemExit('native_api: no discord_presence.rs and no horizon-discord crate; upstream moved Discord again. '
+                     'Update tools/native/native_api.py.')
 
 print('native_api: Native session and presence applied')

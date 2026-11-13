@@ -14,6 +14,7 @@ instead of shipping a client whose modules silently do nothing. Safe to run agai
 """
 import pathlib
 import sys
+from native_moved import relocate
 
 root = pathlib.Path(sys.argv[1]).resolve()
 CRATES = root / 'crates'
@@ -23,6 +24,7 @@ CLIENT = CRATES / 'horizon-client/src'
 
 def patch(path, old, new):
     """Replace `old` (exactly once) with `new`; fine if it was done already."""
+    path = relocate(path, old, new)
     text = path.read_text(encoding='utf-8')
     if new in text:
         return
@@ -30,6 +32,16 @@ def patch(path, old, new):
         raise SystemExit(f'native_tweaks: expected one {old[:70]!r} in {path.relative_to(root)}, '
                          f'found {text.count(old)}. Upstream changed; update tools/native/native_tweaks.py.')
     path.write_text(text.replace(old, new), encoding='utf-8')
+
+
+def patch_any(*tries):
+    """The first of several (path, old, new) whose `old` (or `new`) is there: one place upstream moved code from or
+    to, by Nightly. The last one reports when none is."""
+    for path, old, new in tries[:-1]:
+        text = path.read_text(encoding='utf-8') if path.is_file() else ''
+        if new in text or text.count(old) == 1:
+            return patch(path, old, new)
+    return patch(*tries[-1])
 
 
 if not (RENDER / 'native_ui/tweaks.rs').is_file():
@@ -67,19 +79,37 @@ patch(RENDER / 'camera.rs',
       '    }\n')
 
 # Low Fire.
-patch(CLIENT / 'game/render_tick.rs',
-      '            fire_lower: f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0,\n',
-      '            fire_lower: horizon_client::native_ui::tweaks::fire_lower(\n'
-      '                f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0,\n'
-      '            ),\n')
+patch_any((CLIENT / 'game/extras/pvp.rs',
+           '        f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0\n',
+           '        horizon_client::native_ui::tweaks::fire_lower(\n'
+           '            f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0,\n'
+           '        )\n'),
+          (CLIENT / 'game/render_tick.rs',
+           '            fire_lower: f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0,\n',
+           '            fire_lower: horizon_client::native_ui::tweaks::fire_lower(\n'
+           '                f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0,\n'
+           '            ),\n'))
 
 # Block Overlay and Damage Tint: the block outline and the hurt flash the renderer reads each frame.
-patch(CLIENT / 'game.rs',
-      '            pvp: self.settings.extras.pvp.frame(),\n',
-      '            pvp: horizon_client::native_ui::tweaks::frame(self.settings.extras.pvp.frame()),\n')
+patch_any((CLIENT / 'game/extras/pvp.rs',
+           '    pub(in crate::game) fn pvp_render_frame(&self) -> Frame {\n'
+           '        self.settings.extras.pvp.frame()\n',
+           '    pub(in crate::game) fn pvp_render_frame(&self) -> Frame {\n'
+           '        horizon_client::native_ui::tweaks::frame(self.settings.extras.pvp.frame())\n'),
+          (CLIENT / 'game.rs',
+           '            pvp: self.settings.extras.pvp.frame(),\n',
+           '            pvp: horizon_client::native_ui::tweaks::frame(self.settings.extras.pvp.frame()),\n'))
 
 # Time Changer, Weather Changer and the Crosshair: what PvP & HUD already does for the same things.
-PVP = CLIENT / 'game/pvp.rs'
+# (game/pvp.rs became game/extras/pvp.rs on 2026-11-13, its methods `pub(in crate::game)`.)
+PVP = CLIENT / 'game/extras/pvp.rs'
+_patch = patch
+if PVP.is_file():
+    def patch(path, old, new):
+        _patch(path, old.replace('pub(super) fn', 'pub(in crate::game) fn'),
+               new.replace('pub(super) fn', 'pub(in crate::game) fn'))
+else:
+    PVP = CLIENT / 'game/pvp.rs'
 patch(PVP,
       '        horizon_client::pvp::view_day_time(self.world.day_time, fixed.filter(|_| self.own_view()))\n',
       '        horizon_client::native_ui::tweaks::view_time(\n'
@@ -106,6 +136,7 @@ patch(PVP,
       '        if horizon_client::native_ui::tweaks::crosshair() {\n'
       '            return;\n'
       '        }\n')
+patch = _patch
 
 # Zoom and Freelook: the hooks native mods use.
 HOOKS = CLIENT / 'game/native_hooks.rs'
@@ -129,11 +160,12 @@ patch(HOOKS,
       '            *pitch = (*pitch + tilt).clamp(-90.0, 90.0);\n'
       '        }\n')
 # Freelook: the mouse turns the camera, not the player.
-patch(CLIENT / 'game.rs',
-      '            self.mouse.on_move(0.0, 0.0, x, y, true, true);\n',
-      '            if !horizon_client::native_ui::tweaks::freelook_turn(x, y) {\n'
-      '                self.mouse.on_move(0.0, 0.0, x, y, true, true);\n'
-      '            }\n')
+FREELOOK = ('            self.mouse.on_move(0.0, 0.0, x, y, true, true);\n',
+            '            if !horizon_client::native_ui::tweaks::freelook_turn(x, y) {\n'
+            '                self.mouse.on_move(0.0, 0.0, x, y, true, true);\n'
+            '            }\n')
+# (game/window_handler.rs since 2026-11-13; game/repro.rs has a deeper copy for replays, which stays.)
+patch_any((CLIENT / 'game/window_handler.rs', *FREELOOK), (CLIENT / 'game.rs', *FREELOOK))
 
 # Lag Free: the frame rate while the window is in the background (a hook that may only lower it).
 patch(HOOKS,
@@ -203,10 +235,37 @@ patch(DRAGON,
 
 # Discord RPC: the module switches the game's Rich Presence off, and its custom status is the top line everywhere
 # (menus, singleplayer, servers, hosting), with what the player does moved under it, as in the Java mod.
-patch(CLIENT / 'game/discord.rs',
-      '        if !self.settings.extras.discord_presence {\n',
-      '        if !self.settings.extras.discord_presence || horizon_client::native_ui::tweaks::get().discord_off {\n')
-patch(CLIENT / 'discord_presence.rs',
+# Up to Nightly 2026-11-08 the presence is the engine's discord_presence.rs; since then it is the horizon-discord crate
+# (upstream 01343707a), which reaches the Native UI's switches through horizon-client-render.
+DISCORD = CRATES / 'horizon-discord/src/lib.rs'
+if DISCORD.is_file():
+    TWEAKS = 'horizon_client_render::native_ui::tweaks'
+    patch(CRATES / 'horizon-discord/Cargo.toml',
+          '[dependencies]\n',
+          '[dependencies]\n'
+          '# Native: the Discord RPC module\'s switch and custom status (native_ui::tweaks).\n'
+          'horizon-client-render = { path = "../horizon-client-render" }\n')
+    patch(DISCORD,
+          '        if stop || wanted.status == Status::Off {\n',
+          '        // Native: the Discord RPC module off clears the activity too; it is looked at again every 2 s.\n'
+          f'        let native_off = {TWEAKS}::get().discord_off;\n'
+          '        if stop || wanted.status == Status::Off || native_off {\n')
+    patch(DISCORD,
+          '            std::thread::park();\n'
+          '            continue;\n',
+          '            if native_off {\n'
+          '                std::thread::park_timeout(Duration::from_secs(2));\n'
+          '            } else {\n'
+          '                std::thread::park();\n'
+          '            }\n'
+          '            continue;\n')
+else:
+    TWEAKS = 'crate::native_ui::tweaks'
+    DISCORD = CLIENT / 'discord_presence.rs'
+    patch(CLIENT / 'game/discord.rs',
+          '        if !self.settings.extras.discord_presence {\n',
+          '        if !self.settings.extras.discord_presence || horizon_client::native_ui::tweaks::get().discord_off {\n')
+patch(DISCORD,
       '    let mut a = json!({"details": details, "assets": assets});\n'
       '    if let Some(state) = state {\n'
       '        a["state"] = state.into();\n'
@@ -215,10 +274,10 @@ patch(CLIENT / 'discord_presence.rs',
       '    if let Some(state) = state {\n'
       '        a["state"] = state.into();\n'
       '    }\n'
-      '    if let Some(status) = crate::native_ui::tweaks::discord_phrase() {\n'
+      f'    if let Some(status) = {TWEAKS}::discord_phrase() {{\n'
       '        with_status(&mut a, &status);\n'
       '    }\n')
-patch(CLIENT / 'discord_presence.rs',
+patch(DISCORD,
       '/// The activity Discord shows for `status`; `None` clears it.\n',
       '/// Native: the custom `status` on top and what the player does under it ("Singleplayer · In the Nether").\n'
       '/// Discord refuses a line shorter than two characters, so such a status is left out.\n'
@@ -237,27 +296,27 @@ patch(CLIENT / 'discord_presence.rs',
       '\n'
       '/// The activity Discord shows for `status`; `None` clears it.\n')
 # An edited status reaches Discord within seconds, not at the next minute's refresh: the thread looks every 2 s.
-patch(CLIENT / 'discord_presence.rs',
+patch(DISCORD,
       '        let due = sent.is_none_or(|(w, at)| w != wanted || now - at >= REFRESH);\n'
       '        if !due {\n'
       '            let (_, at) = sent.expect("sent");\n'
       '            std::thread::park_timeout(REFRESH - (now - at));\n',
-      '        let phrase = crate::native_ui::tweaks::discord_phrase();\n'
+      f'        let phrase = {TWEAKS}::discord_phrase();\n'
       '        let due = sent_phrase != phrase || sent.is_none_or(|(w, at)| w != wanted || now - at >= REFRESH);\n'
       '        if !due {\n'
       '            let (_, at) = sent.expect("sent");\n'
       '            std::thread::park_timeout((REFRESH - (now - at)).min(Duration::from_secs(2)));\n')
-patch(CLIENT / 'discord_presence.rs',
+patch(DISCORD,
       '    let mut sent: Option<(Wanted, Instant)> = None;\n',
       '    let mut sent: Option<(Wanted, Instant)> = None;\n'
       '    let mut sent_phrase: Option<String> = None;\n')
-patch(CLIENT / 'discord_presence.rs',
+patch(DISCORD,
       '            Ok(()) => sent = Some((wanted, now)),\n',
       '            Ok(()) => {\n'
       '                sent = Some((wanted, now));\n'
       '                sent_phrase = phrase;\n'
       '            }\n')
-patch(CLIENT / 'discord_presence.rs',
+patch(DISCORD,
       '    #[test]\n'
       '    fn time_counts_from_entering_the_world() {\n',
       '    #[test]\n'
@@ -287,7 +346,6 @@ patch(CLIENT / 'game.rs',
 # Discord: Native's own application (as the Java mod's presence uses), its logo and its words, not Horizon's.
 # The logo is the Native Discord icon (the Native Cape's look), hosted on the Native API: Discord loads image URLs directly.
 ICON = "https://api.playnative.net/v1/site/media/e3c3ffebf47300fe60c82456.png"
-DISCORD = CLIENT / 'discord_presence.rs'
 patch(DISCORD, 'pub const DISCORD_APP_ID: &str = "1563857609738690560";\n',
       'pub const DISCORD_APP_ID: &str = "1465139441457827972";\n')
 # rebrand.py (run first by the release build, not by the checks) has made "Horizon" "Native" here.

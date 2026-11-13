@@ -15,6 +15,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from native_moved import relocate
 
 root = pathlib.Path(sys.argv[1]).resolve()
 native = pathlib.Path(sys.argv[2]).resolve()
@@ -24,6 +25,7 @@ THREADS = root / 'crates/horizon-threads/src'
 
 def patch(path, old, new):
     """Replace `old` (exactly once) with `new`; fine if it was done already, an error if the anchor is gone."""
+    path = relocate(path, old, new)
     text = path.read_text(encoding='utf-8')
     if new in text:
         return
@@ -56,13 +58,20 @@ subprocess.check_call([sys.executable, str(native / 'tools/native/make_mark.py')
 
 # ---- the early GDI screen (Windows) ----
 paint = THREADS / 'boot_paint.rs'
-if 'pub fn paint(hwnd: isize, semibold: &[u8], mono: &[u8], logs: &[String])' not in paint.read_text(encoding='utf-8') \
+# Upstream made the fonts 'static on 2026-11-13 (AddFontMemResourceEx keeps them): either signature is the same paint.
+PAINTS = ('pub fn paint(hwnd: isize, semibold: &[u8], mono: &[u8], logs: &[String])',
+          "pub fn paint(hwnd: isize, semibold: &'static [u8], mono: &'static [u8], logs: &[String])")
+if not any(sig in paint.read_text(encoding='utf-8') for sig in PAINTS) \
         and 'native_mark.bin' not in paint.read_text(encoding='utf-8'):
     raise SystemExit('boot_screen: boot_paint::paint changed upstream; update packaging/native/boot_paint.rs.')
 paint.write_text((native / 'packaging/native/boot_paint.rs').read_text(encoding='utf-8'), encoding='utf-8')
 
 # It repaints about 30 times a second now (300 ms would make the bar jump) and needs no console lines.
-patch_re(CLIENT / 'game.rs',
+# (the repaint loop moved from game.rs to game/loading_screen.rs upstream on 2026-11-13)
+REPAINT = r'&horizon_client::logging::recent_lines\(\),\s*\);\s*std::thread::sleep'
+patch_re(next((f for f in (CLIENT / 'game/loading_screen.rs', CLIENT / 'game.rs')
+               if f.is_file() and (re.search(REPAINT, f.read_text(encoding='utf-8'))
+                                   or re.search(DONE_PAINT, f.read_text(encoding='utf-8')))), CLIENT / 'game.rs'),
          r'&horizon_client::logging::recent_lines\(\),(\s*\);\s*std::thread::sleep\(std::time::Duration::from_millis\()300(\)\);)',
          lambda m: '&[],' + m.group(1) + '33' + m.group(2))
 
