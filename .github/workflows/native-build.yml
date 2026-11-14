@@ -115,18 +115,25 @@ jobs:
           RUSTFLAGS: -C target-feature=+crt-static
           HORIZON_VERSION: nightly-${{ steps.up.outputs.date }}
           HORIZON_NIGHTLY: ${{ steps.up.outputs.date }} ${{ steps.up.outputs.short }}
-        run: cargo build --release -p horizon-client -p horizon-client-lib --bin horizon-client
+        run: |
+          # Since Nightly 2026-11-13 the game players get is horizon-official: horizon-client's game with Horizon's own
+          # parts plugged in (Discord presence among them; horizon-client's own executable has none). Upstream ships it
+          # under horizon-client's name (game-build.yml), and so does this.
+          BIN=horizon-client
+          if [ -d crates/horizon-official ]; then BIN=horizon-official; fi
+          echo "NATIVE_BIN=$BIN" >> "$GITHUB_ENV"
+          cargo build --release -p "$BIN" -p horizon-client-lib --bin "$BIN"
       - name: Check it starts and has no foreign DLLs
         if: steps.need.outputs.build == 'true'
         working-directory: src
         run: |
-          target/release/horizon-client.exe --help | grep -q -- '--resources'
-          python tools/check_imports.py target/release/horizon-client.exe
+          target/release/$NATIVE_BIN.exe --help | grep -q -- '--resources'
+          python tools/check_imports.py target/release/$NATIVE_BIN.exe
       - name: Publish
         if: steps.need.outputs.build == 'true'
         run: |
           mkdir dist
-          cp src/target/release/horizon-client.exe dist/horizon-client-windows-x64.exe
+          cp "src/target/release/$NATIVE_BIN.exe" dist/horizon-client-windows-x64.exe
           cd dist
           sha256sum horizon-client-windows-x64.exe > SHA256SUMS
           printf '%s\n' '{"upstream_release":"${{ steps.up.outputs.name }}","upstream_commit":"${{ steps.up.outputs.short }}"}' > compat.json
