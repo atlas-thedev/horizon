@@ -77,8 +77,10 @@ patch(HUD, '    pub zoom: f32,\n}\nimpl HudRenderer {\n',
       '    pub zoom: f32,\n    native: NativePages,\n}\nimpl HudRenderer {\n')
 # First in the literal: `layout` and `uniform` move into their own fields after it.
 # (Since 2026-11-13 `pictures: HashMap::new()` comes first there; `native` still goes before the fields that move.)
+# Since 2026-11-13 the HUD layout has a 7th binding (the armour glint texture); the pages' groups must name it too.
+ARMOR = 'Some(glint_armor_view)' if 'glint_armor_view: &wgpu::TextureView' in HUD.read_text(encoding='utf-8') else 'None'
 patch(HUD, '            atlas_texture: None,\n',
-      '            native: NativePages::new(&layout, &uniform, &sampler, &linear_sampler, glint_view, glint_sampler),\n'
+      '            native: NativePages::new(&layout, &uniform, &sampler, &linear_sampler, glint_view, glint_sampler, ' + ARMOR + '),\n'
       '            atlas_texture: None,\n')
 insert_after(HUD, '        self.upload_patches(uploads, encoder, &batch.patches);\n',
              '        self.native.upload(device, uploads, encoder, &batch.native);\n')

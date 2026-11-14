@@ -37,6 +37,8 @@ pub struct NativePages {
     linear: wgpu::Sampler,
     glint_view: wgpu::TextureView,
     glint_sampler: wgpu::Sampler,
+    /// Binding 6 of the HUD layout since Nightly 2026-11-13 (the armour glint), when the layout has it.
+    glint_armor_view: Option<wgpu::TextureView>,
 }
 
 impl NativePages {
@@ -47,6 +49,7 @@ impl NativePages {
         linear: &wgpu::Sampler,
         glint_view: &wgpu::TextureView,
         glint_sampler: &wgpu::Sampler,
+        glint_armor_view: Option<&wgpu::TextureView>,
     ) -> Self {
         NATIVE_PAGES_LOST.store(true, std::sync::atomic::Ordering::Relaxed);
         Self {
@@ -57,6 +60,7 @@ impl NativePages {
             linear: linear.clone(),
             glint_view: glint_view.clone(),
             glint_sampler: glint_sampler.clone(),
+            glint_armor_view: glint_armor_view.cloned(),
         }
     }
 
@@ -80,10 +84,7 @@ impl NativePages {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Native UI page"),
-            layout: &self.layout,
-            entries: &[
+        let mut entries = vec![
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: self.uniform.as_entire_binding(),
@@ -112,7 +113,18 @@ impl NativePages {
                     binding: 5,
                     resource: wgpu::BindingResource::Sampler(&self.linear),
                 },
-            ],
+        ];
+        // the group must name every binding of the HUD layout: 2026-11-13 added the armour glint as binding 6
+        if let Some(armor) = &self.glint_armor_view {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(armor),
+            });
+        }
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Native UI page"),
+            layout: &self.layout,
+            entries: &entries,
         });
         NativePage {
             texture,
