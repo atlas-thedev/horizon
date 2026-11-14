@@ -4,7 +4,9 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from native_moved import relocate
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))  # also when run through runpy (the tests)
+from native_moved import relocate  # noqa: E402
 native = Path(__file__).resolve().parents[2]
 root = Path(sys.argv[1]).resolve() if len(sys.argv)>1 else Path.cwd()
 client = root/'crates/horizon-client/src'

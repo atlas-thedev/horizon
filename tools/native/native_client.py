@@ -11,7 +11,9 @@ from Game::hud and lets it see window events first. native_ui.py must run first.
 Every change names the exact text it replaces and the build FAILS when upstream changed it,
 instead of shipping a client that silently has no Native modules. Safe to run again.
 """
-from native_moved import relocate
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))  # also when run through runpy (the tests)
+from native_moved import relocate  # noqa: E402
 import pathlib
 import shutil
 import sys

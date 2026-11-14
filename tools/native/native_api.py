@@ -15,7 +15,9 @@ instead of shipping a client that silently has no Native account. Safe to run ag
 import pathlib
 import shutil
 import sys
-from native_moved import relocate
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))  # also when run through runpy (the tests)
+from native_moved import relocate  # noqa: E402
 
 root = pathlib.Path(sys.argv[1]).resolve()
 native = pathlib.Path(sys.argv[2]).resolve()
