@@ -50,7 +50,7 @@ def patch_re(path, pattern, repl):
 
 
 # What the game's boot paint thread looks like once patched.
-DONE_PAINT = r'&\[\],\s*\);\s*std::thread::sleep\(std::time::Duration::from_millis\(33\)\);'
+DONE_PAINT = r'&\[\],\s*\);\s*std::thread::sleep\(std::time::Duration::from_millis\((?:33|16)\)\);'
 
 
 # ---- the mark, made from the (Native) window icon ----
@@ -68,14 +68,14 @@ if not any(sig in paint.read_text(encoding='utf-8') for sig in PAINTS) \
     raise SystemExit('boot_screen: boot_paint::paint changed upstream; update packaging/native/boot_paint.rs.')
 paint.write_text((native / 'packaging/native/boot_paint.rs').read_text(encoding='utf-8'), encoding='utf-8')
 
-# It repaints about 30 times a second now (300 ms would make the bar jump) and needs no console lines.
+# It repaints about 60 times a second now (300 ms would make the bar jump) and needs no console lines.
 # (the repaint loop moved from game.rs to game/loading_screen.rs upstream on 2026-11-13)
 REPAINT = r'&horizon_client::logging::recent_lines\(\),\s*\);\s*std::thread::sleep'
 patch_re(next((f for f in (CLIENT / 'game/loading_screen.rs', CLIENT / 'game.rs')
                if f.is_file() and (re.search(REPAINT, f.read_text(encoding='utf-8'))
                                    or re.search(DONE_PAINT, f.read_text(encoding='utf-8')))), CLIENT / 'game.rs'),
          r'&horizon_client::logging::recent_lines\(\),(\s*\);\s*std::thread::sleep\(std::time::Duration::from_millis\()300(\)\);)',
-         lambda m: '&[],' + m.group(1) + '33' + m.group(2))
+         lambda m: '&[],' + m.group(1) + '16' + m.group(2))
 
 # ---- the wgpu screen ----
 (CLIENT / 'native_boot.rs').write_text((native / 'packaging/native/native_boot.rs').read_text(encoding='utf-8'),

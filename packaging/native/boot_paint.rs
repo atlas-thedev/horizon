@@ -4,7 +4,9 @@
 //! "Native Client" and a 132x3 bar with a light stretch sweeping along it, faded in the way the launcher
 //! fades it in. The game's own `ui_theme::native_launch_screen` draws the same thing once wgpu takes over.
 //!
-//! Frames are drawn off screen and copied to the window in one go, so repainting at 30 Hz does not flicker.
+//! Frames are drawn off screen and copied to the window in one go, so repainting at 60 Hz does not flicker. The
+//! bar's light stretch has soft ends and is drawn a pixel column at a time with partly lit edge columns, so it glides
+//! instead of stepping a whole pixel at a time.
 
 use std::sync::{Once, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -34,6 +36,12 @@ fn gray(v: f32) -> COLORREF {
     g | g << 8 | g << 16
 }
 
+/// 0 below 0, 1 above 1, a smooth S between.
+fn smooth(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
 /// The launcher's `cubic-bezier(0.65, 0, 0.35, 1)`, as an in-out cubic.
 fn ease(t: f32) -> f32 {
     if t < 0.5 {
@@ -47,7 +55,7 @@ fn ease(t: f32) -> f32 {
 ///
 /// `semibold` and `mono` are the faces' TTF bytes, which must outlive the process: `AddFontMemResourceEx` keeps
 /// referencing them. `_logs` is the console's recent lines, which this screen does not show. Repainting is
-/// safe and cheap (a background thread calls this about 30 times a second).
+/// safe and cheap (a background thread calls this about 60 times a second).
 pub fn paint(hwnd: isize, semibold: &'static [u8], mono: &'static [u8], _logs: &[String]) {
     let hwnd = hwnd as HWND;
     FACES.call_once(|| {
@@ -202,10 +210,22 @@ pub fn paint(hwnd: isize, semibold: &'static [u8], mono: &'static [u8], _logs: &
                 let _ = DeleteObject(brush);
             }
         };
-        bar(bar_x, bar_x + bar_w, 26.0 * a);
+        let track = 26.0 * a;
+        bar(bar_x, bar_x + bar_w, track);
         let len = bar_w * 0.4;
         let pos = -len + ease(phase) * (bar_w + len);
-        bar(bar_x + pos.max(0.0), bar_x + (pos + len).min(bar_w), 198.0 * a);
+        let (start, end) = (pos.max(0.0), (pos + len).min(bar_w));
+        if end > start {
+            // one column at a time: soft ends over the stretch's outer quarter, edge columns lit by how much of
+            // them the stretch covers (so it moves by fractions of a pixel)
+            for col in start.floor() as i32..end.ceil() as i32 {
+                let c = col as f32;
+                let cover = (end.min(c + 1.0) - start.max(c)).clamp(0.0, 1.0);
+                let u = (c + 0.5 - pos) / len;
+                let soft = smooth(u / 0.25).min(smooth((1.0 - u) / 0.25));
+                bar(bar_x + c, bar_x + c + 1.0, track + (198.0 * a - track) * soft * cover);
+            }
+        }
 
         BitBlt(window, 0, 0, iw, ih, hdc, 0, 0, SRCCOPY as _);
         SelectObject(hdc, old_font);

@@ -27,6 +27,12 @@ fn native_sweep_phase() -> f32 {
     (now % ms) as f32 / ms as f32
 }
 
+/// 0 below 0, 1 above 1, a smooth S between.
+fn native_smooth(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
 /// The launcher's `cubic-bezier(0.65, 0, 0.35, 1)`, as an in-out cubic.
 fn native_ease(t: f32) -> f32 {
     if t < 0.5 {
@@ -120,8 +126,21 @@ fn native_launch_screen(atlas: &HudAtlas, batch: &mut HudBatch) {
     let pos = -len + native_ease(native_sweep_phase()) * (bar_w + len);
     let (x0, x1) = (pos.max(0.0), (pos + len).min(bar_w));
     if x1 > x0 {
-        let radius = (bar_h / 2.0).min((x1 - x0) / 2.0);
-        ui.rounded(bx + x0, by, x1 - x0, bar_h, radius, color::hex(0xFFFFFF, 191));
+        // soft ends over the stretch's outer quarter, in thin slices (the early GDI screen draws the same)
+        let slices = 24;
+        let step = len / slices as f32;
+        for i in 0..slices {
+            let (a, b) = ((pos + i as f32 * step).max(x0), (pos + (i + 1) as f32 * step).min(x1));
+            if b <= a {
+                continue;
+            }
+            let u = (i as f32 + 0.5) / slices as f32;
+            let soft = native_smooth(u / 0.25).min(native_smooth((1.0 - u) / 0.25));
+            let alpha = (191.0 * soft).round() as u8;
+            if alpha > 0 {
+                ui.rounded(bx + a, by, b - a, bar_h, 0.0, color::hex(0xFFFFFF, alpha));
+            }
+        }
     }
     ui.finish();
 }
