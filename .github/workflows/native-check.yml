@@ -11,6 +11,10 @@ on:
       - 'packaging/native/**'
       - '.github/workflows/native-*.yml'
   workflow_dispatch:
+  # a branch under native/check/ is checked on every push (no pull request needed); it publishes nothing either
+  push:
+    branches:
+      - 'native/check/**'
 permissions:
   contents: read
 concurrency:
@@ -19,7 +23,7 @@ concurrency:
 jobs:
   check:
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     defaults:
       run:
         shell: bash
@@ -77,7 +81,12 @@ jobs:
         working-directory: src
         env:
           RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo check -p horizon-client -p horizon-client-lib
+        run: |
+          # since Nightly 2026-11-13 players get horizon-official (horizon-client plus Discord presence and the other
+          # official parts): check it too when the Nightly has it
+          extra=""
+          if [ -d crates/horizon-official ]; then extra="-p horizon-official"; fi
+          cargo check -p horizon-client -p horizon-client-lib $extra
       - name: The boot screen's own tests
         working-directory: src
         env:
@@ -90,3 +99,4 @@ jobs:
         run: |
           cargo test -p horizon-client-lib -p horizon-client-render --lib native_
           cargo test -p horizon-client --lib native_
+          if [ -d crates/horizon-discord ]; then cargo test -p horizon-discord --lib; fi

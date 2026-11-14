@@ -295,9 +295,12 @@ impl Boxes {
     /// Sorts every texel back to front (larger view z = farther) and draws them.
     pub fn end(&mut self, c: &mut Canvas) {
         self.quads.sort_by(|a, b| b.z.total_cmp(&a.z));
+        // a model faded with its page shows its back faces through its front ones: draw it solid
+        c.push_solid();
         for q in self.quads.drain(..) {
             c.free_quad(None::<&Arc<Image>>, q.xy, [0.0; 8], q.color);
         }
+        c.pop_alpha();
     }
 
     /// A preview wireframe, in the exact same model/camera transform as the skinned cubes.

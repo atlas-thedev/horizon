@@ -412,8 +412,83 @@ fn wheel_steve() -> Arc<Image> {
         Image::new(64,64,px)
     }).clone()
 }
+/// Takes the clip's sideways and forward/back travel (where the hips go) off every bone, as the launcher's stage does:
+/// a preview plays on the spot instead of walking towards and away from the camera. Up and down (jumps) stays.
+pub fn on_the_spot(mut p: [[f32; 6]; 6]) -> [[f32; 6]; 6] {
+    let (dx, dz) = ((p[4][3] + p[5][3]) * 0.5, (p[4][5] + p[5][5]) * 0.5);
+    for bone in &mut p {
+        bone[3] -= dx;
+        bone[5] -= dz;
+    }
+    p
+}
+
+/// The view-space box of a posed player as `draw_wheel` projects it (same cubes, yaw and pitch).
+fn pose_bounds(p: &[[f32; 6]; 6], slim: bool) -> [f32; 4] {
+    let pivots = [[0.,0.,0.],[0.,0.,0.],[-5.,if slim {2.5} else {2.},0.],[5.,if slim {2.5} else {2.},0.],[-1.9,12.,0.],[1.9,12.,0.]];
+    let aw: f32 = if slim {3.} else {4.};
+    let cubes: [([f32; 3], [f32; 3]); 6] = [([-4.,-8.,-4.],[8.,8.,8.]), ([-4.,0.,-2.],[8.,12.,4.]), ([-aw+1.,-2.,-2.],[aw,12.,4.]),
+        ([-1.,-2.,-2.],[aw,12.,4.]), ([-2.,0.,-2.],[4.,12.,4.]), ([-2.,0.,-2.],[4.,12.,4.])];
+    let (sy,cy) = (-0.38f32).sin_cos(); let (sp,cp) = (-0.10f32).sin_cos();
+    let mut bounds = [f32::INFINITY,f32::INFINITY,f32::NEG_INFINITY,f32::NEG_INFINITY];
+    for i in 0..6 {
+        let (sx,cx) = p[i][0].sin_cos(); let (syaw,cyaw) = p[i][1].sin_cos(); let (sz,cz) = p[i][2].sin_cos();
+        for mask in 0..8 {
+            let mut v = [0.;3];
+            for j in 0..3 { v[j] = cubes[i].0[j] + if mask & (1<<j) == 0 {-0.5} else {cubes[i].1[j]+0.5}; }
+            let yy = cx*v[1]-sx*v[2]; let zz = sx*v[1]+cx*v[2]; let xx = cyaw*v[0]+syaw*zz;
+            let x = cz*xx-sz*yy+pivots[i][0]+p[i][3];
+            let y = sz*xx+cz*yy+pivots[i][1]+p[i][4]-8.;
+            let z = -syaw*v[0]+cyaw*zz+pivots[i][2]+p[i][5];
+            let vx = cy*x+sy*z; let vy = cp*y-sp*(-sy*x+cy*z);
+            bounds[0]=bounds[0].min(vx); bounds[1]=bounds[1].min(vy);
+            bounds[2]=bounds[2].max(vx); bounds[3]=bounds[3].max(vy);
+        }
+    }
+    bounds
+}
+
+thread_local! {
+    /// The emote the next `draw_wheel` shows (its hash and arm width), set by `fit_emote`.
+    static FIT_KEY: std::cell::RefCell<Option<(String, bool)>> = const { std::cell::RefCell::new(None) };
+    /// Each emote's framing: the box of its whole clip, so the model keeps one size and place while it plays.
+    static FITS: std::cell::RefCell<std::collections::HashMap<(String, bool), [f32; 4]>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// The next `draw_wheel` frames emote `hash` by its whole clip instead of the current pose alone. Without it the
+/// model was fitted anew every frame and grew and shrank (came forward and back) as the emote played.
+pub fn fit_emote(hash: &str, slim: bool) {
+    FIT_KEY.with(|k| *k.borrow_mut() = Some((hash.to_owned(), slim)));
+}
+
+fn fit(bounds: &mut [f32; 4]) {
+    let Some(key) = FIT_KEY.with(|k| k.borrow_mut().take()) else { return };
+    FITS.with(|fits| {
+        let mut fits = fits.borrow_mut();
+        if fits.len() > 512 {
+            fits.clear();
+        }
+        let whole = fits.entry(key.clone()).or_insert_with(|| {
+            let mut b = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+            if let Some(duration) = horizon_client::native_emotes::clip_duration(&key.0) {
+                for i in 0..=48 {
+                    if let Some(p) = horizon_client::native_emotes::preview_pose(&key.0, Some(duration * i as f64 / 48.0 * 0.999)) {
+                        let q = pose_bounds(&on_the_spot(p), key.1);
+                        b = [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[2]), b[3].max(q[3])];
+                    }
+                }
+            }
+            b
+        });
+        // props reach further than the body on some frames: the framing only ever grows, so it settles in one loop
+        *whole = [whole[0].min(bounds[0]), whole[1].min(bounds[1]), whole[2].max(bounds[2]), whole[3].max(bounds[3])];
+        *bounds = *whole;
+    });
+}
+
 /// Fits the transformed skin cubes to a wheel sector rectangle, including outer layers.
 pub fn draw_wheel(c: &mut Canvas, skin: &Arc<Image>, slim: bool, p: [[f32; 6]; 6], rect: [f32; 4]) {
+    let p = on_the_spot(p);
     let pivots = [[0.,0.,0.],[0.,0.,0.],[-5.,if slim {2.5} else {2.},0.],[5.,if slim {2.5} else {2.},0.],[-1.9,12.,0.],[1.9,12.,0.]];
     let aw = if slim {3.} else {4.};
     let boxes = [([-4.,-8.,-4.],[8.,8.,8.],[0.,0.],[32.,0.]),
@@ -439,7 +514,7 @@ pub fn draw_wheel(c: &mut Canvas, skin: &Arc<Image>, slim: bool, p: [[f32; 6]; 6
         }
     }
     let [rx,ry,rw,rh] = rect;
-    let unit = (rw / (bounds[2]-bounds[0]).max(1.)).min(rh / (bounds[3]-bounds[1]).max(1.));
+    let unit = { fit(&mut bounds); (rw / (bounds[2]-bounds[0]).max(1.)).min(rh / (bounds[3]-bounds[1]).max(1.)) };
     let mut b = Boxes::new();
     b.begin(rx+rw/2.-(bounds[0]+bounds[2])*unit/2., ry+rh/2.-(bounds[1]+bounds[3])*unit/2., unit, -0.38, -0.10);
     b.translate(0.,-8.,0.);

@@ -11,6 +11,9 @@
 mod discord_module;
 mod emote_wheel;
 mod emotes_view;
+mod waypoints;
+mod waypoints_module;
+mod waypoints_view;
 mod emote_camera;
 mod emotes_module;
 mod extra_modules;
@@ -143,6 +146,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             relay::start();
             music::init(game_dir().as_deref());
             music::start();
+            waypoints::store().init(game_dir().as_deref());
             State {
             canvas: native_ui::canvas(),
             modules: Modules::new(game_dir()),
@@ -281,6 +285,18 @@ impl Game<'_> {
             day_time: clock.as_ref().map_or(0, |c| c.day_time),
             game_time: clock.as_ref().map_or(0, |c| c.game_time),
             dimension: player.as_ref().map(|p| p.dimension.to_string()).unwrap_or_default(),
+            camera: if in_world {
+                self.locator_camera.map(|(pos, yaw, pitch, fov)| waypoints::Camera { pos, yaw, pitch, fov })
+            } else {
+                None
+            },
+            world: if in_world { self.native_world().map(|w| w.0) } else { None },
+            world_label: if in_world { self.native_world().map(|w| w.1) } else { None },
+            look_block: if in_world && waypoints_module::wants_look(&state.modules, &state.held) {
+                self.aim().and_then(|(origin, dir)| self.clip_ray(origin, dir, waypoints_module::LOOK_RANGE)).map(|hit| hit.pos)
+            } else {
+                None
+            },
             in_world,
             sample: false,
             fps: self.fps.round() as i32,
@@ -330,7 +346,8 @@ impl Game<'_> {
         let paused = self.native_pause_active();
         let pause_info = if paused { Some(self.native_pause_info()) } else { None };
         // The clipboard is read only when a paste shortcut came in.
-        let clip = if open && with_state(|s| s.wants_paste()) {
+        let clip = if open && with_state(|s| s.wants_paste() || (s.menu.wants_clipboard() && s.events.iter().any(|e|
+            matches!(e, Event::Button { button: 0, pressed: false })))) {
             self.clipboard.get()
         } else {
             String::new()
@@ -520,7 +537,10 @@ impl Game<'_> {
             let m = self.modifiers;
             let modifiers = if m.shift_key() { 1 } else { 0 } | if m.control_key() { 2 } else { 0 }
                 | if m.alt_key() { 4 } else { 0 } | if m.super_key() { 8 } else { 0 };
-            let allowed = self.focused && self.screen == Screen::Playing && self.title.is_none() && self.native_mod_screen().is_none();
+            // With F3 held the key belongs to one of the game's debug combos (F3 + B hitboxes, F3 + G chunk borders).
+            let debug_combo = with_state(|s| s.held.contains(&292));
+            let allowed = self.focused && self.screen == Screen::Playing && self.title.is_none() && self.native_mod_screen().is_none()
+                && !debug_combo;
             if with_state(|s|s.emote_wheel.open) {
                 let consumed=with_state(|s|s.emote_wheel.key(glfw==Some(wheel_key),glfw==Some(256),key.state==ElementState::Pressed,key.repeat)
                     || glfw.is_some_and(|key_code|s.emote_wheel.navigate(key_code,key.state==ElementState::Pressed,key.repeat)));
@@ -694,6 +714,19 @@ impl Game<'_> {
     }
 
     /// The distance to the entity under the crosshair (`McBridge.reach`).
+    /// The world as a key for things kept per world (`WorldKey`): "server:<address>" or "world:<save name>".
+    fn native_world(&self) -> Option<(String, String)> {
+        if let Some(i) = self.integrated.as_ref() {
+            return Some((format!("world:{}", i.world_name), i.world_name.clone()));
+        }
+        let address = self.server_address()?;
+        let mut key = address.trim().to_ascii_lowercase();
+        if let Some(bare) = key.strip_suffix(":25565") {
+            key = bare.to_owned();
+        }
+        Some((format!("server:{}", key.trim_end_matches('.')), address.to_owned()))
+    }
+
     fn native_reach(&self) -> Option<f64> {
         [
             self.painting_hit().map(|h| h.1),

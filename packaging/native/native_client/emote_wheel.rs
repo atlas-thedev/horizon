@@ -274,6 +274,7 @@ impl Wheel {
                 && let Some(pose) = native_emotes::preview_pose(hash, if active { Some(hover_elapsed) } else { None })
             {
                 let rect = fit_poster([0.,0.,1.,1.], 0.75, cx, cy, inner, outer, angle, label_y);
+                preview3d::fit_emote(hash, slim);
                 preview3d::draw_wheel(c, &skin, slim, pose, rect);
                 drawn = true;
             }

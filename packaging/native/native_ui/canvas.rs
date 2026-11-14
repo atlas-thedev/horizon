@@ -204,6 +204,17 @@ impl Canvas {
         self.alpha *= a.clamp(0.0, 1.0);
     }
 
+    /// Draws fully opaque until [`Canvas::pop_alpha`], whatever fade is around it (3D models: a half-transparent one
+    /// shows through itself).
+    pub fn push_solid(&mut self) {
+        if self.alpha_stack.len() < 32 {
+            self.alpha_stack.push(self.alpha);
+        }
+        if self.alpha > 0.02 {
+            self.alpha = 1.0;
+        }
+    }
+
     pub fn pop_alpha(&mut self) {
         if let Some(a) = self.alpha_stack.pop() {
             self.alpha = a;

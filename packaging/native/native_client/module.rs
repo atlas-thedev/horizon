@@ -68,6 +68,13 @@ pub struct GameView {
     pub day_time: i64,
     pub game_time: i64,
     pub dimension: String,
+    /// The camera the last frame was drawn with (Waypoints projects onto it).
+    pub camera: Option<super::waypoints::Camera>,
+    /// The world as a key for things kept per world ("server:play.example.net", "world:New World"), and its name.
+    pub world: Option<String>,
+    pub world_label: Option<String>,
+    /// The block you look at, up to 128 blocks away; only read while the waypoint key is held.
+    pub look_block: Option<[i32; 3]>,
 }
 
 pub const CONTROLS: [&str; 9] = ["forward", "left", "back", "right", "jump", "sneak", "sprint", "attack", "use"];

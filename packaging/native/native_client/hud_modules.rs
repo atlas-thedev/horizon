@@ -458,7 +458,7 @@ fn direction() -> Module {
             false,
             0.5,
             0.0,
-            vec![Setting::bool("degrees", "Show degrees", true).fixed()],
+            vec![Setting::bool("degrees", "Show degrees", true).fixed(), Setting::bool("waypoints", "Show waypoints", true)],
             Box::new(Direction),
         ),
         |h| h.drop_setting(LABELS),
@@ -505,6 +505,16 @@ impl Behaviour for Direction {
                 hud.text_face(c, font::SEMIBOLD, fs, n, px - tw / 2.0, y + (h - lh) / 2.0, theme::alpha(col, fade));
             } else {
                 c.fill(px - 0.5 * s, y + h / 2.0 - 3.0 * s, s.max(1.0), 6.0 * s, theme::alpha(hud.color(), 0.45 * fade));
+            }
+        }
+        // waypoints: a coloured dot on the strip's lower edge (at the edge, half shown, when it is out of view)
+        if m.bool("waypoints") && !g.sample {
+            for (mark, color) in super::waypoints_module::compass() {
+                let off = ((mark - heading + 540.0) % 360.0) - 180.0;
+                let lim = span / 2.0 - 4.0;
+                let out = off.abs() > lim;
+                let mx = cx + off.clamp(-lim, lim) * ppd;
+                c.circle(mx, y + h - 3.5 * s, if out { 2.0 } else { 3.0 } * s, theme::alpha(color, if out { 0.55 } else { 1.0 }));
             }
         }
         c.pop_clip();

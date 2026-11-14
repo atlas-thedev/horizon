@@ -772,6 +772,15 @@ fn preview_time(s: &State, hash: &str, elapsed: Option<f64>) -> Option<f64> {
     };
     time.is_finite().then_some(time.max(0.0))
 }
+/// How long an emote's clip lasts (ms), once it is downloaded.
+pub fn clip_duration(hash: &str) -> Option<f64> {
+    lock().clips.get(hash).map(|c| c.duration)
+}
+/// When in the clip its still preview pose is (ms): a hover starts playing from there, so the model does not jump.
+pub fn preview_start(hash: &str) -> f64 {
+    let s = lock();
+    preview_time(&s, hash, None).unwrap_or(0.0)
+}
 pub fn preview_pose(hash: &str, elapsed: Option<f64>) -> Option<[[f32; 6]; 6]> {
     let s = lock();
     Some(s.clips.get(hash)?.sample(preview_time(&s, hash, elapsed)?))

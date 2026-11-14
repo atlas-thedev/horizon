@@ -449,6 +449,27 @@ fn texture_file(url: &str) -> Option<(PathBuf, String)> {
         .filter(|p| p.is_absolute()).unwrap_or_else(|| game.join(".native/textures"));
     Some((dir.join(format!("{hash}.png")), hash.to_owned()))
 }
+/// Where to download a Native texture from: `/csl/textures/<hash>` with ".png" on the end. Cloudflare keeps only files
+/// whose name ends in a known type, so the bare hash went all the way to the API every time (about half a second);
+/// with ".png" it comes from Cloudflare's copy nearby. Same bytes: the hash is still checked.
+pub fn cdn_url(url: &str) -> String {
+    let (path, query) = url.split_once('?').map_or((url, None), |(p, q)| (p, Some(q)));
+    let hash = path.rsplit('/').next().unwrap_or("");
+    if !path.contains("/csl/textures/") || hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return url.to_owned();
+    }
+    match query {
+        Some(q) => format!("{path}.png?{q}"),
+        None => format!("{path}.png"),
+    }
+}
+
+/// One connection pool for every picture: after the first, a download skips the TLS handshake (about 0.3 s).
+fn image_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| agent(Duration::from_secs(15)))
+}
+
 fn image_bytes(url: &str, limit: u64) -> Option<Vec<u8>> {
     use sha2::{Digest, Sha256};
     let cached = texture_file(url);
@@ -458,7 +479,7 @@ fn image_bytes(url: &str, limit: u64) -> Option<Vec<u8>> {
         && let Ok(bytes) = std::fs::read(path)
         && valid(&bytes, hash)
     { return Some(bytes); }
-    let bytes = get_bytes(url, None, limit).ok()?;
+    let bytes = finish(image_agent().get(&cdn_url(url)).call(), limit).ok()?;
     if let Some((path, hash)) = cached {
         if !valid(&bytes, &hash) { return None; }
         if !path.exists() {
@@ -471,7 +492,7 @@ fn image_bytes(url: &str, limit: u64) -> Option<Vec<u8>> {
 
 static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 
-/// The picture at `url`, fetched on a background thread the first time it is asked for (at most four at once).
+/// The picture at `url`, fetched on a background thread the first time it is asked for (at most eight at once).
 pub fn image(url: &str, limit: u64) -> Pic {
     if url.is_empty() {
         return Pic::Failed;
@@ -481,7 +502,7 @@ pub fn image(url: &str, limit: u64) -> Pic {
         if let Some(p) = cache.get(url) {
             return p.clone();
         }
-        if IN_FLIGHT.load(Ordering::Relaxed) >= 4 {
+        if IN_FLIGHT.load(Ordering::Relaxed) >= 8 {
             return Pic::Loading;
         }
         if cache.len() > 400 {
@@ -542,6 +563,15 @@ mod tests {
         std::fs::write(dir.join(".native/session.json"), r#"{"ticket":"nmt1.x","api":"https://evil.example"}"#).unwrap();
         assert!(read_handoff(&dir).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn texture_downloads_use_the_cacheable_png_address() {
+        let h = "a".repeat(64);
+        assert_eq!(cdn_url(&format!("https://x/csl/textures/{h}")), format!("https://x/csl/textures/{h}.png"));
+        assert_eq!(cdn_url(&format!("https://x/csl/textures/{h}?v=2")), format!("https://x/csl/textures/{h}.png?v=2"));
+        assert_eq!(cdn_url("https://x/v1/emotes/posters/p.png?v=2"), "https://x/v1/emotes/posters/p.png?v=2");
+        assert_eq!(cdn_url(&format!("https://textures.minecraft.net/texture/{h}")), format!("https://textures.minecraft.net/texture/{h}"));
     }
 
     #[test]

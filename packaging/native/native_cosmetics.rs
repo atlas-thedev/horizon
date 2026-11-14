@@ -665,7 +665,36 @@ fn library() -> std::sync::MutexGuard<'static, HashMap<(String, String, u8), Sta
         .unwrap_or_else(|e| e.into_inner())
 }
 
-/// A file by hash: the disk cache in the game folder first, else Native.
+/// The launcher's texture cache (`textureCache` in `.native/launcher.json`). The launcher downloads every store
+/// cosmetic in the background, so a cosmetic is usually there before the game first needs it.
+fn launcher_cache() -> Option<std::path::PathBuf> {
+    static DIR: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let game = std::env::var_os("NATIVE_GAME_DIR").map(std::path::PathBuf::from).or_else(|| std::env::current_dir().ok())?;
+        let info = [game.join(".native/launcher.json"), game.join(".noctra/launcher.json")]
+            .into_iter()
+            .find_map(|p| std::fs::metadata(&p).ok().filter(|m| m.len() < 16384).and_then(|_| std::fs::read(p).ok()))
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+        info.and_then(|v| v["textureCache"].as_str().map(std::path::PathBuf::from))
+            .filter(|p| p.is_absolute())
+            .or_else(|| Some(game.join(".native/textures")))
+    })
+    .clone()
+}
+
+/// One connection pool for every cosmetic file: after the first, a download skips the TLS handshake.
+fn cosmetic_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(8))
+            .timeout_read(Duration::from_secs(20))
+            .user_agent("NativeClient (Rust engine)")
+            .build()
+    })
+}
+
+/// A file by hash: the disk cache in the game folder first, then the launcher's, else Native.
 fn fetch(base: &str, hash: &str, limit: u64) -> Option<Vec<u8>> {
     let cache = std::env::current_dir().ok()?.join("assets/native").join(hash);
     if let Ok(bytes) = std::fs::read(&cache)
@@ -673,14 +702,22 @@ fn fetch(base: &str, hash: &str, limit: u64) -> Option<Vec<u8>> {
     {
         return Some(bytes);
     }
-    let response = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(8))
-        .timeout_read(Duration::from_secs(20))
-        .user_agent("NativeClient (Rust engine)")
-        .build()
-        .get(&format!("{base}{hash}"))
-        .call()
-        .ok()?;
+    if hash.len() == 64
+        && let Some(dir) = launcher_cache()
+        && let Ok(bytes) = std::fs::read(dir.join(format!("{hash}.png")))
+        && bytes.len() as u64 <= limit
+        && {
+            use sha2::Digest;
+            format!("{:x}", sha2::Sha256::digest(&bytes)) == hash
+        }
+    {
+        let _ = std::fs::create_dir_all(cache.parent()?);
+        let _ = std::fs::write(&cache, &bytes);
+        return Some(bytes);
+    }
+    // ".png" on Native's texture address: Cloudflare keeps those (the bare hash went to the API every time)
+    let url = if base.ends_with("/csl/textures/") { format!("{base}{hash}.png") } else { format!("{base}{hash}") };
+    let response = cosmetic_agent().get(&url).call().ok()?;
     let mut body = Vec::new();
     response.into_reader().take(limit + 1).read_to_end(&mut body).ok()?;
     if body.len() as u64 > limit {

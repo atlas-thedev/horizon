@@ -86,6 +86,9 @@ pub struct EmotesView {
     dragging: bool,
     /// The slot under the mouse this frame (set while the wheel draws), for drops.
     hovered_slot: Option<usize>,
+    /// The card under the mouse and since when: its emote plays from its still pose, not from a random moment.
+    hover_card: Option<String>,
+    hover_at: f64,
     scroll: Scroll,
     search: TextField,
 }
@@ -114,6 +117,8 @@ impl EmotesView {
             drag_y: 0.0,
             dragging: false,
             hovered_slot: None,
+            hover_card: None,
+            hover_at: 0.0,
             scroll: Scroll::new("emotes"),
             search,
         }
@@ -307,6 +312,7 @@ impl EmotesView {
                         c.push_clip(x + 1.0, py, w - 2.0, ph);
                         // draw_wheel takes the emote's props too (tools/native/native_emotes.py adds them)
                         let props = native_emotes::preview_props(&e.hash, elapsed);
+                        preview3d::fit_emote(&e.hash, slim);
                         preview3d::draw_wheel(c, skin, slim, pose, [px + pw * 0.1, py + ph * 0.04, pw * 0.8, ph * 0.92], props);
                         c.pop_clip();
                     }
@@ -526,6 +532,12 @@ impl EmotesView {
             }
         }
         let at = index_of(row, &it.id);
+        if over && self.hover_card.as_deref() != Some(it.id.as_str()) {
+            self.hover_card = Some(it.id.clone());
+            self.hover_at = ui.now;
+        } else if !over && self.hover_card.as_deref() == Some(it.id.as_str()) {
+            self.hover_card = None;
+        }
         let sel = self.pick.as_deref() == Some(it.id.as_str());
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let sl = ui.anim_on(&format!("{id}#s"), sel, 16.0);
@@ -560,8 +572,10 @@ impl EmotesView {
     #[allow(clippy::too_many_arguments)]
     fn poster(&self, ui: &Ui, c: &mut Canvas, it: &Emote, skin: &Arc<Image>, slim: bool, x: f32, y: f32, w: f32, h: f32, play: bool) {
         native_emotes::want_clip(&it.hash);
-        let elapsed = play.then(|| (ui.now - self.shown_at).max(0.0));
+        // hovered: from the still pose on, so the model keeps its place and just starts moving
+        let elapsed = play.then(|| native_emotes::preview_start(&it.hash) + (ui.now - self.hover_at).max(0.0));
         if let Some(pose) = native_emotes::preview_pose(&it.hash, elapsed) {
+            preview3d::fit_emote(&it.hash, slim);
             preview3d::draw_wheel(c, skin, slim, pose, [x, y, w, h], native_emotes::preview_props(&it.hash, elapsed));
             return;
         }

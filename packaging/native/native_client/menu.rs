@@ -19,13 +19,16 @@ use horizon_client::native_ui::{Canvas, Image, assets, font, icons, theme};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub const TABS: [&str; 6] = ["Mods", "Cosmetics", "Emotes", "Settings", "Screenshots", "Music"];
+pub const TABS: [&str; 7] = ["Mods", "Cosmetics", "Emotes", "Settings", "Screenshots", "Music", "Waypoints"];
+/// The order the rail shows the tabs in (Waypoints next to Emotes; the TAB_* numbers stay as they were).
+const RAIL_ORDER: [usize; 7] = [0, 1, 2, 6, 3, 4, 5];
 pub const TAB_MODS: usize = 0;
 pub const TAB_COSMETICS: usize = 1;
 pub const TAB_EMOTES: usize = 2;
 pub const TAB_SETTINGS: usize = 3;
 pub const TAB_SHOTS: usize = 4;
 pub const TAB_MUSIC: usize = 5;
+pub const TAB_WAYPOINTS: usize = 6;
 const RAIL: f32 = 54.0;
 /// Corner radius of the floating top bars, squared off a little so square avatars sit well.
 const PILL_R: f32 = 13.0;
@@ -83,6 +86,7 @@ pub struct Menu {
     music: MusicView,
     locker: Locker,
     emotes: EmotesView,
+    waypoints: super::waypoints_view::WaypointsView,
     /// The menu is over a world (the Emotes page can play an emote there).
     in_world: bool,
     who: String,
@@ -142,6 +146,7 @@ impl Menu {
             music: MusicView::new(),
             locker: Locker::new(),
             emotes: EmotesView::new(),
+            waypoints: super::waypoints_view::WaypointsView::new(),
             in_world: false,
             who: String::new(),
             game_dir: None,
@@ -193,12 +198,20 @@ impl Menu {
         if self.tab == TAB_MUSIC && self.music.escape(ui) {
             return true;
         }
+        if self.tab == TAB_WAYPOINTS && self.waypoints.escape(ui) {
+            return true;
+        }
         if self.selected.is_some() {
             self.selected = None;
             self.page_at = ui.now;
             return true;
         }
         false
+    }
+
+    /// A click on this page may need the clipboard (Waypoints: Paste coordinates).
+    pub fn wants_clipboard(&self) -> bool {
+        self.tab == TAB_WAYPOINTS
     }
 
     pub fn open_tab(&mut self, t: usize, now: f64) {
@@ -227,6 +240,9 @@ impl Menu {
         }
         if t == TAB_EMOTES {
             self.emotes.opened(now);
+        }
+        if t == TAB_WAYPOINTS {
+            self.waypoints.opened();
         }
         self.selected = None;
         self.widgets.listening = None;
@@ -260,12 +276,17 @@ impl Menu {
         c.fill(x0 + 16.0, y0 + 60.0, rw - 32.0, 1.0, theme::HAIRLINE);
         let rx = x0 + (rw - RAIL) / 2.0;
         let mut ty = y0 + 74.0;
-        let tab_icons = [theme::I_NAV_MODS, theme::I_NAV_LOCKER, theme::I_SMILE, theme::I_NAV_SETTINGS, icons::CAMERA, icons::MUSIC];
-        for (i, label) in TABS.iter().enumerate() {
-            if rail_tile(ui, c, &format!("menu:tab:{i}"), rx, ty, tab_icons[i], label, self.tab == i) {
+        let tab_icons =
+            [theme::I_NAV_MODS, theme::I_NAV_LOCKER, theme::I_SMILE, theme::I_NAV_SETTINGS, icons::CAMERA, icons::MUSIC, theme::I_MAP_PIN];
+        // every tab and the close tile fit, however short the window is
+        let step = (RAIL + 8.0).min((wh - 74.0 - 16.0 - RAIL - 8.0) / TABS.len() as f32);
+        let size = (step - 6.0).clamp(30.0, RAIL);
+        let tx = x0 + (rw - size) / 2.0;
+        for i in RAIL_ORDER {
+            if rail_tile_sized(ui, c, &format!("menu:tab:{i}"), tx, ty, size, tab_icons[i], TABS[i], self.tab == i) {
                 self.set_tab(i, ui.now);
             }
-            ty += RAIL + 8.0;
+            ty += step;
         }
         if rail_tile(ui, c, "menu:rail:close", rx, y0 + wh - RAIL - 16.0, theme::I_X, "Close", false) {
             c.pop_alpha();
@@ -331,7 +352,7 @@ impl Menu {
                     c.pop_alpha();
                 }
             }
-            TAB_COSMETICS | TAB_EMOTES | TAB_SHOTS | TAB_MUSIC => {
+            TAB_COSMETICS | TAB_EMOTES | TAB_SHOTS | TAB_MUSIC | TAB_WAYPOINTS => {
                 header(c, TABS[self.tab], mx, py, hh);
                 if self.tab == TAB_COSMETICS {
                     let store = "Get more in the Native Store";
@@ -373,6 +394,10 @@ impl Menu {
         }
         if self.tab == TAB_COSMETICS {
             self.locker.draw(ui, c, &self.who, self.page_at, x, y, w, h);
+            return Action::None;
+        }
+        if self.tab == TAB_WAYPOINTS {
+            self.waypoints.draw(ui, c, x, y, w, h);
             return Action::None;
         }
         if self.tab == TAB_EMOTES {
@@ -1226,7 +1251,12 @@ pub fn header(c: &mut Canvas, title: &str, x: f32, y: f32, h: f32) -> f32 {
 /// Square icon tile with an active marker; the label shows up as a tooltip.
 #[allow(clippy::too_many_arguments)]
 fn rail_tile(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, icon: u32, label: &str, on: bool) -> bool {
-    let s = RAIL;
+    rail_tile_sized(ui, c, id, x, y, RAIL, icon, label, on)
+}
+
+/// A rail tile `s` wide and tall (smaller when the window is too short for the full size).
+#[allow(clippy::too_many_arguments)]
+fn rail_tile_sized(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, s: f32, icon: u32, label: &str, on: bool) -> bool {
     let over = ui.hover(c, x, y, s, s);
     let click = ui.clicked(c, id, x, y, s, s);
     let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
@@ -1238,7 +1268,7 @@ fn rail_tile(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, icon: u32, l
         c.round(x - 5.0, y + (s - bh) / 2.0, 3.0, bh, 1.5, theme::alpha(theme::WHITE, sel));
     }
     let fg = theme::mix(theme::mix(theme::TEXT_MUTED, theme::TEXT_SECONDARY, hv), theme::TEXT_STRONG, sel);
-    c.icon(icon, 24.0, x + s / 2.0, y + s / 2.0, fg);
+    c.icon(icon, 24.0 * s / RAIL, x + s / 2.0, y + s / 2.0, fg);
     if over {
         ui.tip(label);
     }

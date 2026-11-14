@@ -367,4 +367,37 @@ patch(DISCORD, '        assert_eq!(single["details"], "Singleplayer");\n',
 patch(DISCORD, '        assert_eq!(multi["details"], "Multiplayer");\n',
       '        assert_eq!(multi["details"], "Playing Multiplayer");\n')
 
+# Motion Blur: the module only set `tweaks::motion_blur`; nothing drew it. The world goes through world_post's own
+# target while it is on, and each frame is blended into a history at the copy to the screen (native_world_blur.rs).
+POST = RENDER / 'gfx/world_post.rs'
+patch(POST,
+      '        if self.scale == 1.0 && !self.antialias && !self.taa_on && !always {\n'
+      '            self.target = None;\n'
+      '            return None;\n'
+      '        }\n',
+      "        // Native Motion Blur blends frames in the world's own target: it needs one at any scale.\n"
+      '        let always = always || native_blur_ready(device, window);\n'
+      '        if self.scale == 1.0 && !self.antialias && !self.taa_on && !always {\n'
+      '            self.target = None;\n'
+      '            return None;\n'
+      '        }\n')
+text = POST.read_text(encoding='utf-8')
+if 'fn native_finish(' not in text:
+    TAA = '        self.finish_with(encoder, screen, &taa.show[i], timing);\n'
+    # Since 2026-11-13 the TAA path draws its resolve through its own pipeline (sharpen when upscaling).
+    SHOWN = '        self.draw_onto(encoder, screen, shown, pipeline, timing);\n'
+    if TAA not in text and text.count(SHOWN) == 1:
+        text = text.replace(SHOWN, '        let blurred = native_blur(self, encoder, shown);\n'
+                                   '        self.draw_onto(encoder, screen, blurred.as_ref().unwrap_or(shown), pipeline, timing);\n')
+        TAA = None
+    for old, count in (('            self.finish_with(encoder, screen, &target.group, timing.as_deref_mut());\n', 2),
+                       (TAA, 1)):
+        if old is None:
+            continue
+        if text.count(old) != count:
+            raise SystemExit(f'native_tweaks: expected {count} {old.strip()!r} in world_post.rs; update tools/native/native_tweaks.py.')
+        text = text.replace(old, old.replace('self.finish_with(', 'self.native_finish('))
+    text += '\n' + (pathlib.Path(sys.argv[2]).resolve() / 'packaging/native/native_world_blur.rs').read_text(encoding='utf-8')
+    POST.write_text(text, encoding='utf-8')
+
 print('native_tweaks: Native Client engine hooks applied')

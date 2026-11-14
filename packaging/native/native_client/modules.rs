@@ -27,6 +27,7 @@ impl Modules {
         all.extend(super::overlay_modules::all());
         all.extend(super::discord_module::all());
         all.extend(super::music_modules::all());
+        all.extend(super::waypoints_module::all());
         all.extend(super::emotes_module::all(super::uiconfig::UiConfig::load(game_dir.as_deref()).emote_key));
         // The order the Java mod registers them in: it is the order of the menu's grid.
         const ORDER: [&str; 45] = [
