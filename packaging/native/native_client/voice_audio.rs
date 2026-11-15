@@ -828,19 +828,22 @@ mod tests {
 
     #[test]
     fn opus_carries_a_voice_through() {
+        // one frame sent and one played every 20 ms, as in a call
         let mut enc = Encoder::new().expect("encoder");
         let mut packet = [0u8; 1275];
         let mut s = Stream::new().expect("decoder");
+        let mut loudest = 0.0f32;
         for f in 0..20u32 {
             let n = enc.encode(&tone(f as usize * FRAME), &mut packet).expect("a packet");
             assert!(n > 10 && n < 300, "about 32 kbps: {n} bytes");
             s.push(f, 0, packet[..n].to_vec());
+            if let Some(pcm) = s.pull()
+                && f >= 5
+            {
+                loudest = loudest.max(rms(pcm));
+            }
         }
-        let mut level = 0.0;
-        while let Some(pcm) = s.pull() {
-            level = rms(pcm);
-        }
-        assert!(level > 0.1, "the tone comes out at its level: {level}");
+        assert!(loudest > 0.1, "the tone comes out at its level: {loudest}");
     }
 
     #[test]
@@ -848,13 +851,16 @@ mod tests {
         let mut enc = Encoder::new().unwrap();
         let mut packet = [0u8; 1275];
         let mut s = Stream::new().unwrap();
+        let mut played = 0;
         for f in 0..20u32 {
             let n = enc.encode(&tone(f as usize * FRAME), &mut packet).unwrap();
             if f != 7 {
                 s.push(f, if f == 19 { END } else { 0 }, packet[..n].to_vec());
             }
+            if s.pull().is_some() {
+                played += 1;
+            }
         }
-        let mut played = 0;
         while s.pull().is_some() {
             played += 1;
         }
