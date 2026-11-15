@@ -2,7 +2,7 @@
 //!
 //! - the microphone (cpal) is resampled to 48 kHz mono, cleaned by WebRTC's audio processing (sonora: echo
 //!   cancellation against what the speakers play, noise suppression, a high-pass filter), gated (push to talk / voice
-//!   activation), encoded with Opus (32 kbps, voice, in-band FEC) and sent in 20 ms frames;
+//!   activation), encoded with Opus (opus-rs, pure Rust: 32 kbps, voice, in-band FEC) and sent in 20 ms frames;
 //! - every speaker has a small jitter buffer in front of an Opus decoder (loss concealment and FEC); their voices are
 //!   mixed with the voice volume and each player's own volume, with the ring tone and the speaker test chime, and
 //!   played (cpal), and the mix is what the echo canceller removes from the microphone.
@@ -32,27 +32,17 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 // ── Opus ──────────────────────────────────────────────────────────────────
 
 /// A 48 kHz mono Opus encoder set up like native-mod's (VoIP, 32 kbps, complexity 5, FEC for 10 % loss).
-pub struct Encoder(*mut unsafe_libopus::OpusEncoder);
-// SAFETY: the encoder is plain memory owned by this value and only used from one thread at a time.
-unsafe impl Send for Encoder {}
+pub struct Encoder(opus_rs::OpusEncoder);
 
 impl Encoder {
     pub fn new() -> Option<Encoder> {
-        use unsafe_libopus as o;
-        let mut err = 0i32;
-        // SAFETY: valid arguments; the pointer is checked before use and freed in Drop.
-        unsafe {
-            let st = o::opus_encoder_create(RATE as i32, 1, o::OPUS_APPLICATION_VOIP, &mut err);
-            if st.is_null() || err != o::OPUS_OK {
-                return None;
-            }
-            let _ = o::opus_encoder_ctl!(st, o::OPUS_SET_BITRATE_REQUEST, 32_000i32);
-            let _ = o::opus_encoder_ctl!(st, o::OPUS_SET_COMPLEXITY_REQUEST, 5i32);
-            let _ = o::opus_encoder_ctl!(st, o::OPUS_SET_SIGNAL_REQUEST, o::OPUS_SIGNAL_VOICE);
-            let _ = o::opus_encoder_ctl!(st, o::OPUS_SET_INBAND_FEC_REQUEST, 1i32);
-            let _ = o::opus_encoder_ctl!(st, o::OPUS_SET_PACKET_LOSS_PERC_REQUEST, 10i32);
-            Some(Encoder(st))
-        }
+        let mut e = opus_rs::OpusEncoder::new(RATE as i32, 1, opus_rs::Application::Voip).ok()?;
+        e.bitrate_bps = 32_000;
+        e.complexity = 5;
+        e.use_inband_fec = true;
+        e.packet_loss_perc = 10;
+        e.set_signal(opus_rs::Signal::Voice);
+        Some(Encoder(e))
     }
 
     /// One 20 ms frame into `out`; the packet's length.
@@ -60,45 +50,50 @@ impl Encoder {
         if pcm.len() != FRAME {
             return None;
         }
-        // SAFETY: `pcm` holds FRAME samples and `out` its own length, as told.
-        let n = unsafe { unsafe_libopus::opus_encode(self.0, pcm.as_ptr(), FRAME as i32, out.as_mut_ptr(), out.len() as i32) };
-        (n > 0).then_some(n as usize)
+        self.0.encode_i16(pcm, FRAME, out).ok().filter(|n| *n > 0)
     }
 }
 
-impl Drop for Encoder {
-    fn drop(&mut self) {
-        // SAFETY: created by opus_encoder_create and freed once.
-        unsafe { unsafe_libopus::opus_encoder_destroy(self.0) }
-    }
+pub struct Decoder {
+    opus: opus_rs::OpusDecoder,
+    out: Vec<f32>,
+    /// The last good frame, faded out when a packet is missing and the codec cannot conceal it.
+    last: [i16; FRAME],
 }
-
-pub struct Decoder(*mut unsafe_libopus::OpusDecoder);
-// SAFETY: as for the encoder.
-unsafe impl Send for Decoder {}
 
 impl Decoder {
     pub fn new() -> Option<Decoder> {
-        let mut err = 0i32;
-        // SAFETY: valid arguments; checked before use, freed in Drop.
-        let st = unsafe { unsafe_libopus::opus_decoder_create(RATE as i32, 1, &mut err) };
-        (!st.is_null() && err == unsafe_libopus::OPUS_OK).then_some(Decoder(st))
+        Some(Decoder { opus: opus_rs::OpusDecoder::new(RATE as i32, 1).ok()?, out: vec![0.0; FRAME], last: [0; FRAME] })
     }
 
     /// 20 ms of audio from `packet` (`fec`: rebuild the frame before it from its redundancy), or, with no packet,
-    /// a concealed frame. False when the packet could not be decoded.
+    /// a concealed frame. False when nothing usable came out.
     pub fn decode(&mut self, packet: Option<&[u8]>, fec: bool, pcm: &mut [i16; FRAME]) -> bool {
-        let (ptr, len) = packet.map_or((std::ptr::null(), 0), |p| (p.as_ptr(), p.len() as i32));
-        // SAFETY: `pcm` has room for FRAME samples; a null packet asks for concealment.
-        let n = unsafe { unsafe_libopus::opus_decode(self.0, ptr, len, pcm.as_mut_ptr(), FRAME as i32, i32::from(fec)) };
-        n > 0
-    }
-}
-
-impl Drop for Decoder {
-    fn drop(&mut self) {
-        // SAFETY: created by opus_decoder_create and freed once.
-        unsafe { unsafe_libopus::opus_decoder_destroy(self.0) }
+        let got = match (packet, fec) {
+            (Some(p), true) => self.opus.decode_fec(p, FRAME, &mut self.out),
+            (Some(p), false) => self.opus.decode(p, FRAME, &mut self.out),
+            (None, _) => Err("lost"), // concealed below (an empty packet is not something to hand the decoder)
+        };
+        match got {
+            Ok(n) if n > 0 => {
+                for (o, v) in pcm.iter_mut().zip(&self.out) {
+                    *o = (v.clamp(-1.0, 1.0) * 32767.0) as i16;
+                }
+                if packet.is_some() && !fec {
+                    self.last = *pcm;
+                }
+                true
+            }
+            _ if packet.is_none() => {
+                // concealment by hand: the last frame, quieter each time, instead of a click of silence
+                for v in &mut self.last {
+                    *v /= 2;
+                }
+                *pcm = self.last;
+                true
+            }
+            _ => false,
+        }
     }
 }
 
@@ -506,7 +501,8 @@ fn open_output(name: &str, ring: Arc<Mutex<VecDeque<f32>>>) -> Result<cpal::Stre
         {
             let mut r = lock(&ring);
             while pending.len() < frames && !r.is_empty() {
-                let take: Vec<f32> = r.drain(..r.len().min(480)).collect();
+                let n = r.len().min(480);
+                let take: Vec<f32> = r.drain(..n).collect();
                 resample.run(&take, &mut pending);
             }
         }
@@ -521,14 +517,18 @@ fn open_output(name: &str, ring: Arc<Mutex<VecDeque<f32>>>) -> Result<cpal::Stre
     let stream = match format {
         SampleFormat::F32 => device.build_output_stream(
             &config,
-            move |d: &mut [f32], _| d.copy_from_slice(&fill(d.len() / channels)),
+            move |d: &mut [f32], _| {
+                let samples = fill(d.len() / channels);
+                d.copy_from_slice(&samples);
+            },
             err,
             None,
         ),
         SampleFormat::I16 => device.build_output_stream(
             &config,
             move |d: &mut [i16], _| {
-                for (o, v) in d.iter_mut().zip(fill(d.len() / channels)) {
+                let samples = fill(d.len() / channels);
+                for (o, v) in d.iter_mut().zip(samples) {
                     *o = from_f32::<i16>(v);
                 }
             },
@@ -538,7 +538,8 @@ fn open_output(name: &str, ring: Arc<Mutex<VecDeque<f32>>>) -> Result<cpal::Stre
         SampleFormat::U16 => device.build_output_stream(
             &config,
             move |d: &mut [u16], _| {
-                for (o, v) in d.iter_mut().zip(fill(d.len() / channels)) {
+                let samples = fill(d.len() / channels);
+                for (o, v) in d.iter_mut().zip(samples) {
                     *o = from_f32::<u16>(v);
                 }
             },

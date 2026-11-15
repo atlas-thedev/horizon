@@ -366,7 +366,8 @@ impl CallStrip {
         let max = (x + w - 20.0 - fx - 10.0).max(60.0);
         let text = c.ellipsize(font::MEDIUM, 12.0, &status.0, max);
         let tw = c.text_width(font::MEDIUM, 12.0, &text);
-        c.text(font::MEDIUM, 12.0, &text, x + w - 20.0 - tw, cy - c.line_height(font::MEDIUM, 12.0) / 2.0, status.1);
+        let lh = c.line_height(font::MEDIUM, 12.0);
+        c.text(font::MEDIUM, 12.0, &text, x + w - 20.0 - tw, cy - lh / 2.0, status.1);
         // a friend's own volume
         let Some(open) = self.open.clone() else { return };
         let Some(m) = members.iter().find(|m| m.user_id == open).cloned() else {
@@ -385,7 +386,8 @@ impl CallStrip {
 fn volume_row(ui: &mut Ui, c: &mut Canvas, m: &Member, x: f32, y: f32, w: f32) {
     let cy = y + 16.0;
     let name = c.ellipsize(font::MEDIUM, 12.0, m.shown(), 120.0);
-    c.text(font::MEDIUM, 12.0, &name, x, cy - c.line_height(font::MEDIUM, 12.0) / 2.0, theme::TEXT_STRONG);
+    let lh = c.line_height(font::MEDIUM, 12.0);
+    c.text(font::MEDIUM, 12.0, &name, x, cy - lh / 2.0, theme::TEXT_STRONG);
     let v = voice::volume(&m.user_id);
     let pct = format!("{:.0}%", v * 100.0);
     let (sx, sw) = (x + 130.0, (w - 130.0 - 50.0).max(40.0));
@@ -400,7 +402,8 @@ fn volume_row(ui: &mut Ui, c: &mut Canvas, m: &Member, x: f32, y: f32, w: f32) {
         voice::set_volume(&m.user_id, snapped);
     }
     let pw = c.text_width(font::SEMIBOLD, 11.5, &pct);
-    c.text(font::SEMIBOLD, 11.5, &pct, x + w - pw, cy - c.line_height(font::SEMIBOLD, 11.5) / 2.0, if v <= 0.0 { theme::DANGER } else { theme::TEXT_SECONDARY });
+    let lh = c.line_height(font::SEMIBOLD, 11.5);
+    c.text(font::SEMIBOLD, 11.5, &pct, x + w - pw, cy - lh / 2.0, if v <= 0.0 { theme::DANGER } else { theme::TEXT_SECONDARY });
 }
 
 // ── the incoming-call card over the game ──────────────────────────────────

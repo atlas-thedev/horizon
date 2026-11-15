@@ -63,8 +63,8 @@ patch(root / 'crates/horizon-client/Cargo.toml',
       '# Native Music: the songs\n'
       'symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "vorbis", "wav", "pcm"] }\n'
       'cpal = "0.16"\n'
-      '# Native Voice: Opus (libopus in pure Rust), WebRTC echo cancellation and noise suppression, AES-GCM\n'
-      'unsafe-libopus = "0.2"\n'
+      '# Native Voice: Opus (pure Rust), WebRTC echo cancellation and noise suppression, AES-GCM\n'
+      'opus-rs = "0.1"\n'
       'sonora = "0.3"\n'
       'aes-gcm = "0.10"\n')
 
