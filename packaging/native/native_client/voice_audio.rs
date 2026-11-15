@@ -861,7 +861,7 @@ mod tests {
         }
         let want = 44_100.0 * 48_000.0 / 44_100.0;
         assert!((out.len() as f64 - want).abs() < 10.0, "{} samples for one second", out.len());
-        assert!(out.iter().all(|v| (v - 0.5).abs() < 1e-4 || *v == 0.0));
+        assert!(out.iter().skip(2).all(|v| (v - 0.5).abs() < 1e-4), "a steady level stays steady");
     }
 
     #[test]

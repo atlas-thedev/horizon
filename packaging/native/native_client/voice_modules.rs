@@ -290,7 +290,7 @@ pub fn call_controls(ui: &mut Ui, c: &mut Canvas, key: &str, right: f32, y: f32)
     if n > 0 {
         c.round(x - 2.0, y - 2.0, size + 4.0, size + 4.0, 9.0, theme::alpha(theme::ONLINE, 0.25));
     }
-    if ui.icon_button(c, "relay:call", x, y, size, if busy { theme::I_LOADER } else { theme::I_PHONE }, Some(&tip)) && !busy {
+    if ui.icon_button(c, "relay:call", x, y, size, if busy { theme::I_LOADER } else { theme::I_PHONE }, Some(tip.as_str())) && !busy {
         voice::join_call(key);
     }
     x
@@ -393,7 +393,7 @@ fn volume_row(ui: &mut Ui, c: &mut Canvas, m: &Member, x: f32, y: f32, w: f32) {
     c.round(sx, cy - 2.0, sw, 4.0, 2.0, 0x33FFFFFF);
     c.round(sx, cy - 2.0, sw * v / 2.0, 4.0, 2.0, theme::ACCENT);
     c.circle(sx + sw * v / 2.0, cy, 6.0, 0xFFFFFFFF);
-    ui.clicked(c, &id, sx - 6.0, cy - 9.0, sw + 12.0, 18.0);
+    let _ = ui.clicked(c, &id, sx - 6.0, cy - 9.0, sw + 12.0, 18.0);
     if ui.is_pressing(&id) {
         let t = ((ui.mx - sx) / sw).clamp(0.0, 1.0);
         let snapped = ((t * 2.0 * 20.0).round() / 20.0).clamp(0.0, 2.0); // steps of 5 %

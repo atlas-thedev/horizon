@@ -187,12 +187,12 @@ fn later(job: impl FnOnce() + Send + 'static) {
 
 fn post(path: &str, body: &Value) -> Result<Value, String> {
     let ticket = super::net::ticket().ok_or("Sign in to Native to use voice.")?;
-    super::net::post_json(&format!("{}{path}", super::net::api()), Some(&ticket), body).map_err(http_text)
+    super::net::post_json(&format!("{}{path}", super::net::api()), Some(ticket.as_str()), body).map_err(http_text)
 }
 
 fn get(path: &str) -> Result<Value, String> {
     let ticket = super::net::ticket().ok_or("Sign in to Native to use voice.")?;
-    super::net::get_json(&format!("{}{path}", super::net::api()), Some(&ticket)).map_err(http_text)
+    super::net::get_json(&format!("{}{path}", super::net::api()), Some(ticket.as_str())).map_err(http_text)
 }
 
 fn http_text(e: super::net::HttpError) -> String {
@@ -898,7 +898,7 @@ fn on_state(p: &Value) {
             let me_left = left.is_some_and(|l| str_of(l, "userId") == me) && reason != "left" && reason != "switched";
             if let Some(c) = s.call.as_mut() {
                 c.members = list.clone();
-                if me_left || call_over(Some(&c.key), &list, me.as_deref(), c.saw_others) {
+                if me_left || call_over(Some(c.key.as_str()), &list, me.as_deref(), c.saw_others) {
                     ended = true;
                 } else if has_others(&list, me.as_deref()) {
                     c.saw_others = true;
