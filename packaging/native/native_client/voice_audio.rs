@@ -802,6 +802,31 @@ mod tests {
     }
 
     #[test]
+    fn the_java_mods_opus_decodes_here() {
+        // a 300 Hz tone encoded by native-mod's Opus (Concentus, the same settings): what a Java player sends
+        let packets = [
+            "7881a824c35581009c0000090802ff12c9b8cab70571ae98c77bad48f41301b9d717128d30bc8a25cdf363e23f7fd08b10ee9c27349c0b79971d306673a812784db330de9cefe138b7512c0b4653bc80dfb4d9fa76d695cf056572c557f8abecd79a88cbe265774db771d93778259df63f9313e4fc1a27b35f",
+            "78c2e324c3549a45ad8aecfed2161dd7fe9efeadcf58e052bf84028d0d450145ed3234e8ff6a21a5c6e0702a52f9bc9e7a8a8b2c09c54745935235aa6159a53efba57aff016de01d2946692aa316375ca38dd86fb23368b685554044909498",
+            "78eb4112d1d618a17c93031a4d68d91d4452cbac38b035e39cc405eb7431a5efab801fde41f0fc5ef9369baee6d3cc4a6fbddadbdd3d98df3386a45c1e96d1ab3584a30f0fcdba338d527e0c1ba4",
+            "78e51b370e7e05f4680a5d647958d2fb67d436289939fe318b2208959a0b5417351e7bfd61a6c9fa3dedb98d7c0fc2bd4181935cc82c10afc204836d7e0b4c046c434ecd7ef99f82e7296959",
+            "78e663970f7cb9b23eb21506675c08ef8521dc56e73136caee00ace8fdbd75c3aa512ba8e5200ecddb13f607409ad99e868f367f28a9d1fb30b17fe4b0fd1ae89bf402edbd35a8530efc69e7aece57",
+            "78e663970f7cb9b23d7f841ce573e7ce8e54e8adf122ddc1f3297b650f808a4d6888079a5b4c84f305d5e2921cc59465bf79ab901a448a103271db8ecabfdcc38944fa86b87a2c232ae2d25c904d7358",
+        ];
+        let unhex = |s: &str| (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect::<Vec<u8>>();
+        let mut d = Decoder::new().unwrap();
+        let mut pcm = [0i16; FRAME];
+        for (i, p) in packets.iter().enumerate() {
+            assert!(d.decode(Some(&unhex(p)), false, &mut pcm), "packet {i} decodes");
+            if i >= 2 {
+                let level = rms(&pcm);
+                assert!(level > 0.08 && level < 0.3, "frame {i} at the tone's level: {level}");
+                let crossings = pcm.windows(2).filter(|w| (w[0] < 0) != (w[1] < 0)).count();
+                assert!((9..=15).contains(&crossings), "frame {i} is the 300 Hz tone: {crossings} zero crossings");
+            }
+        }
+    }
+
+    #[test]
     fn opus_carries_a_voice_through() {
         let mut enc = Encoder::new().expect("encoder");
         let mut packet = [0u8; 1275];
