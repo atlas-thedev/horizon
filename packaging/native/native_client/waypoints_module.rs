@@ -15,7 +15,7 @@ use std::sync::Mutex;
 
 pub const ID: &str = "waypoints";
 /// GLFW N.
-pub const KEY_N: i32 = 78;
+pub const KEY_J: i32 = 74;
 const HOLD_MS: f64 = 400.0;
 pub const LOOK_RANGE: f64 = 128.0;
 const NOTICE_MS: f64 = 2600.0;
@@ -29,7 +29,7 @@ pub fn all() -> Vec<Module> {
         theme::I_MAP_PIN,
         true,
         vec![
-            Setting::key("add", "Add waypoint (hold: where you look)", KEY_N),
+            Setting::key("add", "Add waypoint (hold: where you look)", KEY_J),
             Setting::num("size", "Marker size", 100.0, 60.0, 160.0, 10.0, "%"),
             Setting::num("range", "Show up to", 10000.0, 100.0, 10000.0, 100.0, " m"),
             Setting::bool("beam", "Light beam", true),
@@ -51,7 +51,7 @@ pub fn wants_look(modules: &super::modules::Modules, held: &HashSet<i32>) -> boo
         .is_some_and(|s| s.as_key() >= 0 && held.contains(&s.as_key()))
 }
 
-static ADD_KEY: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(KEY_N);
+static ADD_KEY: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(KEY_J);
 
 /// The add key's code, for the page's hint.
 pub fn add_key() -> i32 {

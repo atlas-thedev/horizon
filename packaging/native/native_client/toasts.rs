@@ -28,7 +28,7 @@ impl Toasts {
     }
 
     pub fn active(&self) -> bool {
-        !self.shown.is_empty()
+        !self.shown.is_empty() || super::voice_modules::card_height() > 0.0
     }
 
     /// Takes the new notices (dropping them when the player turned pop-ups off).
@@ -45,12 +45,18 @@ impl Toasts {
     }
 
     pub fn draw(&mut self, c: &mut Canvas, relay_key: &str, now: i64) {
-        if self.shown.is_empty() {
-            return;
-        }
         let (w, h, gap) = (290.0f32, 66.0f32, 8.0f32);
         let x = c.width() - w - 14.0;
         let mut y = 14.0f32;
+        // an incoming call (or the one you are making) sits on top of the message cards
+        let card = super::voice_modules::card_height();
+        if card > 0.0 {
+            super::voice_modules::draw_card(c, x, y, w, now);
+            y += card;
+        }
+        if self.shown.is_empty() {
+            return;
+        }
         let hint = format!("Press {relay_key} to open chat");
         for (i, (n, born)) in self.shown.iter().enumerate() {
             let age = (now - born) as f32;

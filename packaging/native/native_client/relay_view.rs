@@ -72,6 +72,8 @@ pub struct RelayView {
     pub(super) nick: TextField,
     pub(super) row_typing: bool,
     pub(super) row_pinned: bool,
+    /// The call strip under a chat's header (whose volume is open).
+    pub(super) call_strip: super::voice_modules::CallStrip,
     pub(super) row_dot: u32,
     pub(super) row_check: u8,
     pub(super) row_time: String,
@@ -172,6 +174,7 @@ impl RelayView {
             nick: TextField::new("relay:nick"),
             row_typing: false,
             row_pinned: false,
+            call_strip: super::voice_modules::CallStrip::default(),
             row_dot: 0,
             row_check: 0,
             row_time: String::new(),

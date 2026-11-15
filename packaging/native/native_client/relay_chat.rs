@@ -216,6 +216,9 @@ impl RelayView {
         {
             self.profile_open = !self.profile_open;
         }
+        // Voice: call / join (or accept / decline while it rings), and mute / deafen / leave in a call.
+        let calls_right = x + w - 46.0 - 38.0 * if sel.starts_with("dm:") { 2.0 } else { 1.0 } + 32.0;
+        let calls_left = super::voice_modules::call_controls(ui, c, &sel, calls_right, y + 14.0);
         let api = net::api();
         let conv = relay::conversation(&sel);
         let group = conv.is_group();
@@ -234,7 +237,7 @@ impl RelayView {
         } else {
             avatars::draw(c, friend.and_then(|f| f.skin.as_deref()), hx, hy, 36.0, 10.0);
         }
-        let name_w = (x + w - 46.0 - 38.0 * if group { 1.0 } else { 2.0 } - 10.0 - (hx + 48.0)).max(60.0);
+        let name_w = (calls_left - 10.0 - (hx + 48.0)).max(60.0);
         let shown = c.ellipsize(font::SEMIBOLD, 15.0, &name, name_w);
         c.text(font::SEMIBOLD, 15.0, &shown, hx + 48.0, hy, theme::TEXT_STRONG);
         let (status, status_color) = if group {
@@ -247,12 +250,15 @@ impl RelayView {
         let status = c.ellipsize(font::REGULAR, 11.5, &status, name_w);
         c.text(font::REGULAR, 11.5, &status, hx + 48.0, hy + 20.0, status_color);
         c.fill(x, y + 64.0, w, 1.0, theme::HAIRLINE);
+        // The call strip: who is in this chat's call, the timer, the ping (and a friend's volume).
+        let strip_h = self.call_strip.height(&sel);
+        self.call_strip.draw(ui, c, &sel, x, y + 65.0, w);
 
         // Messages.
         let input_h = 46.0;
         let bar_h = if self.reply_to.is_some() || self.editing_id.is_some() { 36.0 } else { 0.0 };
-        let my0 = y + 65.0;
-        let mh = h - 65.0 - input_h - 34.0 - bar_h;
+        let my0 = y + 65.0 + strip_h;
+        let mh = h - 65.0 - strip_h - input_h - 34.0 - bar_h;
         let mut sc = self.chat_scrolls.remove(&sel).unwrap_or_else(|| {
             let mut s = Scroll::new(&format!("relay-chat:{sel}"));
             s.stick_bottom = true;

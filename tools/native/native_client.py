@@ -54,14 +54,19 @@ if 'realm: bool,' in (CLIENT / 'title.rs').read_text(encoding='utf-8'):
         text = text.replace(old, old[:-2] + ', realm: false }')
     menu.write_text(text, encoding='utf-8')
 
-# Native Music decodes songs with symphonia and plays them through cpal. The lock file learns the new
-# packages when the build resolves them, so the builds run without --locked.
+# Native Music decodes songs with symphonia and plays them through cpal; Native Voice adds Opus, WebRTC's audio
+# processing and AES-GCM. The lock file learns the new packages when the build resolves them, so the builds run
+# without --locked.
 patch(root / 'crates/horizon-client/Cargo.toml',
       'log = "0.4"\n',
       'log = "0.4"\n'
       '# Native Music: the songs\n'
       'symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "vorbis", "wav", "pcm"] }\n'
-      'cpal = "0.16"\n')
+      'cpal = "0.16"\n'
+      '# Native Voice: Opus (libopus in pure Rust), WebRTC echo cancellation and noise suppression, AES-GCM\n'
+      'unsafe-libopus = "0.2"\n'
+      'sonora = "0.3"\n'
+      'aes-gcm = "0.10"\n')
 
 GAME = CLIENT / 'game.rs'
 patch(GAME, 'mod cosmetics;\n', 'mod cosmetics;\nmod native_client;\n')

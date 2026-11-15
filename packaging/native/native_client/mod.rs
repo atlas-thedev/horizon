@@ -54,6 +54,10 @@ mod title_view;
 mod toasts;
 mod ui;
 mod uiconfig;
+mod voice;
+mod voice_audio;
+mod voice_modules;
+mod voice_net;
 mod wardrobe;
 mod widgets;
 
@@ -195,6 +199,35 @@ fn game_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("NATIVE_GAME_DIR")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
+}
+
+/// A voice key pressed in the world: true when it did something (answer, decline, cancel, mute, deafen).
+fn voice_key(glfw: i32) -> bool {
+    const V: i32 = 86;
+    const N: i32 = 78;
+    if let Some(ring) = voice::incoming() {
+        if glfw == V {
+            voice::accept(&ring.key);
+            return true;
+        }
+        if glfw == N {
+            voice::decline(&ring.key);
+            return true;
+        }
+    } else if glfw == N && voice::calling().is_some() {
+        voice::leave_call();
+        return true;
+    }
+    let (mute, deafen) = with_state(|s| voice_modules::keys(&s.modules));
+    if glfw == mute {
+        voice::toggle_mute();
+        return true;
+    }
+    if glfw == deafen {
+        voice::toggle_deafen();
+        return true;
+    }
+    false
 }
 
 /// The Music page's keys: play / pause, next, previous. True when `key` is one of them.
@@ -372,6 +405,14 @@ impl Game<'_> {
             }
             let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
             let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
+            // a call accepted or started while Voice Chat was off switches it on (the keep-alive, push to talk)
+            if voice::take_enable_request()
+                && let Some(m) = state.modules.get_mut("voice")
+                && !m.state.enabled
+            {
+                m.set_enabled(true);
+                state.modules.changed();
+            }
             for m in &mut state.modules.all {
                 if m.state.enabled {
                     m.behaviour.frame(&m.state, &g);
@@ -382,7 +423,7 @@ impl Game<'_> {
                 state.cfg.music_volume,
                 state.cfg.music_shuffle,
                 music::Repeat::from_index(state.cfg.music_repeat),
-                1.0,
+                if state.cfg.music_duck && voice::in_any_call() { 0.3 } else { 1.0 },
             );
             let discord_off = state.modules.get("discord-rpc").is_some_and(|m| !m.state.enabled);
             native_ui::tweaks::set(|t| t.discord_off = discord_off);
@@ -600,6 +641,19 @@ impl Game<'_> {
             && self.screen == Screen::Playing
             && let Some(glfw) = keys::glfw(code)
             && with_state(|s| music_key(&s.cfg, glfw))
+        {
+            return true;
+        }
+        // Calls from the world: V answers, N declines (or cancels the call you are making); Voice Chat's mute and
+        // deafen keys.
+        if let WindowEvent::KeyboardInput { event: key, .. } = event
+            && key.state == ElementState::Pressed
+            && !key.repeat
+            && let PhysicalKey::Code(code) = key.physical_key
+            && self.screen == Screen::Playing
+            && self.title.is_none()
+            && let Some(glfw) = keys::glfw(code)
+            && voice_key(glfw)
         {
             return true;
         }

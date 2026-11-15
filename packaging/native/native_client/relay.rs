@@ -477,6 +477,21 @@ pub fn take_notices() -> Vec<Notice> {
     lock().notices.drain(..).collect()
 }
 
+/// A card from another part of Native (voice: missed call, declined, call ended).
+pub fn push_notice(n: Notice) {
+    lock().notices.push_back(n);
+}
+
+/// The signed-in Native account's id, without copying the whole snapshot.
+pub fn me_id() -> Option<String> {
+    lock().me_id.clone()
+}
+
+/// The signed-in account's skin reference (a texture hash, or "mj:<uuid>").
+pub fn me_skin() -> Option<String> {
+    lock().me_skin.clone()
+}
+
 pub fn set_viewing(key: Option<&str>) {
     lock().viewing = key.map(str::to_owned);
 }
@@ -1645,6 +1660,7 @@ fn handle(kind: &str, p: &Value) {
         "hello" => {
             lock().link = Link::Online;
             refresh();
+            super::voice::refresh_calls();
             let reopen: Vec<String> = {
                 let s = lock();
                 s.conversations.values().filter(|c| c.loaded && s.viewing.as_deref() == Some(c.key.as_str())).map(|c| c.key.clone()).collect()
@@ -1654,6 +1670,7 @@ fn handle(kind: &str, p: &Value) {
             }
         }
         // Nearby players' emotes, pushed live so they start without waiting for a poll.
+        "voice:state" | "voice:ring" | "voice:ring-end" | "voice:declined" | "voice:ended" => super::voice::on_event(kind, p),
         "emote:play" => horizon_client::native_emotes::pushed_play(p),
         "emote:stop" => horizon_client::native_emotes::pushed_stop(p),
         "presence" => {

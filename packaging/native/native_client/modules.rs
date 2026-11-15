@@ -7,6 +7,9 @@ use serde_json::{Map, Value};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// Saved once the keys moved off clashes (see `Modules::migrate_keys`); native-mod writes the same marker.
+const KEYS_V2: &str = "keysV2";
+
 pub struct Modules {
     pub all: Vec<Module>,
     file: Option<PathBuf>,
@@ -27,6 +30,7 @@ impl Modules {
         all.extend(super::overlay_modules::all());
         all.extend(super::discord_module::all());
         all.extend(super::music_modules::all());
+        all.extend(super::voice_modules::all());
         all.extend(super::waypoints_module::all());
         all.extend(super::emotes_module::all(super::uiconfig::UiConfig::load(game_dir.as_deref()).emote_key));
         // The order the Java mod registers them in: it is the order of the menu's grid.
@@ -112,6 +116,7 @@ impl Modules {
                 return;
             }
         };
+        let keys_v2 = root.get(KEYS_V2).is_some();
         for m in &mut self.all {
             let Some(o) = root.get(m.state.id).filter(|o| o.is_object()) else {
                 continue;
@@ -140,6 +145,22 @@ impl Modules {
                 }
             }
         }
+        if !keys_v2 {
+            self.migrate_keys();
+            self.changed();
+        }
+    }
+
+    /// Configurations from before the keys moved off clashes (adding a waypoint was N, also "decline the call"; push to
+    /// talk was B, also the emote wheel): the old defaults become J and Z, once. The Java mod reads the same marker.
+    fn migrate_keys(&mut self) {
+        for (module, setting, from, to) in [("waypoints", "add", 78, 74), ("voice", "ptt", 66, 90)] {
+            if let Some(s) = self.get_mut(module).and_then(|m| m.state.settings.iter_mut().find(|s| s.id == setting))
+                && s.as_key() == from
+            {
+                s.set_key(to);
+            }
+        }
     }
 
     pub fn save(&mut self) {
@@ -160,6 +181,7 @@ impl Modules {
             o.insert("settings".into(), Value::Object(settings));
             root.insert(m.state.id.to_owned(), Value::Object(o));
         }
+        root.insert(KEYS_V2.to_owned(), Value::Bool(true));
         let text = serde_json::to_string_pretty(&Value::Object(root)).unwrap_or_default();
         let write = || -> std::io::Result<()> {
             std::fs::create_dir_all(file.parent().unwrap_or(file))?;
