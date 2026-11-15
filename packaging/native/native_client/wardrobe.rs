@@ -9,8 +9,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-pub const SLOTS: [&str; 8] = ["capes", "hats", "glasses", "back", "shoes", "hand", "auras", "balloons"];
-pub const SLOT_NAMES: [&str; 8] = ["Capes", "Hats", "Glasses", "Backs", "Shoes", "Hand Items", "Auras", "Balloons"];
+/// (no glasses: the store stopped selling them on 2026-11-14)
+pub const SLOTS: [&str; 7] = ["capes", "hats", "back", "shoes", "hand", "auras", "balloons"];
+pub const SLOT_NAMES: [&str; 7] = ["Capes", "Hats", "Backs", "Shoes", "Hand Items", "Auras", "Balloons"];
 const BACK: &str = "back";
 const CAPES: &str = "capes";
 

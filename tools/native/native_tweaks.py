@@ -402,4 +402,95 @@ if 'fn native_finish(' not in text:
     text += '\n' + (pathlib.Path(sys.argv[2]).resolve() / 'packaging/native/native_world_blur.rs').read_text(encoding='utf-8')
     POST.write_text(text, encoding='utf-8')
 
+# Resource-pack armour (a server pack's custom armour, a pack's own `<namespace>:equipment/<name>.json`): Java's
+# EquipmentAssetManager reads the equipment assets of EVERY namespace and reloads them with the packs. Upstream reads
+# only `minecraft` and the content mods' namespaces, at startup only, and packs only those namespaces' entity textures,
+# so armour from a pack namespace was invisible on the body (its icon in the slot still showed).
+patch(CLIENT / 'game/armor_stands.rs',
+      '        let namespaces = std::iter::once("minecraft".to_owned())\n'
+      '            .chain(horizon_client::mod_content::namespaces(root));\n',
+      '        // Native: every namespace of the root, the resource packs\' own too (a server pack\'s armour).\n'
+      '        let namespaces = std::iter::once("minecraft".to_owned()).chain(\n'
+      '            std::fs::read_dir(root.join("assets"))\n'
+      '                .into_iter()\n'
+      '                .flatten()\n'
+      '                .flatten()\n'
+      '                .filter_map(|e| e.file_name().into_string().ok())\n'
+      '                .filter(|n| n != "minecraft"),\n'
+      '        );\n')
+patch(CLIENT / 'game/armor_stands.rs',
+      '        let fresh = Self::load(root, None);\n'
+      '        self.trim_overrides = fresh.trim_overrides;\n',
+      '        let fresh = Self::load(root, None);\n'
+      '        // Native: the packs\' equipment assets change with the packs, like the trims.\n'
+      '        self.equipment = fresh.equipment;\n'
+      '        self.trim_overrides = fresh.trim_overrides;\n')
+patch(RENDER / 'hud.rs',
+      '        let assets = root.join("assets");\n'
+      '        // A native mod\'s particle type names its textures `<ns>:particle/<path>`\n',
+      '        // Native: every namespace\'s armour layers (`<ns>:entity/equipment/...`), which a resource pack\'s\n'
+      '        // equipment assets name; the content mods\' are packed above with all their entity textures.\n'
+      '        if folders.contains(&"entity")\n'
+      '            && let Ok(all) = fs::read_dir(root.join("assets"))\n'
+      '        {\n'
+      '            for ns in all.flatten() {\n'
+      '                let name = ns.file_name().to_string_lossy().into_owned();\n'
+      '                if name != "minecraft" && !namespaces.contains(&name) {\n'
+      '                    walk(&ns.path().join("textures/entity/equipment"), &mut files);\n'
+      '                }\n'
+      '            }\n'
+      '        }\n'
+      '        let assets = root.join("assets");\n'
+      '        // A native mod\'s particle type names its textures `<ns>:particle/<path>`\n')
+# Their tests: upstream's one that wanted pack namespaces unread now wants them read (when it is still there).
+LOADING_TESTS = CLIENT / 'game/entity_model_loading_tests.rs'
+UNREAD = ('    // Not a content root: other namespaces stay unread, as before.\n'
+          '    assert!(ArmorStandAssets::load(&root.0, None).equipment.is_empty());\n')
+if LOADING_TESTS.is_file():
+    text = LOADING_TESTS.read_text(encoding='utf-8')
+    if UNREAD in text:
+        text = text.replace(UNREAD, '    // Native: like Java\'s EquipmentAssetManager, every namespace is read, content root or not.\n'
+                                    '    assert!(ArmorStandAssets::load(&root.0, None).equipment.contains_key("gems:ruby"));\n')
+    if 'fn native_resource_pack_equipment_loads_and_reloads(' not in text:
+        text += '''
+#[test]
+fn native_resource_pack_equipment_loads_and_reloads() {
+    let root = FixtureRoot::new();
+    let equipment = root.0.join("assets/kimo/equipment");
+    fs::create_dir_all(&equipment).unwrap();
+    let frost = json!({"layers": {"humanoid": [{"texture": "kimo:frost"}]}});
+    fs::write(equipment.join("frost.json"), serde_json::to_vec(&frost).unwrap()).unwrap();
+    let mut assets = ArmorStandAssets::load(&root.0, None);
+    assert_eq!(
+        assets.equipment["kimo:frost"]["humanoid"],
+        vec![("kimo:entity/equipment/humanoid/frost".into(), None)]
+    );
+    // a server pack applied later: its armour is there after the reload
+    fs::write(equipment.join("ember.json"), serde_json::to_vec(&frost).unwrap()).unwrap();
+    assets.reload_trims(&root.0);
+    assert!(assets.equipment.contains_key("kimo:ember"));
+}
+'''
+    LOADING_TESTS.write_text(text, encoding='utf-8')
+patch(RENDER / 'hud.rs',
+      '    /// A pack\'s particle sprite of any size packs whole, as vanilla\'s particle atlas stitches\n',
+      '    #[test]\n'
+      '    fn native_resource_pack_armour_packs_under_its_namespace() {\n'
+      '        let root = std::env::temp_dir().join(format!("horizon-atlas-pack-armour-{}", std::process::id()));\n'
+      '        let _ = fs::remove_dir_all(&root);\n'
+      '        let equipment = root.join("assets/kimo/textures/entity/equipment/humanoid");\n'
+      '        fs::create_dir_all(&equipment).unwrap();\n'
+      '        write_strip(&equipment.join("frost.png"), 64, 32, &[[0, 120, 200, 255]], None);\n'
+      '        let other = root.join("assets/kimo/textures/entity/creeper");\n'
+      '        fs::create_dir_all(&other).unwrap();\n'
+      '        write_strip(&other.join("big.png"), 64, 32, &[[9, 9, 9, 255]], None);\n'
+      '        let atlas = HudAtlas::build(&root).unwrap();\n'
+      '        let rect = atlas.sprites["kimo:entity/equipment/humanoid/frost"];\n'
+      '        assert_eq!(texel_at(&atlas, rect, 0, 0), [0, 120, 200, 255]);\n'
+      '        // only the armour layers of a namespace that is not a content mod\'s\n'
+      '        assert!(!atlas.sprites.contains_key("kimo:entity/creeper/big"));\n'
+      '        fs::remove_dir_all(&root).unwrap();\n'
+      '    }\n'
+      '    /// A pack\'s particle sprite of any size packs whole, as vanilla\'s particle atlas stitches\n')
+
 print('native_tweaks: Native Client engine hooks applied')

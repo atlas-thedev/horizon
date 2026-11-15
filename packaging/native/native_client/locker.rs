@@ -12,7 +12,7 @@ use horizon_client::native_ui::{Canvas, font, theme};
 
 /// One per wardrobe slot, for item cards without a picture; `BALLOON_ICON` is drawn by hand (the icon font has no balloon).
 const BALLOON_ICON: u32 = 0;
-const SLOT_ICONS: [u32; 8] = [theme::I_LAYERS, theme::I_HAT, theme::I_GLASSES, theme::I_BACKPACK, theme::I_FOOTPRINTS, theme::I_HAND, theme::I_SPARKLES, BALLOON_ICON];
+const SLOT_ICONS: [u32; 7] = [theme::I_LAYERS, theme::I_HAT, theme::I_BACKPACK, theme::I_FOOTPRINTS, theme::I_HAND, theme::I_SPARKLES, BALLOON_ICON];
 
 /// A slot's icon; the balloon is a round balloon, its knot and a wavy string.
 fn slot_icon(c: &mut Canvas, icon: u32, size: f32, cx: f32, cy: f32, color: u32) {
@@ -48,7 +48,7 @@ impl Default for Locker {
 }
 
 fn singular(slot: usize) -> &'static str {
-    ["cape", "hat", "glasses", "back item", "shoes", "hand item", "aura", "balloon"][slot]
+    ["cape", "hat", "back item", "shoes", "hand item", "aura", "balloon"][slot]
 }
 
 impl Locker {

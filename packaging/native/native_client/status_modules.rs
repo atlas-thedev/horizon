@@ -356,7 +356,7 @@ fn armor() -> Module {
         Module::hud(
             "armor",
             "Armor Stats",
-            "Displays your equipped armor pieces and their durability bars.",
+            "Displays your equipped armor pieces, their durability bars and, if you like, their durability as numbers.",
             theme::I_SHIELD,
             false,
             0.0,
@@ -365,6 +365,10 @@ fn armor() -> Module {
                 Setting::choice("layout", "Orientation", 0, &["Vertical", "Horizontal"]).shorts(&["Vertical", "Horizontal"]),
                 Setting::bool("durability", "Show durability", true).fixed(),
                 Setting::bool("empty", "Show empty slots", false).fixed(),
+                // the durability as text beside (vertical) or under (horizontal) each piece
+                Setting::choice("numbers", "Durability numbers", 0, &["Off", "Left", "Left / Max", "Percent"])
+                    .shorts(&["Off", "Left", "L / Max", "%"]),
+                Setting::bool("numcolour", "Colour numbers by durability", true),
             ],
             Box::new(Framed(Armor)),
         ),
@@ -373,6 +377,27 @@ fn armor() -> Module {
 }
 
 struct Armor;
+
+/// A piece's durability as the "Durability numbers" setting shows it; empty without durability.
+fn armor_number(mode: usize, sl: &StackView) -> String {
+    if sl.max == 0 {
+        return String::new();
+    }
+    let left = sl.max.saturating_sub(sl.damage);
+    match mode {
+        1 => left.to_string(),
+        2 => format!("{left}/{}", sl.max),
+        3 => format!("{}%", (sl.durability() * 100.0).round() as u32),
+        _ => String::new(),
+    }
+}
+
+/// Vanilla's durability bar colour (`ItemStack.getBarColor`): the hue from red to green with what is left.
+fn bar_color(left: f32) -> u32 {
+    let h6 = left.clamp(0.0, 1.0) * 2.0; // hue / 60 degrees, 0 (red) to 2 (green)
+    let (r, g) = if h6 < 1.0 { (1.0, h6) } else { (2.0 - h6, 1.0) };
+    0xFF00_0000 | ((r * 255.0).round() as u32) << 16 | ((g * 255.0).round() as u32) << 8
+}
 
 impl Boxed for Armor {
     fn visible(&self, m: &ModuleState, g: &GameView) -> bool {
@@ -393,10 +418,29 @@ impl Boxed for Armor {
             return [1.0, 1.0];
         }
         let vertical = m.choice("layout") == 0;
+        // The numbers: beside each piece in a column, under each piece in a row.
+        let mode = m.choice("numbers");
+        let ts = 0.8 * s;
+        let text_gap = 4.0 * s;
+        let numbers: Vec<String> =
+            g.vitals.armor.iter().map(|a| a.as_ref().map_or_else(String::new, |a| armor_number(mode, a))).collect();
+        let num_w = match m.hud.as_ref() {
+            Some(hud) => numbers.iter().map(|t| if t.is_empty() { 0.0 } else { hud.text_w(c, ts, t) }).fold(0.0, f32::max),
+            None => 0.0,
+        };
+        let show_numbers = num_w > 0.0;
+        let num_h = if show_numbers { m.hud.as_ref().map_or(0.0, |hud| hud.line_h(c, ts)) } else { 0.0 };
+        let cell = if vertical { item_size } else { item_size.max(num_w) };
         let (w, h) = if vertical {
-            (item_size + pad * 2.0, visible as f32 * slot_h + (visible - 1) as f32 * spacing + pad * 2.0)
+            (
+                item_size + if show_numbers { text_gap + num_w } else { 0.0 } + pad * 2.0,
+                visible as f32 * slot_h + (visible - 1) as f32 * spacing + pad * 2.0,
+            )
         } else {
-            (visible as f32 * item_size + (visible - 1) as f32 * spacing + pad * 2.0, slot_h + pad * 2.0)
+            (
+                visible as f32 * cell + (visible - 1) as f32 * spacing + pad * 2.0,
+                slot_h + if show_numbers { 2.0 * s + num_h } else { 0.0 } + pad * 2.0,
+            )
         };
         if draw {
             const EMPTY_ITEMS: [&str; 4] = ["leather_helmet", "leather_chestplate", "leather_leggings", "leather_boots"];
@@ -405,17 +449,30 @@ impl Boxed for Armor {
                 if sl.is_none() && !show_empty {
                     continue;
                 }
-                let ix = if vertical { x + pad } else { x + pad + ox };
+                let ix = if vertical { x + pad } else { x + pad + ox + (cell - item_size) / 2.0 };
                 let iy = if vertical { y + pad + oy } else { y + pad };
                 if let Some(sl) = sl {
                     slot_item(c, sl, ix, iy, item_size, false, durability);
+                    let num = &numbers[i];
+                    if show_numbers
+                        && !num.is_empty()
+                        && let Some(hud) = m.hud.as_ref()
+                    {
+                        let tc = if m.bool("numcolour") { bar_color(sl.durability()) } else { hud.color() };
+                        if vertical {
+                            hud.text(c, ts, num, ix + item_size + text_gap, iy + (item_size - num_h) / 2.0, tc);
+                        } else {
+                            let tw = hud.text_w(c, ts, num);
+                            hud.text(c, ts, num, x + pad + ox + (cell - tw) / 2.0, iy + item_size + 2.0 * s, tc);
+                        }
+                    }
                 } else {
                     c.host(HOST_ITEM_ID, item_key(EMPTY_ITEMS[i]), ix, iy, item_size, 0x88FFFFFF);
                 }
                 if vertical {
                     oy += slot_h + spacing;
                 } else {
-                    ox += item_size + spacing;
+                    ox += cell + spacing;
                 }
             }
         }
@@ -574,5 +631,23 @@ mod tests {
         let view = Effects::collect(m, &g);
         assert_eq!(view[0].id, "regeneration");
         assert_eq!(view.len(), 5);
+    }
+}
+
+#[cfg(test)]
+mod native_armor_number_tests {
+    use super::*;
+
+    #[test]
+    fn native_armor_numbers() {
+        let sl = StackView { id: "diamond_helmet".into(), count: 1, damage: 53, max: 363, key: 0 };
+        assert_eq!(armor_number(0, &sl), "");
+        assert_eq!(armor_number(1, &sl), "310");
+        assert_eq!(armor_number(2, &sl), "310/363");
+        assert_eq!(armor_number(3, &sl), "85%");
+        let head = StackView { id: "carved_pumpkin".into(), count: 1, damage: 0, max: 0, key: 0 };
+        assert_eq!(armor_number(2, &head), "");
+        assert_eq!(bar_color(1.0), 0xFF00FF00);
+        assert_eq!(bar_color(0.0), 0xFFFF0000);
     }
 }
