@@ -114,6 +114,7 @@ pub struct Ring {
 pub struct Settings {
     pub push_to_talk: bool,
     pub ptt_held: bool,
+    pub ptt_key: String,
     pub threshold_db: f32,
     pub mic_gain: f32,
     pub out_volume: f32,
@@ -128,6 +129,7 @@ impl Default for Settings {
         Settings {
             push_to_talk: false,
             ptt_held: false,
+            ptt_key: String::new(),
             threshold_db: -42.0,
             mic_gain: 1.0,
             out_volume: 1.0,
@@ -462,6 +464,12 @@ pub fn configure(settings: Settings) {
     }
 }
 
+/// Push to talk key label when push to talk is enabled and bound.
+pub fn push_to_talk_key() -> Option<String> {
+    let s = lock();
+    (s.settings.push_to_talk && !s.settings.ptt_key.is_empty()).then(|| s.settings.ptt_key.clone())
+}
+
 /// True once after a call was accepted or started while the Voice Chat module was off: switch it on.
 pub fn take_enable_request() -> bool {
     std::mem::take(&mut lock().enable_module)
@@ -469,17 +477,26 @@ pub fn take_enable_request() -> bool {
 
 // ── for the audio engine and the socket ───────────────────────────────────
 
+/// True when a local call is an outgoing private call still waiting for the other player to answer.
+pub fn is_ring_outgoing(key: &str, carry_on: bool, members: &[Member], me: Option<&str>, has_incoming: bool) -> bool {
+    !has_incoming && key.starts_with("dm:") && !carry_on && !has_others(members, me)
+}
+
 /// What the audio engine should run right now.
 pub fn wants() -> audio::Wants {
+    let me_id = me();
     let mut s = lock();
     let t = now();
     s.incoming.retain(|_, r| t <= r.until);
     let in_call = s.call.is_some();
+    let ring = !s.incoming.is_empty();
+    let ring_outgoing = s.call.as_ref().is_some_and(|r| is_ring_outgoing(&r.key, r.carry_on, &r.members, me_id.as_deref(), ring));
     let st = &s.settings;
     audio::Wants {
         mic: in_call && !s.muted && !s.deafened || t < s.mic_test_until,
         speakers: in_call,
-        ring: !s.incoming.is_empty(),
+        ring,
+        ring_outgoing,
         mic_device: st.mic_device.clone(),
         out_device: st.out_device.clone(),
         mic_gain: st.mic_gain,
@@ -1039,5 +1056,15 @@ mod tests {
         assert_eq!(m.sid, 3_000_000_000, "sids are unsigned 32-bit");
         assert_eq!(m.shown(), "BobMC");
         assert!(m.muted && m.connected && !m.deafened);
+    }
+
+    #[test]
+    fn outgoing_ringback_only_runs_while_waiting_in_private_call() {
+        let me = Some("me");
+        assert!(is_ring_outgoing("dm:bob", false, &roster(&["me"]), me, false));
+        assert!(!is_ring_outgoing("dm:bob", false, &roster(&["me", "bob"]), me, false), "answered");
+        assert!(!is_ring_outgoing("dm:bob", true, &roster(&["me"]), me, false), "resumed carry_on");
+        assert!(!is_ring_outgoing("dm:bob", false, &roster(&["me"]), me, true), "incoming call takes priority");
+        assert!(!is_ring_outgoing("g:squad", false, &roster(&["me"]), me, false), "group calls don't ring out");
     }
 }

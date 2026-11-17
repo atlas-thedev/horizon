@@ -71,6 +71,7 @@ impl module::Behaviour for VoiceChat {
             push_to_talk: m.choice("mode") == PTT,
             // in a call the key also works while a screen (Relay chat, menus) is open: you are not in the world then
             ptt_held: (g.playing || voice::in_any_call()) && ptt >= 0 && g.keys_down.contains(&ptt),
+            ptt_key: if ptt >= 0 { super::keys::name(ptt) } else { String::new() },
             threshold_db: m.num("threshold"),
             mic_gain: m.num("mic") / 100.0,
             out_volume: m.num("volume") / 100.0,
@@ -222,6 +223,9 @@ impl module::Behaviour for VoiceOverlay {
             let fx = if horizontal { x + pad + i as f32 * (face + gap) } else { x + pad };
             let fy = if horizontal { y + pad } else { y + pad + i as f32 * (face + gap) };
             let (cx, cy) = (fx + face / 2.0, fy + face / 2.0);
+            if r.speaking {
+                c.circle(cx, cy, face / 2.0 + 4.5 * s, theme::alpha(theme::ONLINE, 0.22));
+            }
             c.circle(cx, cy, face / 2.0 + 2.0 * s, if r.speaking { theme::ONLINE } else { 0x40FFFFFF });
             c.circle(cx, cy, face / 2.0 + 0.5 * s, 0xFF08090C);
             avatars::draw_round(c, r.skin.as_deref(), fx, fy, face);
@@ -240,7 +244,23 @@ impl module::Behaviour for VoiceOverlay {
     }
 }
 
-// ── Relay: the call buttons and the call strip ────────────────────────────
+// ── Relay: the call buttons and the call stage ────────────────────────────
+
+/// Header icon button; with a tint it is a filled pill (green join/accept, red leave/decline/muted).
+fn voice_button(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, icon: u32, tip: &str, tint: u32) -> bool {
+    let size = 32.0;
+    if tint == 0 {
+        return ui.icon_button(c, id, x, y, size, icon, Some(tip));
+    }
+    let over = ui.hover(c, x, y, size, size);
+    let click = ui.clicked(c, id, x, y, size, size);
+    c.round(x, y, size, size, 8.0, if over { theme::mix(tint, 0xFFFFFFFF, 0.15) } else { tint });
+    c.icon(icon, 16.0, x + 16.0, y + 16.0, 0xFFFFFFFF);
+    if over {
+        ui.tip(tip);
+    }
+    click
+}
 
 /// Call / mute / deafen / leave (or accept / decline while it rings) in a chat header, right to left from `right`.
 /// Returns the left edge.
@@ -248,7 +268,7 @@ pub fn call_controls(ui: &mut Ui, c: &mut Canvas, key: &str, right: f32, y: f32)
     let size = 32.0;
     let mut x = right - size;
     if voice::ringing(key).is_some() && !voice::in_call(key) {
-        if ui.icon_button(c, "relay:call-decline", x, y, size, theme::I_PHONE_OFF, Some("Decline")) {
+        if voice_button(ui, c, "relay:call-decline", x, y, theme::I_PHONE_OFF, "Decline", theme::DANGER) {
             voice::decline(key);
         }
         x -= size + 6.0;
@@ -257,23 +277,23 @@ pub fn call_controls(ui: &mut Ui, c: &mut Canvas, key: &str, right: f32, y: f32)
             let ph = ((ui.now / 1100.0 + f64::from(k) / 2.0) % 1.0) as f32;
             c.round(x - ph * 7.0, y - ph * 7.0, size + ph * 14.0, size + ph * 14.0, 8.0 + ph * 7.0, theme::alpha(theme::ONLINE, 0.35 * (1.0 - ph)));
         }
-        if ui.icon_button(c, "relay:call-accept", x, y, size, theme::I_PHONE, Some("Accept")) {
+        if voice_button(ui, c, "relay:call-accept", x, y, theme::I_PHONE, "Accept", theme::ONLINE) {
             voice::accept(key);
         }
         return x;
     }
     if voice::in_call(key) {
-        if ui.icon_button(c, "relay:call-leave", x, y, size, theme::I_PHONE_OFF, Some("Leave call")) {
+        if voice_button(ui, c, "relay:call-leave", x, y, theme::I_PHONE_OFF, "Leave call", theme::DANGER) {
             voice::leave_call();
         }
         x -= size + 6.0;
         let deaf = voice::deafened();
-        if ui.icon_button(c, "relay:call-deafen", x, y, size, if deaf { theme::I_HEADPHONES_OFF } else { theme::I_HEADPHONES }, Some(if deaf { "Undeafen" } else { "Deafen" })) {
+        if voice_button(ui, c, "relay:call-deafen", x, y, if deaf { theme::I_HEADPHONES_OFF } else { theme::I_HEADPHONES }, if deaf { "Undeafen" } else { "Deafen" }, if deaf { theme::DANGER } else { 0 }) {
             voice::toggle_deafen();
         }
         x -= size + 6.0;
         let mute = voice::muted();
-        if ui.icon_button(c, "relay:call-mute", x, y, size, if mute { theme::I_MIC_OFF } else { theme::I_MIC }, Some(if mute { "Unmute" } else { "Mute" })) {
+        if voice_button(ui, c, "relay:call-mute", x, y, if mute { theme::I_MIC_OFF } else { theme::I_MIC }, if mute { "Unmute" } else { "Mute" }, if mute { theme::DANGER } else { 0 }) {
             voice::toggle_mute();
         }
         return x;
@@ -287,110 +307,270 @@ pub fn call_controls(ui: &mut Ui, c: &mut Canvas, key: &str, right: f32, y: f32)
     } else {
         "Start voice call".to_owned()
     };
-    if n > 0 {
-        c.round(x - 2.0, y - 2.0, size + 4.0, size + 4.0, 9.0, theme::alpha(theme::ONLINE, 0.25));
-    }
-    if ui.icon_button(c, "relay:call", x, y, size, if busy { theme::I_LOADER } else { theme::I_PHONE }, Some(tip.as_str())) && !busy {
+    if voice_button(ui, c, "relay:call", x, y, if busy { theme::I_LOADER } else { theme::I_PHONE }, &tip, if n > 0 { theme::ONLINE } else { 0 }) && !busy {
         voice::join_call(key);
     }
     x
 }
 
-/// The call strip under a chat's header: who is in the call (a click on a face shows their volume), how long it has
-/// been going, the ping, or what is wrong. The height it took (0 when there is no call here).
+/// The animated call stage under a chat's header (faces, audio-reactive glow, mute badges, call timer, live ping pill,
+/// and per-player volume slider), or a compact live banner when others are in a call.
 #[derive(Default)]
 pub struct CallStrip {
     open: Option<String>,
+    key: Option<String>,
+    h: f32,
 }
 
 impl CallStrip {
-    pub fn height(&self, key: &str) -> f32 {
-        let call = voice::in_call(key) || voice::calling().as_deref() == Some(key);
-        let live = !voice::call_members(key).is_empty();
-        let note = voice::note().is_some() && !call;
-        if !(call || live || note) {
-            0.0
-        } else if call && self.open.is_some() {
-            90.0
-        } else {
-            50.0
-        }
-    }
-
-    pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, key: &str, x: f32, y: f32, w: f32) {
-        let h = self.height(key);
-        if h <= 0.0 {
-            return;
-        }
-        c.fill(x, y, w, h, 0x0DFFFFFF);
-        c.fill(x, y + h - 1.0, w, 1.0, theme::HAIRLINE);
-        let mine = voice::in_call(key);
+    pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, key: &str, x: f32, y: f32, w: f32) -> f32 {
+        let in_call = voice::in_call(key);
         let members = voice::call_members(key);
         let me = super::relay::me_id();
-        let mut fx = x + 20.0;
-        let cy = y + 25.0;
-        for m in &members {
-            let face = 26.0;
-            let ring = if voice::speaking(m) { theme::ONLINE } else { 0x26FFFFFF };
-            c.circle(fx + face / 2.0, cy, face / 2.0 + 2.0 + voice::level(m) * 2.0, ring);
-            c.circle(fx + face / 2.0, cy, face / 2.0 + 0.5, 0xFF08090C);
-            let skin = m.skin.clone().or_else(|| super::relay::friend(&m.user_id).and_then(|f| f.skin));
-            avatars::draw_round(c, skin.as_deref(), fx, cy - face / 2.0, face);
-            if m.muted || m.deafened {
-                c.circle(fx + face - 3.0, cy + face / 2.0 - 3.0, 6.0, theme::DANGER);
-                c.icon(if m.deafened { theme::I_HEADPHONES_OFF } else { theme::I_MIC_OFF }, 8.0, fx + face - 3.0, cy + face / 2.0 - 3.0, 0xFFFFFFFF);
-            }
-            let other = me.as_deref() != Some(m.user_id.as_str());
-            if mine && other && ui.clicked(c, &format!("voice:face:{}", m.user_id), fx - 2.0, cy - face / 2.0 - 2.0, face + 4.0, face + 4.0) {
-                self.open = if self.open.as_deref() == Some(m.user_id.as_str()) { None } else { Some(m.user_id.clone()) };
-            }
-            if ui.hover(c, fx, cy - face / 2.0, face, face) {
-                ui.tip(m.shown());
-            }
-            fx += face + 8.0;
+        let mut picked: Option<Member> = None;
+        if in_call && let Some(open) = self.open.as_deref() {
+            picked = members
+                .iter()
+                .find(|m| m.user_id == open && me.as_deref() != Some(m.user_id.as_str()))
+                .cloned();
         }
-        // the status on the right
-        let status = if let Some(p) = voice::link_problem(key) {
-            (p, theme::DANGER)
-        } else if voice::calling().as_deref() == Some(key) {
-            ("Calling...".to_owned(), theme::TEXT_SECONDARY)
-        } else if let (true, Some(call)) = (mine, voice::call()) {
-            let secs = ((super::relay::now_ms() - call.since) / 1000).max(0);
-            let ping = if call.rtt >= 0 { format!(" · {} ms", call.rtt) } else { String::new() };
-            (format!("In call · {}:{:02}{ping}", secs / 60, secs % 60), theme::ONLINE)
-        } else if !members.is_empty() {
-            (format!("{} in call", members.len()), theme::TEXT_SECONDARY)
+        if picked.is_none() {
+            self.open = None;
+        }
+        let note = if !in_call { voice::note() } else { None };
+        let live_banner = !in_call && (!members.is_empty() || note.is_some());
+        let target = if in_call {
+            if picked.is_some() { 170.0 } else { 128.0 }
+        } else if live_banner {
+            48.0
         } else {
-            (voice::note().unwrap_or_default(), theme::TEXT_MUTED)
+            0.0
         };
-        let max = (x + w - 20.0 - fx - 10.0).max(60.0);
-        let text = c.ellipsize(font::MEDIUM, 12.0, &status.0, max);
-        let tw = c.text_width(font::MEDIUM, 12.0, &text);
-        let lh = c.line_height(font::MEDIUM, 12.0);
-        c.text(font::MEDIUM, 12.0, &text, x + w - 20.0 - tw, cy - lh / 2.0, status.1);
-        // a friend's own volume
-        let Some(open) = self.open.clone() else { return };
-        let Some(m) = members.iter().find(|m| m.user_id == open).cloned() else {
-            self.open = None;
-            return;
-        };
-        if !mine {
-            self.open = None;
-            return;
+        if self.key.as_deref() != Some(key) {
+            self.key = Some(key.to_owned());
+            self.h = 0.0; // a newly opened chat grows its stage in
         }
-        volume_row(ui, c, &m, x + 20.0, y + 50.0, w - 40.0);
+        let dt = ui.dt.min(0.1);
+        self.h += (target - self.h) * (dt * 12.0).min(1.0);
+        if (target - self.h).abs() < 0.5 {
+            self.h = target;
+        }
+        if self.h < 1.0 {
+            return 0.0;
+        }
+        let h = self.h;
+        c.push_clip(x, y, w, h);
+        c.push_alpha((h / (if target == 0.0 { 48.0 } else { target }).max(1.0) * 1.4).min(1.0));
+
+        if !in_call {
+            if !members.is_empty() {
+                c.gradient_v(x, y, w, h, 0x1A22C55E, 0x0622C55E);
+                let (mut fx, cy, face) = (x + 20.0, y + h / 2.0, 24.0);
+                for m in members.iter().take(4) {
+                    let skin = m.skin.clone().or_else(|| super::relay::friend(&m.user_id).and_then(|f| f.skin));
+                    c.circle(fx + face / 2.0, cy, face / 2.0 + 1.5, theme::alpha(theme::ONLINE, 0.55));
+                    avatars::draw_round(c, skin.as_deref(), fx, cy - face / 2.0, face);
+                    fx += face + 6.0;
+                }
+                let label = format!("{} in voice call", members.len());
+                let lh = c.line_height(font::SEMIBOLD, 12.0);
+                c.text(font::SEMIBOLD, 12.0, &label, fx + 6.0, cy - lh / 2.0, theme::ONLINE);
+                let busy = voice::joining(key);
+                let (bw, bh) = (72.0, 28.0);
+                let (bx, by) = (x + w - 20.0 - bw, cy - bh / 2.0);
+                let over = ui.hover(c, bx, by, bw, bh);
+                c.round(bx, by, bw, bh, 8.0, if over { theme::mix(theme::ONLINE, 0xFFFFFFFF, 0.15) } else { theme::ONLINE });
+                let btxt = if busy { "..." } else { "Join" };
+                let btw = c.text_width(font::SEMIBOLD, 12.0, btxt);
+                c.text(font::SEMIBOLD, 12.0, btxt, bx + (bw - btw) / 2.0, by + (bh - lh) / 2.0, theme::SOLID_FG);
+                if ui.clicked(c, "relay:banner-join", bx, by, bw, bh) && !busy {
+                    voice::join_call(key);
+                }
+            } else if let Some(note_txt) = note {
+                c.fill(x, y, w, h, 0x0DFFFFFF);
+                let cy = y + h / 2.0;
+                c.icon(theme::I_PHONE_OFF, 14.0, x + 28.0, cy, theme::TEXT_MUTED);
+                let txt = c.ellipsize(font::MEDIUM, 12.0, &note_txt, (w - 70.0).max(40.0));
+                let lh = c.line_height(font::MEDIUM, 12.0);
+                c.text(font::MEDIUM, 12.0, &txt, x + 44.0, cy - lh / 2.0, theme::TEXT_SECONDARY);
+            }
+            c.pop_alpha();
+            c.pop_clip();
+            c.fill(x, y + h - 1.0, w, 1.0, theme::HAIRLINE);
+            return h;
+        }
+
+        let link = voice::link_problem(key);
+        let tint = if link.is_some() { theme::DANGER } else { theme::ONLINE };
+        c.gradient_v(x, y, w, h, theme::alpha(tint, 0.15), theme::alpha(tint, 0.03));
+
+        // top line: live dot + status + timer + ping pill
+        let calling = voice::calling().as_deref() == Some(key);
+        let pulse = (0.5 + 0.5 * (ui.now / 320.0).sin()) as f32;
+        c.circle(x + 24.0, y + 18.0, 4.0 + pulse * 2.5, theme::alpha(tint, 0.25));
+        c.circle(x + 24.0, y + 18.0, 3.5, tint);
+        let head = if let Some(p) = &link {
+            p.as_str()
+        } else if calling {
+            "Ringing..."
+        } else if members.len() <= 1 {
+            "Waiting for others"
+        } else {
+            "Voice connected"
+        };
+        let mut tx = x + 35.0;
+        let hlh = c.line_height(font::SEMIBOLD, 11.5);
+        let hw = c.text(font::SEMIBOLD, 11.5, head, tx, y + 18.0 - hlh / 2.0, tint);
+        tx += hw + 10.0;
+        if let Some(room) = voice::call() {
+            let secs = ((super::relay::now_ms() - room.since) / 1000).max(0);
+            let time = if secs >= 3600 {
+                format!("{}:{:02}:{:02}", secs / 3600, (secs / 60) % 60, secs % 60)
+            } else {
+                format!("{}:{:02}", secs / 60, secs % 60)
+            };
+            let tlh = c.line_height(font::MEDIUM, 11.0);
+            let tw2 = c.text(font::MEDIUM, 11.0, &time, tx, y + 18.0 - tlh / 2.0, theme::TEXT_MUTED);
+            tx += tw2 + 8.0;
+            if room.rtt >= 0 {
+                let ping_txt = format!("{} ms", room.rtt);
+                let p_col = if room.rtt < 80 { theme::ONLINE } else if room.rtt < 180 { theme::IDLE } else { theme::DANGER };
+                let pw = c.text_width(font::SEMIBOLD, 10.0, &ping_txt) + 12.0;
+                c.round(tx, y + 10.0, pw, 16.0, 8.0, theme::alpha(p_col, 0.15));
+                let plh = c.line_height(font::SEMIBOLD, 10.0);
+                c.text(font::SEMIBOLD, 10.0, &ping_txt, tx + 6.0, y + 18.0 - plh / 2.0, p_col);
+            }
+        }
+        if members.len() > 1 {
+            let hint = "Click a face to change their volume";
+            let hw2 = c.text_width(font::REGULAR, 10.5, hint);
+            let lh2 = c.line_height(font::REGULAR, 10.5);
+            c.text(font::REGULAR, 10.5, hint, x + w - 20.0 - hw2, y + 18.0 - lh2 / 2.0, theme::TEXT_MUTED);
+        }
+
+        // faces
+        struct Tile {
+            name: String,
+            skin: Option<String>,
+            user_id: Option<String>,
+            member: Option<Member>,
+            is_self: bool,
+        }
+        let mut tiles: Vec<Tile> = Vec::with_capacity(members.len() + 1);
+        for m in &members {
+            let is_self = me.as_deref() == Some(m.user_id.as_str());
+            let skin = m.skin.clone().or_else(|| super::relay::friend(&m.user_id).and_then(|f| f.skin));
+            tiles.push(Tile {
+                name: if is_self { "You".to_owned() } else { m.shown().to_owned() },
+                skin,
+                user_id: if is_self { None } else { Some(m.user_id.clone()) },
+                member: Some(m.clone()),
+                is_self,
+            });
+        }
+        if calling && let Some(fid) = key.strip_prefix("dm:") {
+            let f = super::relay::friend(fid);
+            tiles.push(Tile {
+                name: f.as_ref().map_or_else(|| "Friend".to_owned(), |f| f.display().to_owned()),
+                skin: f.and_then(|f| f.skin),
+                user_id: None,
+                member: None,
+                is_self: false,
+            });
+        }
+        let max_tiles = (((w - 40.0) / 80.0) as usize).max(1);
+        let n = tiles.len().min(max_tiles);
+        let (face, slot) = (44.0f32, 80.0f32);
+        let row0 = x + (w - n as f32 * slot) / 2.0;
+        let fy = y + 36.0;
+        for (i, t) in tiles.iter().take(n).enumerate() {
+            let cx = row0 + i as f32 * slot + slot / 2.0;
+            let cy = fy + face / 2.0;
+            let r = face / 2.0;
+            let waiting = t.member.is_none();
+            let lvl = t.member.as_ref().map_or(0.0, voice::level);
+            let talking = t.member.as_ref().is_some_and(|m| lvl > 0.0 || voice::speaking(m));
+            if waiting {
+                for k in 0..3 {
+                    let ph = ((ui.now / 1500.0 + f64::from(k) / 3.0) % 1.0) as f32;
+                    let ex = r + 2.0 + ph * 16.0;
+                    c.outline(cx - ex, cy - ex, ex * 2.0, ex * 2.0, ex, 1.5, theme::alpha(theme::ONLINE, 0.55 * (1.0 - ph)));
+                }
+            } else if talking {
+                let glow = 0.35 + 0.65 * lvl.max(0.3);
+                c.circle(cx, cy, r + 4.0 + glow * 5.0, theme::alpha(theme::ONLINE, 0.22 * glow));
+            }
+            let sel = t.user_id.as_ref().is_some_and(|id| self.open.as_deref() == Some(id.as_str()));
+            let over = t.user_id.is_some() && ui.hover(c, cx - r - 4.0, cy - r - 4.0, face + 8.0, face + 8.0);
+            let ring_col = if talking {
+                theme::ONLINE
+            } else if sel {
+                0xFF60A5FA
+            } else if over {
+                0x66FFFFFF
+            } else {
+                0x26FFFFFF
+            };
+            c.circle(cx, cy, r + 2.5, ring_col);
+            c.circle(cx, cy, r + 0.5, 0xFF08090C);
+            c.push_alpha(if waiting { 0.55 } else { 1.0 });
+            avatars::draw_round(c, t.skin.as_deref(), cx - r, cy - r, face);
+            c.pop_alpha();
+            if let Some(m) = &t.member {
+                let muted = if t.is_self { voice::muted() } else { m.muted };
+                let deaf = if t.is_self { voice::deafened() } else { m.deafened };
+                if muted || deaf {
+                    c.circle(cx + r - 4.0, cy + r - 4.0, 8.0, 0xFF08090C);
+                    c.circle(cx + r - 4.0, cy + r - 4.0, 6.5, theme::DANGER);
+                    c.icon(if deaf { theme::I_HEADPHONES_OFF } else { theme::I_MIC_OFF }, 8.0, cx + r - 4.0, cy + r - 4.0, 0xFFFFFFFF);
+                }
+            }
+            let label = c.ellipsize(font::MEDIUM, 11.0, &t.name, slot - 8.0);
+            let lw = c.text_width(font::MEDIUM, 11.0, &label);
+            c.text(font::MEDIUM, 11.0, &label, cx - lw / 2.0, fy + face + 7.0, if talking { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY });
+            if let Some(uid) = &t.user_id {
+                if ui.clicked(c, &format!("relay:stage:{uid}"), cx - r - 4.0, cy - r - 4.0, face + 8.0, face + 8.0) {
+                    self.open = if sel { None } else { Some(uid.clone()) };
+                }
+                if over {
+                    ui.tip(if sel { "Hide volume".to_owned() } else { format!("Volume for {}", t.name) }.as_str());
+                }
+            }
+        }
+        if tiles.len() > n {
+            let more = format!("+{}", tiles.len() - n);
+            let mlh = c.line_height(font::SEMIBOLD, 12.0);
+            c.text(font::SEMIBOLD, 12.0, &more, row0 + n as f32 * slot + 4.0, fy + face / 2.0 - mlh / 2.0, theme::TEXT_MUTED);
+        }
+
+        // one volume slider, for the face that was clicked
+        if let Some(m) = picked {
+            let rw = (w - 40.0).min(460.0);
+            volume_row(ui, c, &m, x + (w - rw) / 2.0, y + 124.0, rw);
+        }
+        c.pop_alpha();
+        c.pop_clip();
+        c.fill(x, y + h - 1.0, w, 1.0, theme::HAIRLINE);
+        h
     }
 }
 
 /// "face  name  ----o----  120%": one player's own volume, 0 - 200 %.
 fn volume_row(ui: &mut Ui, c: &mut Canvas, m: &Member, x: f32, y: f32, w: f32) {
-    let cy = y + 16.0;
-    let name = c.ellipsize(font::MEDIUM, 12.0, m.shown(), 120.0);
+    let (face, cy) = (20.0, y + 15.0);
+    let talking = voice::speaking(m);
+    let skin = m.skin.clone().or_else(|| super::relay::friend(&m.user_id).and_then(|f| f.skin));
+    c.circle(x + face / 2.0, cy, face / 2.0 + 2.0, if talking { theme::ONLINE } else { 0x26FFFFFF });
+    c.circle(x + face / 2.0, cy, face / 2.0 + 0.5, 0xFF08090C);
+    avatars::draw_round(c, skin.as_deref(), x, cy - face / 2.0, face);
+    let name_w = (w * 0.32).min(110.0);
+    let name = c.ellipsize(font::MEDIUM, 12.0, m.shown(), name_w);
     let lh = c.line_height(font::MEDIUM, 12.0);
-    c.text(font::MEDIUM, 12.0, &name, x, cy - lh / 2.0, theme::TEXT_STRONG);
+    c.text(font::MEDIUM, 12.0, &name, x + face + 8.0, cy - lh / 2.0, theme::TEXT_STRONG);
     let v = voice::volume(&m.user_id);
     let pct = format!("{:.0}%", v * 100.0);
-    let (sx, sw) = (x + 130.0, (w - 130.0 - 50.0).max(40.0));
+    let sx = x + face + 8.0 + name_w + 12.0;
+    let sw = (x + w - 40.0 - 10.0 - sx).max(40.0);
     let id = format!("voice:vol:{}", m.user_id);
     c.round(sx, cy - 2.0, sw, 4.0, 2.0, 0x33FFFFFF);
     c.round(sx, cy - 2.0, sw * v / 2.0, 4.0, 2.0, theme::ACCENT);
@@ -410,33 +590,72 @@ fn volume_row(ui: &mut Ui, c: &mut Canvas, m: &Member, x: f32, y: f32, w: f32) {
 
 /// Height of the call card in the toasts column (0 when there is none).
 pub fn card_height() -> f32 {
-    if voice::incoming().is_some() || voice::calling().is_some() { 74.0 } else { 0.0 }
+    if voice::incoming().is_some() || voice::calling().is_some() { 84.0 } else { 0.0 }
 }
 
-/// "Incoming voice call" (V answers, N declines) or "Calling..." (N cancels), top right, over the message cards.
+/// "Incoming voice call" (V accepts, N declines) or "Calling..." (N cancels), top right, over the message cards.
 pub fn draw_card(c: &mut Canvas, x: f32, y: f32, w: f32, now: i64) {
     let ring = voice::incoming();
     let calling = if ring.is_none() { voice::calling() } else { None };
-    let (title, name, skin) = match (&ring, &calling) {
+    let (head, name, skin) = match (&ring, &calling) {
         (Some(r), _) => ("Incoming voice call", r.name.clone(), r.skin.clone()),
         (None, Some(key)) => {
             let f = key.strip_prefix("dm:").and_then(super::relay::friend);
-            ("Calling...", f.as_ref().map_or("Friend".to_owned(), |f| f.display().to_owned()), f.and_then(|f| f.skin))
+            ("Calling...", f.as_ref().map_or("your friend".to_owned(), |f| f.display().to_owned()), f.and_then(|f| f.skin))
         }
         _ => return,
     };
-    let h = 66.0;
-    // a soft pulse while it rings
-    let pulse = ((now as f64 / 600.0).sin() * 0.5 + 0.5) as f32;
-    c.shadow(x, y + 3.0, w, h, 14.0, 14.0, 0x66000000);
-    c.round(x, y, w, h, 14.0, 0xF00A0B0E);
-    c.outline(x, y, w, h, 14.0, 1.0, theme::alpha(theme::ONLINE, 0.35 + 0.4 * pulse));
-    avatars::draw(c, skin.as_deref(), x + 12.0, y + 12.0, 38.0, 10.0);
-    let (tx, tw) = (x + 60.0, w - 72.0);
-    c.text(font::SEMIBOLD, 12.0, title, tx, y + 9.0, theme::ONLINE);
+    let h = 76.0;
+    let pulse = ((now as f64 / 260.0).sin() * 0.5 + 0.5) as f32;
+    let accent = if ring.is_some() { theme::ONLINE } else { 0xFF60A5FA };
+    c.shadow(x, y + 3.0, w, h, 14.0, 16.0, 0x70000000);
+    c.round(x, y, w, h, 14.0, 0xF40A0B0E);
+    c.outline(x, y, w, h, 14.0, 1.0, theme::alpha(accent, 0.35 + 0.35 * pulse));
+    let (ax, ay) = (x + 14.0, y + 14.0);
+    if ring.is_some() {
+        c.circle(ax + 24.0, ay + 24.0, 27.0 + 2.0 * pulse, theme::alpha(accent, 0.18 + 0.2 * pulse));
+    }
+    avatars::draw(c, skin.as_deref(), ax, ay, 48.0, 12.0);
+    let (tx, tw) = (x + 76.0, w - 118.0);
+    c.text(font::SEMIBOLD, 10.5, head, tx, y + 12.0, accent);
     let shown = c.ellipsize(font::SEMIBOLD, 14.0, &name, tw);
-    c.text(font::SEMIBOLD, 14.0, &shown, tx, y + 25.0, theme::TEXT_STRONG);
-    let hint = if ring.is_some() { "V to answer · N to decline" } else { "N to cancel" };
-    c.text(font::REGULAR, 10.5, hint, tx, y + 45.0, theme::TEXT_MUTED);
-    c.icon(theme::I_PHONE, 16.0, x + w - 22.0, y + h / 2.0, theme::ONLINE);
+    c.text(font::SEMIBOLD, 14.0, &shown, tx, y + 27.0, theme::TEXT_STRONG);
+    let hint = if ring.is_some() { "V  accept  ·  N  decline" } else { "N  cancel call" };
+    c.text(font::REGULAR, 10.5, hint, tx, y + 50.0, theme::TEXT_SECONDARY);
+    c.circle(x + w - 24.0, y + 26.0, 13.0, theme::alpha(accent, 0.16));
+    c.icon(theme::I_PHONE, 14.0, x + w - 24.0, y + 26.0, accent);
+    if let Some(r) = ring {
+        let span = (r.until - r.at).max(1) as f32;
+        let left = ((r.until - now) as f32 / span).clamp(0.0, 1.0);
+        c.fill(x + 14.0, y + h - 3.0, (w - 28.0) * left, 1.5, theme::alpha(accent, 0.65));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::ui::Event;
+
+    #[test]
+    fn idle_call_stage_and_card_are_collapsed() {
+        let mut c = horizon_client::native_ui::canvas();
+        c.begin(400, 400, 1.0);
+        let mut ui = Ui::default();
+        let mut strip = CallStrip::default();
+        assert_eq!(strip.draw(&mut ui, &mut c, "dm:idle", 0.0, 0.0, 400.0), 0.0);
+        assert_eq!(card_height(), 0.0);
+    }
+
+    #[test]
+    fn filled_voice_button_triggers_click_on_release() {
+        let mut c = horizon_client::native_ui::canvas();
+        c.begin(200, 200, 1.0);
+        let mut ui = Ui::default();
+        ui.begin(&[Event::Move { x: 16.0, y: 16.0 }, Event::Button { button: 0, pressed: true }], 1.0);
+        assert!(!voice_button(&mut ui, &mut c, "t:accept", 0.0, 0.0, theme::I_PHONE, "Accept", theme::ONLINE));
+        ui.end();
+        ui.begin(&[Event::Button { button: 0, pressed: false }], 1.0);
+        assert!(voice_button(&mut ui, &mut c, "t:accept", 0.0, 0.0, theme::I_PHONE, "Accept", theme::ONLINE));
+        ui.end();
+    }
 }

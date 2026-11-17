@@ -311,6 +311,26 @@ pub fn chime(rate: u32, gain: f32) -> Vec<f32> {
     out
 }
 
+/// Warm 4-note rising bell chime (E5-G#5-B5-E6) in a 3 s cycle, -1..1, zero-click fade-in and smooth decay.
+pub fn incoming_ring_sample(sample: usize) -> f64 {
+    const FREQ: [f64; 4] = [659.25, 830.61, 987.77, 1318.51];
+    const START: [usize; 4] = [0, 8_640, 17_280, 25_920];
+    const LEN: [usize; 4] = [16_320, 17_280, 28_320, 31_680];
+    let mut sum = 0.0;
+    for n in 0..4 {
+        if sample >= START[n] && sample - START[n] < LEN[n] {
+            let rel = (sample - START[n]) as f64;
+            let attack = (rel / 480.0).min(1.0);
+            let decay = (1.0 - rel / LEN[n] as f64).powf(2.2);
+            let t = rel / f64::from(RATE);
+            let w = 2.0 * std::f64::consts::PI * FREQ[n] * t;
+            let tone = 0.78 * w.sin() + 0.22 * (2.0 * w).sin();
+            sum += tone * attack * decay;
+        }
+    }
+    (sum * 0.55).clamp(-1.0, 1.0)
+}
+
 /// Two beeps in a 3 s cycle (0 - 0.4 s and 0.6 - 1.0 s) with short fades so they do not click (`Voice.beepEnvelope`).
 pub fn beep_envelope(sample: usize) -> f64 {
     let fade = 48.0 * 6.0;
@@ -579,6 +599,7 @@ pub struct Wants {
     pub mic: bool,
     pub speakers: bool,
     pub ring: bool,
+    pub ring_outgoing: bool,
     pub mic_device: String,
     pub out_device: String,
     pub mic_gain: f32,
@@ -611,12 +632,13 @@ fn run() {
     let (mut hang, mut open) = (0u32, false);
     let mut next_mix = Instant::now();
     let mut ring_pos = 0usize;
+    let mut ring_mode = 0u8; // 0 = off, 1 = incoming, 2 = outgoing
     let mut idle_since: Option<Instant> = None;
     while engine().running.load(Ordering::SeqCst) {
         let w = voice::wants();
         let chiming = !lock(&engine().chime).is_empty();
         // Nothing to do for a while: the thread ends (and the devices close).
-        if !w.mic && !w.speakers && !w.ring && !chiming {
+        if !w.mic && !w.speakers && !w.ring && !w.ring_outgoing && !chiming {
             mic = None;
             out = None;
             let since = *idle_since.get_or_insert_with(Instant::now);
@@ -645,7 +667,7 @@ fn run() {
                 }
             }
         }
-        let want_out = w.speakers || w.ring || chiming;
+        let want_out = w.speakers || w.ring || w.ring_outgoing || chiming;
         if out.as_ref().is_some_and(|(_, n)| *n != w.out_device) || !want_out {
             out = None;
             lock(&play).clear();
@@ -693,19 +715,30 @@ fn run() {
                     }
                 }
             }
-            if w.ring && !w.deafened {
-                let g = w.out_volume.min(1.0) * 0.3;
+            let mode = if w.ring { 1 } else if w.ring_outgoing { 2 } else { 0 };
+            if mode != ring_mode {
+                ring_pos = 0;
+                ring_mode = mode;
+            }
+            if mode != 0 && !w.deafened {
+                let g = w.out_volume.min(1.0) * if mode == 1 { 0.34 } else { 0.16 };
                 for m in &mut mix {
                     let at = ring_pos % (RATE as usize * 3);
-                    let env = beep_envelope(at);
-                    if env > 0.0 {
-                        let t = at as f64 / f64::from(RATE);
-                        let v = ((2.0 * std::f64::consts::PI * 440.0 * t).sin() + (2.0 * std::f64::consts::PI * 480.0 * t).sin()) * 0.5 * env;
-                        *m += v as f32 * g;
-                    }
+                    let v = if mode == 1 {
+                        incoming_ring_sample(at)
+                    } else {
+                        let env = beep_envelope(at);
+                        if env > 0.0 {
+                            let t = at as f64 / f64::from(RATE);
+                            ((2.0 * std::f64::consts::PI * 440.0 * t).sin() + (2.0 * std::f64::consts::PI * 480.0 * t).sin()) * 0.5 * env
+                        } else {
+                            0.0
+                        }
+                    };
+                    *m += v as f32 * g;
                     ring_pos += 1;
                 }
-            } else {
+            } else if mode == 0 {
                 ring_pos = 0;
             }
             {
@@ -903,6 +936,19 @@ mod tests {
         assert_eq!(beep_envelope(24_000), 0.0, "the gap between the beeps");
         assert!(beep_envelope(38_400) > 0.99, "the second beep");
         assert_eq!(beep_envelope(100_000), 0.0, "quiet for the rest of the cycle");
+    }
+
+    #[test]
+    fn incoming_ringtone_chime_is_smooth_and_bounded() {
+        assert_eq!(incoming_ring_sample(0), 0.0, "starts from silence");
+        let mut peak = 0.0f64;
+        for i in 0..57_600 {
+            let v = incoming_ring_sample(i).abs();
+            assert!(v <= 1.0, "never clips at sample {i}");
+            peak = peak.max(v);
+        }
+        assert!(peak > 0.25, "audible chime peak: {peak}");
+        assert_eq!(incoming_ring_sample(90_000), 0.0, "silent tail of the 3 s cycle");
     }
 
     #[test]

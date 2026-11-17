@@ -240,7 +240,31 @@ impl RelayView {
         let name_w = (calls_left - 10.0 - (hx + 48.0)).max(60.0);
         let shown = c.ellipsize(font::SEMIBOLD, 15.0, &name, name_w);
         c.text(font::SEMIBOLD, 15.0, &shown, hx + 48.0, hy, theme::TEXT_STRONG);
-        let (status, status_color) = if group {
+        let in_call = super::voice::call_members(&sel).len();
+        let (status, status_color) = if super::voice::in_call(&sel) {
+            if let Some(link) = super::voice::link_problem(&sel) {
+                (link, theme::DANGER)
+            } else if !group && in_call <= 1 {
+                (format!("Calling {name}..."), theme::ONLINE)
+            } else {
+                let mut s = if in_call > 1 {
+                    let others = in_call - 1;
+                    format!("In voice call with {others} {}", if others == 1 { "other" } else { "others" })
+                } else {
+                    "In voice call - waiting for others".to_owned()
+                };
+                if let Some(ptt) = super::voice::push_to_talk_key() {
+                    s.push_str(&format!("  -  hold {ptt} to talk"));
+                }
+                (s, theme::ONLINE)
+            }
+        } else if super::voice::ringing(&sel).is_some() {
+            (format!("{name} is calling you"), theme::ONLINE)
+        } else if in_call > 0 {
+            (format!("Voice call - {in_call} in call"), theme::ONLINE)
+        } else if let Some(err) = super::voice::note() {
+            (err, theme::DANGER)
+        } else if group {
             (grp.map_or(String::new(), |g| format!("{} members", g.members)), theme::TEXT_MUTED)
         } else if let Some(f) = friend.filter(|f| f.online) {
             (f.line(), theme::mix(f.dot(), 0xFFFFFFFF, 0.45))
@@ -250,9 +274,8 @@ impl RelayView {
         let status = c.ellipsize(font::REGULAR, 11.5, &status, name_w);
         c.text(font::REGULAR, 11.5, &status, hx + 48.0, hy + 20.0, status_color);
         c.fill(x, y + 64.0, w, 1.0, theme::HAIRLINE);
-        // The call strip: who is in this chat's call, the timer, the ping (and a friend's volume).
-        let strip_h = self.call_strip.height(&sel);
-        self.call_strip.draw(ui, c, &sel, x, y + 65.0, w);
+        // The animated call stage: who is in this chat's call, the timer, the ping (and a friend's volume).
+        let strip_h = self.call_strip.draw(ui, c, &sel, x, y + 65.0, w);
 
         // Messages.
         let input_h = 46.0;
