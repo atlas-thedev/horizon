@@ -5,7 +5,7 @@
 //! everyone.
 use super::emote_wheel::poster_url;
 use super::locker::session_lock;
-use super::menu::{clamp01, ease, empty, glow};
+use super::menu::{CARD, CARD_HOVER, clamp01, ease, empty, glow};
 use super::net::{self, Pic};
 use super::preview3d;
 use super::scroll::Scroll;
@@ -161,7 +161,7 @@ impl EmotesView {
         }
         let me = native_emotes::snapshot();
         if !me.is_object() {
-            ui.dots(c, x + w / 2.0, y + h / 2.0, theme::text_secondary());
+            ui.dots(c, x + w / 2.0, y + h / 2.0, theme::TEXT_SECONDARY);
             return false;
         }
         let items = catalog(&me);
@@ -192,7 +192,7 @@ impl EmotesView {
 
         // the player's emotes, then a few to try on
         let fy = wy + 18.0;
-        c.text(font::SEMIBOLD, 10.5, "YOUR EMOTES", lx, fy, theme::text_muted());
+        c.text(font::SEMIBOLD, 10.5, "YOUR EMOTES", lx, fy, theme::TEXT_MUTED);
         let mut chip_x = lx + c.text_width(font::SEMIBOLD, 10.5, "YOUR EMOTES") + 14.0;
         chip_x += self.chip(ui, c, "emotes:all", chip_x, fy - 7.0, "All", !self.equipped_only) + 6.0;
         self.chip(ui, c, "emotes:equipped", chip_x, fy - 7.0, "On this page", self.equipped_only);
@@ -246,15 +246,15 @@ impl EmotesView {
                 format!("No emote matches \u{201C}{}\u{201D}.", self.search.value().trim())
             };
             let msg = c.ellipsize(font::REGULAR, 12.0, &msg, lw);
-            c.text(font::REGULAR, 12.0, &msg, lx, cy + 8.0, theme::text_muted());
+            c.text(font::REGULAR, 12.0, &msg, lx, cy + 8.0, theme::TEXT_MUTED);
             used = 36.0;
         }
         if !others.is_empty() {
             let oy = cy + used + 10.0;
-            c.text(font::SEMIBOLD, 10.5, "TRY ONE ON", lx, oy, theme::text_muted());
+            c.text(font::SEMIBOLD, 10.5, "TRY ONE ON", lx, oy, theme::TEXT_MUTED);
             let store = "More in the Native Store";
             let stw = c.text_width(font::MEDIUM, 11.0, store);
-            c.text(font::MEDIUM, 11.0, store, lx + lw - stw, oy, theme::text_muted());
+            c.text(font::MEDIUM, 11.0, store, lx + lw - stw, oy, theme::TEXT_MUTED);
             let oy = oy + 22.0;
             for (i, it) in others.iter().enumerate() {
                 let ix = lx + (i % cols) as f32 * (tw + gap);
@@ -296,14 +296,14 @@ impl EmotesView {
         let it = find(items, self.pick.as_deref()).cloned();
         c.round(x, y, w, h, 14.0, 0x66000000);
         glow(c, x, y, w, h * 0.6, 14.0, 0x10FFFFFF);
-        c.outline(x, y, w, h, 14.0, 1.0, theme::hairline());
-        c.text(font::SEMIBOLD, 10.5, "PREVIEW", x + 16.0, y + 16.0, theme::text_muted());
+        c.outline(x, y, w, h, 14.0, 1.0, theme::HAIRLINE);
+        c.text(font::SEMIBOLD, 10.5, "PREVIEW", x + 16.0, y + 16.0, theme::TEXT_MUTED);
         let title = it.as_ref().map_or_else(|| "Pick an emote".to_owned(), Emote::label);
         let title = c.ellipsize(font::SEMIBOLD, 15.0, &title, w - 32.0);
-        c.text(font::SEMIBOLD, 15.0, &title, x + 16.0, y + 32.0, theme::text_strong());
+        c.text(font::SEMIBOLD, 15.0, &title, x + 16.0, y + 32.0, theme::TEXT_STRONG);
         let (px, py, pw, ph) = (x + 12.0, y + 64.0, w - 24.0, h - 64.0 - 132.0);
         match &it {
-            None => c.icon(theme::I_SMILE, 34.0, x + w / 2.0, py + ph / 2.0, theme::text_muted()),
+            None => c.icon(theme::I_SMILE, 34.0, x + w / 2.0, py + ph / 2.0, theme::TEXT_MUTED),
             Some(e) => {
                 native_emotes::want_clip(&e.hash);
                 let elapsed = Some((ui.now - self.pick_at).max(0.0));
@@ -316,7 +316,7 @@ impl EmotesView {
                         preview3d::draw_wheel(c, skin, slim, pose, [px + pw * 0.1, py + ph * 0.04, pw * 0.8, ph * 0.92], props);
                         c.pop_clip();
                     }
-                    None => ui.dots(c, x + w / 2.0, py + ph / 2.0, theme::text_muted()),
+                    None => ui.dots(c, x + w / 2.0, py + ph / 2.0, theme::TEXT_MUTED),
                 }
             }
         }
@@ -329,8 +329,8 @@ impl EmotesView {
             Some(_) => "In the Native Store".to_owned(),
         };
         let subw = c.text_width(font::REGULAR, 11.0, &sub);
-        c.text(font::REGULAR, 11.0, &sub, x + (w - subw) / 2.0, y + h - 122.0, theme::text_muted());
-        c.fill(x + 16.0, y + h - 100.0, w - 32.0, 1.0, theme::hairline());
+        c.text(font::REGULAR, 11.0, &sub, x + (w - subw) / 2.0, y + h - 122.0, theme::TEXT_MUTED);
+        c.fill(x + 16.0, y + h - 100.0, w - 32.0, 1.0, theme::HAIRLINE);
         let (bx, bw, bh) = (x + 16.0, w - 32.0, 34.0);
         // the big one: play it in the world for everyone, or say why not
         let ry = y + h - 88.0;
@@ -344,11 +344,11 @@ impl EmotesView {
                 close = native_emotes::play(self.page, slot);
             }
         } else if it.is_some() {
-            c.round(bx, ry, bw, bh, 10.0, theme::subtle());
-            c.outline(bx, ry, bw, bh, 10.0, 1.0, theme::hairline());
+            c.round(bx, ry, bw, bh, 10.0, theme::SUBTLE);
+            c.outline(bx, ry, bw, bh, 10.0, 1.0, theme::HAIRLINE);
             let tw = c.text_width(font::SEMIBOLD, 12.0, hint);
             let lh = c.line_height(font::SEMIBOLD, 12.0);
-            c.text(font::SEMIBOLD, 12.0, hint, bx + (bw - tw) / 2.0, ry + (bh - lh) / 2.0, theme::text_muted());
+            c.text(font::SEMIBOLD, 12.0, hint, bx + (bw - tw) / 2.0, ry + (bh - lh) / 2.0, theme::TEXT_MUTED);
         }
         let Some(e) = it else { return close };
         let (by, hw) = (ry + bh + 8.0, (bw - 8.0) / 2.0);
@@ -357,8 +357,8 @@ impl EmotesView {
             self.pick_at = ui.now;
         }
         if native_emotes::saving() {
-            c.round(hx, by, hw, bh, 10.0, theme::subtle_hover());
-            ui.dots(c, hx + hw / 2.0, by + bh / 2.0, theme::text_strong());
+            c.round(hx, by, hw, bh, 10.0, theme::SUBTLE_HOVER);
+            ui.dots(c, hx + hw / 2.0, by + bh / 2.0, theme::TEXT_STRONG);
         } else if let Some(i) = at {
             if ui.button(c, "emotes:remove", hx, by, hw, bh, "Unequip", theme::I_X, ui::BTN_GLASS) {
                 native_emotes::save_loadout(native_emotes::equip(pages, self.page, i, None));
@@ -392,8 +392,8 @@ impl EmotesView {
         y: f32,
         w: f32,
     ) -> f32 {
-        c.text(font::SEMIBOLD, 10.5, "YOUR WHEEL", x, y, theme::text_muted());
-        c.text(font::SEMIBOLD, 17.0, "Emote slots", x, y + 14.0, theme::text_strong());
+        c.text(font::SEMIBOLD, 10.5, "YOUR WHEEL", x, y, theme::TEXT_MUTED);
+        c.text(font::SEMIBOLD, 17.0, "Emote slots", x, y + 14.0, theme::TEXT_STRONG);
         // page switcher, right
         let mut px = x + w;
         if is_plus && pages.len() < limit {
@@ -414,7 +414,7 @@ impl EmotesView {
             let lw = c.text_width(font::MEDIUM, 11.5, &label);
             px -= lw + 10.0;
             let lh = c.line_height(font::MEDIUM, 11.5);
-            c.text(font::MEDIUM, 11.5, &label, px + 4.0, y + 20.0 - lh / 2.0, theme::text_secondary());
+            c.text(font::MEDIUM, 11.5, &label, px + 4.0, y + 20.0 - lh / 2.0, theme::TEXT_SECONDARY);
             px -= 30.0;
             if ui.icon_button(c, "emotes:prev", px, y + 6.0, 28.0, theme::I_CHEVRON_LEFT, Some("Previous wheel page")) && self.page > 0 {
                 self.page -= 1;
@@ -424,7 +424,7 @@ impl EmotesView {
             let tip = "Native Plus adds more wheel pages";
             let tw = c.text_width(font::REGULAR, 11.0, tip);
             let lh = c.line_height(font::REGULAR, 11.0);
-            c.text(font::REGULAR, 11.0, tip, x + w - tw, y + 20.0 - lh / 2.0, theme::text_muted());
+            c.text(font::REGULAR, 11.0, tip, x + w - tw, y + 20.0 - lh / 2.0, theme::TEXT_MUTED);
         }
 
         let (sy, gap) = (y + 44.0, 8.0);
@@ -438,8 +438,8 @@ impl EmotesView {
         let bottom = sy + s + 20.0;
         let help = if locked { "This page needs Native Plus to play." } else { "Pick a slot, then an emote. Drag to move, drag off to remove." };
         let help = c.ellipsize(font::REGULAR, 11.0, help, w);
-        c.text(font::REGULAR, 11.0, &help, x, bottom - 8.0, theme::text_muted());
-        c.fill(x, bottom + 10.0, w, 1.0, theme::hairline());
+        c.text(font::REGULAR, 11.0, &help, x, bottom - 8.0, theme::TEXT_MUTED);
+        c.fill(x, bottom + 10.0, w, 1.0, theme::HAIRLINE);
         bottom + 14.0
     }
 
@@ -480,7 +480,7 @@ impl EmotesView {
         }
         let hv = ui.anim_on(&format!("{id}#h"), over || target, 14.0);
         let on = ui.anim_on(&format!("{id}#on"), self.slot == i, 16.0);
-        c.round(x, y, s, s, 12.0, theme::mix(theme::mix(theme::panel(), theme::panel_hover(), hv), 0xFF16181D, on * 0.6));
+        c.round(x, y, s, s, 12.0, theme::mix(theme::mix(CARD, CARD_HOVER, hv), 0xFF16181D, on * 0.6));
         c.outline(
             x,
             y,
@@ -488,7 +488,7 @@ impl EmotesView {
             s,
             12.0,
             if on > 0.5 || target { 1.5 } else { 1.0 },
-            theme::mix(theme::mix(theme::hairline(), theme::border_hover(), hv), 0xE6FFFFFF, on.max(if target { 1.0 } else { 0.0 })),
+            theme::mix(theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv), 0xE6FFFFFF, on.max(if target { 1.0 } else { 0.0 })),
         );
         match &it {
             Some(e) if !(self.dragging && self.drag_from == Some(i)) => {
@@ -496,12 +496,12 @@ impl EmotesView {
                 self.poster(ui, c, e, skin, slim, x + pad, y + pad * 0.6, s - pad * 2.0, s - pad * 2.0 - 8.0, false);
                 let n = c.ellipsize(font::MEDIUM, 9.5, &e.label(), s - 10.0);
                 let nw = c.text_width(font::MEDIUM, 9.5, &n);
-                c.text(font::MEDIUM, 9.5, &n, x + (s - nw) / 2.0, y + s - 15.0, theme::text_secondary());
+                c.text(font::MEDIUM, 9.5, &n, x + (s - nw) / 2.0, y + s - 15.0, theme::TEXT_SECONDARY);
             }
             Some(_) => {}
-            None => c.icon(theme::I_PLUS, 16.0, x + s / 2.0, y + s / 2.0 - 4.0, theme::alpha(theme::text_muted(), 0.6 + 0.4 * hv)),
+            None => c.icon(theme::I_PLUS, 16.0, x + s / 2.0, y + s / 2.0 - 4.0, theme::alpha(theme::TEXT_MUTED, 0.6 + 0.4 * hv)),
         }
-        c.text(font::SEMIBOLD, 9.5, &(i + 1).to_string(), x + 7.0, y + 5.0, if locked { theme::text_muted() } else { theme::text_secondary() });
+        c.text(font::SEMIBOLD, 9.5, &(i + 1).to_string(), x + 7.0, y + 5.0, if locked { theme::TEXT_MUTED } else { theme::TEXT_SECONDARY });
         let tip = format!("Remove from slot {}", i + 1);
         if it.is_some()
             && over
@@ -541,30 +541,30 @@ impl EmotesView {
         let sel = self.pick.as_deref() == Some(it.id.as_str());
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let sl = ui.anim_on(&format!("{id}#s"), sel, 16.0);
-        c.round(x, y, w, h, 12.0, theme::mix(theme::panel(), theme::panel_hover(), hv.max(sl * 0.7)));
-        c.outline(x, y, w, h, 12.0, if sel { 1.5 } else { 1.0 }, theme::mix(theme::mix(theme::hairline(), theme::border_hover(), hv), 0xE6FFFFFF, sl));
+        c.round(x, y, w, h, 12.0, theme::mix(CARD, CARD_HOVER, hv.max(sl * 0.7)));
+        c.outline(x, y, w, h, 12.0, if sel { 1.5 } else { 1.0 }, theme::mix(theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv), 0xE6FFFFFF, sl));
         let meta = 28.0;
         c.round(x + 6.0, y + 6.0, w - 12.0, h - meta - 10.0, 8.0, 0x40000000);
         self.poster(ui, c, it, skin, slim, x + 10.0, y + 8.0, w - 20.0, h - meta - 14.0, over);
         if !it.owned {
-            c.icon(if it.free { theme::I_PLUS } else { theme::I_LOCK }, 11.0, x + w - 15.0, y + 15.0, theme::text_secondary());
+            c.icon(if it.free { theme::I_PLUS } else { theme::I_LOCK }, 11.0, x + w - 15.0, y + 15.0, theme::TEXT_SECONDARY);
         } else if let Some(i) = at {
             c.circle(x + w - 15.0, y + 15.0, 9.0, 0xFFF4F4F5);
             let n = (i + 1).to_string();
             let nw = c.text_width(font::SEMIBOLD, 9.5, &n);
             let lh = c.line_height(font::SEMIBOLD, 9.5);
-            c.text(font::SEMIBOLD, 9.5, &n, x + w - 15.0 - nw / 2.0, y + 15.0 - lh / 2.0, theme::solid_fg());
+            c.text(font::SEMIBOLD, 9.5, &n, x + w - 15.0 - nw / 2.0, y + 15.0 - lh / 2.0, theme::SOLID_FG);
         }
-        c.fill(x + 1.0, y + h - meta, w - 2.0, 1.0, theme::hairline());
+        c.fill(x + 1.0, y + h - meta, w - 2.0, 1.0, theme::HAIRLINE);
         let tag = if it.owned { None } else if it.free { Some("Free") } else { Some("Store") };
         let tag_w = tag.map_or(0.0, |t| c.text_width(font::MEDIUM, 10.0, t) + 8.0);
         let n = c.ellipsize(font::SEMIBOLD, 11.0, &it.label(), w - 18.0 - tag_w);
         let my = y + h - meta / 2.0;
         let lh = c.line_height(font::SEMIBOLD, 11.0);
-        c.text(font::SEMIBOLD, 11.0, &n, x + 9.0, my - lh / 2.0, if sel || at.is_some() { theme::text_strong() } else { theme::text() });
+        c.text(font::SEMIBOLD, 11.0, &n, x + 9.0, my - lh / 2.0, if sel || at.is_some() { theme::TEXT_STRONG } else { theme::TEXT });
         if let Some(tag) = tag {
             let th = c.line_height(font::MEDIUM, 10.0);
-            c.text(font::MEDIUM, 10.0, tag, x + w - 9.0 - tag_w + 8.0, my - th / 2.0, if it.free { theme::accent() } else { theme::text_muted() });
+            c.text(font::MEDIUM, 10.0, tag, x + w - 9.0 - tag_w + 8.0, my - th / 2.0, if it.free { theme::ACCENT } else { theme::TEXT_MUTED });
         }
     }
 
@@ -585,8 +585,8 @@ impl EmotesView {
                 let (dw, dh) = (img.width as f32 * k, img.height as f32 * k);
                 c.image(&img, x + (w - dw) / 2.0, y + (h - dh) / 2.0, dw, dh, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
             }
-            Some(Pic::Loading) => ui.dots(c, x + w / 2.0, y + h / 2.0, theme::text_muted()),
-            _ => c.icon(theme::I_SMILE, (w * 0.4).min(22.0), x + w / 2.0, y + h / 2.0, theme::text_muted()),
+            Some(Pic::Loading) => ui.dots(c, x + w / 2.0, y + h / 2.0, theme::TEXT_MUTED),
+            _ => c.icon(theme::I_SMILE, (w * 0.4).min(22.0), x + w / 2.0, y + h / 2.0, theme::TEXT_MUTED),
         }
     }
 
@@ -600,7 +600,7 @@ impl EmotesView {
         let it = find(items, Some(&drag_id)).cloned();
         if self.dragging && let Some(e) = &it {
             let s = 64.0;
-            c.round(ui.mx - s / 2.0, ui.my - s / 2.0, s, s, 12.0, theme::alpha(theme::panel_hover(), 0.88));
+            c.round(ui.mx - s / 2.0, ui.my - s / 2.0, s, s, 12.0, 0xE00E1014);
             c.outline(ui.mx - s / 2.0, ui.my - s / 2.0, s, s, 12.0, 1.0, 0xE6FFFFFF);
             self.poster(ui, c, e, skin, slim, ui.mx - s / 2.0 + 6.0, ui.my - s / 2.0 + 4.0, s - 12.0, s - 10.0, false);
         }
@@ -645,8 +645,8 @@ impl EmotesView {
         }
         let a = ui.anim_on(&format!("{id}#on"), on, 16.0);
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-        c.round(x, y, w, h, h / 2.0, theme::mix(theme::mix(theme::subtle(), theme::subtle_hover(), hv), 0xFFF4F4F5, a));
-        let fg = theme::mix(theme::mix(theme::text_secondary(), theme::text_strong(), hv), theme::solid_fg(), a);
+        c.round(x, y, w, h, h / 2.0, theme::mix(theme::mix(theme::SUBTLE, theme::SUBTLE_HOVER, hv), 0xFFF4F4F5, a));
+        let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::SOLID_FG, a);
         let lh = c.line_height(font::SEMIBOLD, 11.0);
         c.text(font::SEMIBOLD, 11.0, label, x + 11.0, y + (h - lh) / 2.0, fg);
         w
@@ -655,9 +655,9 @@ impl EmotesView {
     fn search_box(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
         let f = self.search.focused(ui);
         let fa = ui.anim_on("emotes:search#f", f, 14.0);
-        c.round(x, y, w, h, h / 2.0, theme::mix(theme::alpha(theme::panel(), 0.72), theme::alpha(theme::panel_hover(), 0.88), fa));
-        c.outline(x, y, w, h, h / 2.0, 1.0, theme::mix(theme::hairline_strong(), theme::border_hover(), fa));
-        c.icon(theme::I_SEARCH, 13.0, x + 16.0, y + h / 2.0, theme::text_muted());
+        c.round(x, y, w, h, h / 2.0, theme::mix(0xB808090C, 0xE00E1014, fa));
+        c.outline(x, y, w, h, h / 2.0, 1.0, theme::mix(theme::HAIRLINE_STRONG, theme::BORDER_HOVER, fa));
+        c.icon(theme::I_SEARCH, 13.0, x + 16.0, y + h / 2.0, theme::TEXT_MUTED);
         let clear = !self.search.is_empty();
         if ui.pressed && ui.hover(c, x, y, w - if clear { 30.0 } else { 0.0 }, h) {
             self.search.focus(ui);

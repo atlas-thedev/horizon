@@ -2,50 +2,30 @@
 //! monochrome, soft hairlines). Colours are ARGB, as in the Java mod.
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicU32, Ordering};
-
+pub const PAGE: u32 = 0xFF000000;
+pub const SURFACE: u32 = 0xFF050608;
+pub const PANEL: u32 = 0xFF08090C;
+pub const PANEL_HOVER: u32 = 0xFF0E1014;
+pub const PANEL_PRESSED: u32 = 0xFF14171D;
+/// 8 %.
+pub const HAIRLINE: u32 = 0x14FFFFFF;
+/// 16 %.
+pub const HAIRLINE_STRONG: u32 = 0x29FFFFFF;
+pub const BORDER_HOVER: u32 = 0x47FFFFFF;
+/// 6 %.
+pub const SUBTLE: u32 = 0x0FFFFFFF;
+/// 12 %.
+pub const SUBTLE_HOVER: u32 = 0x1FFFFFFF;
+pub const TEXT: u32 = 0xFFD2D2D2;
+pub const TEXT_STRONG: u32 = 0xFFFFFFFF;
+pub const TEXT_SECONDARY: u32 = 0xFFA1A1AA;
+pub const TEXT_MUTED: u32 = 0xFF75717A;
+pub const ACCENT: u32 = 0xFFD9A6DA;
+pub const ONLINE: u32 = 0xFF22C55E;
+pub const IDLE: u32 = 0xFFF59E0B;
+pub const DANGER: u32 = 0xFFEF4444;
 pub const WHITE: u32 = 0xFFFFFFFF;
-pub const KEYS: [&str; 19] = ["page", "surface", "panel", "hover", "pressed", "border", "strongBorder", "focus", "overlay", "hoverOverlay", "text", "heading", "secondaryText", "mutedText", "accent", "success", "warning", "danger", "buttonText"];
-pub const DEFAULT: [u32; KEYS.len()] = [0xFF000000, 0xFF050608, 0xFF08090C, 0xFF0E1014, 0xFF14171D, 0x14FFFFFF, 0x29FFFFFF, 0x47FFFFFF, 0x0FFFFFFF, 0x1FFFFFFF, 0xFFD2D2D2, 0xFFFFFFFF, 0xFFA1A1AA, 0xFF75717A, 0xFFD9A6DA, 0xFF22C55E, 0xFFF59E0B, 0xFFEF4444, 0xFF09090B];
-static COLORS: [AtomicU32; KEYS.len()] = {
-    let mut colors = [const { AtomicU32::new(0) }; KEYS.len()];
-    let mut i = 0;
-    while i < KEYS.len() {
-        colors[i] = AtomicU32::new(DEFAULT[i]);
-        i += 1;
-    }
-    colors
-};
-
-pub fn colors() -> [u32; KEYS.len()] {
-    std::array::from_fn(|i| COLORS[i].load(Ordering::Relaxed))
-}
-
-pub fn set_colors(colors: [u32; KEYS.len()]) {
-    for (slot, color) in COLORS.iter().zip(colors) {
-        slot.store(color, Ordering::Relaxed);
-    }
-}
-
-pub fn page() -> u32 { COLORS[0].load(Ordering::Relaxed) }
-pub fn surface() -> u32 { COLORS[1].load(Ordering::Relaxed) }
-pub fn panel() -> u32 { COLORS[2].load(Ordering::Relaxed) }
-pub fn panel_hover() -> u32 { COLORS[3].load(Ordering::Relaxed) }
-pub fn panel_pressed() -> u32 { COLORS[4].load(Ordering::Relaxed) }
-pub fn hairline() -> u32 { COLORS[5].load(Ordering::Relaxed) }
-pub fn hairline_strong() -> u32 { COLORS[6].load(Ordering::Relaxed) }
-pub fn border_hover() -> u32 { COLORS[7].load(Ordering::Relaxed) }
-pub fn subtle() -> u32 { COLORS[8].load(Ordering::Relaxed) }
-pub fn subtle_hover() -> u32 { COLORS[9].load(Ordering::Relaxed) }
-pub fn text() -> u32 { COLORS[10].load(Ordering::Relaxed) }
-pub fn text_strong() -> u32 { COLORS[11].load(Ordering::Relaxed) }
-pub fn text_secondary() -> u32 { COLORS[12].load(Ordering::Relaxed) }
-pub fn text_muted() -> u32 { COLORS[13].load(Ordering::Relaxed) }
-pub fn accent() -> u32 { COLORS[14].load(Ordering::Relaxed) }
-pub fn online() -> u32 { COLORS[15].load(Ordering::Relaxed) }
-pub fn idle() -> u32 { COLORS[16].load(Ordering::Relaxed) }
-pub fn danger() -> u32 { COLORS[17].load(Ordering::Relaxed) }
-pub fn solid_fg() -> u32 { COLORS[18].load(Ordering::Relaxed) }
+pub const SOLID_FG: u32 = 0xFF09090B;
 
 // Lucide icon codepoints.
 pub const I_MESSAGE: u32 = 0xE11A;

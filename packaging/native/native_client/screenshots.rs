@@ -215,7 +215,7 @@ impl Screenshots {
             format!("{} {}", self.shots.len(), if self.shots.len() == 1 { "screenshot" } else { "screenshots" })
         };
         let lh = c.line_height(font::MEDIUM, 12.0);
-        c.text(font::MEDIUM, 12.0, &count, x + 2.0, y + (tb - lh) / 2.0, theme::text_secondary());
+        c.text(font::MEDIUM, 12.0, &count, x + 2.0, y + (tb - lh) / 2.0, theme::TEXT_SECONDARY);
         let bw = 130.0;
         let bx = x + w - bw;
         if ui.button(c, "shots:folder", bx, y, bw, 32.0, "Open folder", theme::I_LAYERS, ui::BTN_GHOST) {
@@ -229,7 +229,7 @@ impl Screenshots {
         {
             let nw = c.text_width(font::MEDIUM, 11.5, note);
             let nh = c.line_height(font::MEDIUM, 11.5);
-            c.text(font::MEDIUM, 11.5, note, bx - 52.0 - nw, y + (tb - nh) / 2.0, theme::online());
+            c.text(font::MEDIUM, 11.5, note, bx - 52.0 - nw, y + (tb - nh) / 2.0, theme::ONLINE);
         }
         let (gy, gh) = (y + tb + 8.0, h - tb - 8.0);
         if self.loaded && self.shots.is_empty() {
@@ -269,14 +269,14 @@ impl Screenshots {
         let id = format!("shots:card:{index}");
         let over = ui.hover(c, x, y, w, h);
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-        c.round(x, y, w, h, 12.0, theme::mix(theme::alpha(theme::panel(), 0.72), theme::alpha(theme::panel_hover(), 0.85), hv));
-        c.outline(x, y, w, h, 12.0, 1.0, theme::mix(theme::hairline(), theme::hairline_strong(), hv));
+        c.round(x, y, w, h, 12.0, theme::mix(0xB808090C, 0xD80E1014, hv));
+        c.outline(x, y, w, h, 12.0, 1.0, theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, hv));
         let (ix, iy, iw, ih) = (x + 5.0, y + 5.0, w - 10.0, w * 9.0 / 16.0 - 4.0);
         match self.thumbs.get(&shot.key()).cloned() {
             None => {
                 self.load_thumb(&shot);
                 c.round(ix, iy, iw, ih, 8.0, 0x12FFFFFF);
-                c.icon(icons::CAMERA, 18.0, ix + iw / 2.0, iy + ih / 2.0, theme::text_muted());
+                c.icon(icons::CAMERA, 18.0, ix + iw / 2.0, iy + ih / 2.0, theme::TEXT_MUTED);
             }
             Some(t) => {
                 c.push_clip(ix, iy, iw, ih);
@@ -286,8 +286,8 @@ impl Screenshots {
         }
         let ty = iy + ih + 6.0;
         let name = c.ellipsize(font::MEDIUM, 11.0, &shot.name, w - 18.0);
-        c.text(font::MEDIUM, 11.0, &name, x + 10.0, ty, theme::text());
-        c.text(font::REGULAR, 10.0, &format!("{}  \u{b7}  {}", shot.when, shot.size), x + 10.0, ty + 15.0, theme::text_muted());
+        c.text(font::MEDIUM, 11.0, &name, x + 10.0, ty, theme::TEXT);
+        c.text(font::REGULAR, 10.0, &format!("{}  \u{b7}  {}", shot.when, shot.size), x + 10.0, ty + 15.0, theme::TEXT_MUTED);
         if over {
             ui.cursor_hand = true;
         }
@@ -344,8 +344,8 @@ impl Screenshots {
             return;
         }
         let name = c.ellipsize(font::SEMIBOLD, 13.0, &shot.name, w - 560.0);
-        c.text(font::SEMIBOLD, 13.0, &name, x + 106.0, y + 2.0, theme::text_strong());
-        c.text(font::REGULAR, 10.5, &format!("{}  \u{b7}  {}", shot.when, shot.size), x + 106.0, y + 19.0, theme::text_muted());
+        c.text(font::SEMIBOLD, 13.0, &name, x + 106.0, y + 2.0, theme::TEXT_STRONG);
+        c.text(font::REGULAR, 10.5, &format!("{}  \u{b7}  {}", shot.when, shot.size), x + 106.0, y + 19.0, theme::TEXT_MUTED);
         let mut bx = x + w - 112.0;
         if self.confirm.is_some() {
             if ui.button(c, "shots:yes", bx, y, 112.0, 32.0, "Delete it", theme::I_TRASH, ui::BTN_DANGER) {
@@ -358,7 +358,7 @@ impl Screenshots {
             }
             let ask = "Delete this screenshot for good?";
             let aw = c.text_width(font::MEDIUM, 11.5, ask);
-            c.text(font::MEDIUM, 11.5, ask, bx - 14.0 - aw, y + 8.0, theme::danger());
+            c.text(font::MEDIUM, 11.5, ask, bx - 14.0 - aw, y + 8.0, theme::DANGER);
         } else {
             if ui.button(c, "shots:del", bx, y, 112.0, 32.0, "Delete", theme::I_TRASH, ui::BTN_GHOST) {
                 self.confirm = Some(shot.name.clone());
@@ -375,11 +375,11 @@ impl Screenshots {
         }
         let (py, ph) = (y + 46.0, h - 46.0);
         c.round(x, py, w, ph, 12.0, 0x66000000);
-        c.outline(x, py, w, ph, 12.0, 1.0, theme::hairline());
+        c.outline(x, py, w, ph, 12.0, 1.0, theme::HAIRLINE);
         let Some(img) = self.big.clone() else {
             let t = if self.big_loading { "Loading..." } else { "This picture can't be shown" };
             let tw = c.text_width(font::MEDIUM, 12.0, t);
-            c.text(font::MEDIUM, 12.0, t, x + (w - tw) / 2.0, py + ph / 2.0 - 8.0, theme::text_muted());
+            c.text(font::MEDIUM, 12.0, t, x + (w - tw) / 2.0, py + ph / 2.0 - 8.0, theme::TEXT_MUTED);
             return;
         };
         let pad = 10.0;

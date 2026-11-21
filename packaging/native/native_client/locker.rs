@@ -2,7 +2,7 @@
 //! player's model on the left, the slots and the owned items on the right.
 #![allow(dead_code)]
 
-use super::menu::{clamp01, disabled, ease, empty, glow};
+use super::menu::{CARD, CARD_HOVER, clamp01, disabled, ease, empty, glow};
 use super::net::{self, Pic};
 use super::preview3d::PlayerPreview;
 use super::scroll::Scroll;
@@ -72,8 +72,8 @@ impl Locker {
         // The stage.
         c.round(x, y, sw, h, 14.0, 0x66000000);
         glow(c, x, y, sw, h * 0.6, 14.0, 0x10FFFFFF);
-        c.outline(x, y, sw, h, 14.0, 1.0, theme::hairline());
-        c.text(font::SEMIBOLD, 10.5, "PREVIEW", x + 16.0, y + 16.0, theme::text_muted());
+        c.outline(x, y, sw, h, 14.0, 1.0, theme::HAIRLINE);
+        c.text(font::SEMIBOLD, 10.5, "PREVIEW", x + 16.0, y + 16.0, theme::TEXT_MUTED);
         let title = if nothing {
             format!("No {}", singular(self.slot))
         } else if let Some(p) = &picked {
@@ -82,20 +82,20 @@ impl Locker {
             "Your look".to_owned()
         };
         let title = c.ellipsize(font::SEMIBOLD, 15.0, &title, sw - 32.0);
-        c.text(font::SEMIBOLD, 15.0, &title, x + 16.0, y + 32.0, theme::text_strong());
+        c.text(font::SEMIBOLD, 15.0, &title, x + 16.0, y + 32.0, theme::TEXT_STRONG);
         let bare = nothing.then_some(SLOTS[self.slot]);
         c.push_clip(x + 1.0, y + 56.0, sw - 2.0, h - 56.0 - 96.0);
         self.preview.draw(ui, c, "menu:preview", x, y + 60.0, sw, h - 60.0 - 104.0, &l, who, picked.as_ref(), bare);
         c.pop_clip();
         let hint = "Drag to turn";
         let hw = c.text_width(font::REGULAR, 11.0, hint);
-        c.text(font::REGULAR, 11.0, hint, x + (sw - hw) / 2.0, y + h - 92.0, theme::text_muted());
-        c.fill(x + 16.0, y + h - 70.0, sw - 32.0, 1.0, theme::hairline());
+        c.text(font::REGULAR, 11.0, hint, x + (sw - hw) / 2.0, y + h - 92.0, theme::TEXT_MUTED);
+        c.fill(x + 16.0, y + h - 70.0, sw - 32.0, 1.0, theme::HAIRLINE);
         let (bx, by, bw, bh) = (x + 16.0, y + h - 54.0, sw - 32.0, 38.0);
         let ready = l.state == State::Ready;
         if l.busy.is_some() {
-            c.round(bx, by, bw, bh, 10.0, theme::subtle_hover());
-            ui.dots(c, bx + bw / 2.0, by + bh / 2.0, theme::text_strong());
+            c.round(bx, by, bw, bh, 10.0, theme::SUBTLE_HOVER);
+            ui.dots(c, bx + bw / 2.0, by + bh / 2.0, theme::TEXT_STRONG);
         } else if !ready || (picked.is_none() && !nothing) {
             disabled(c, bx, by, bw, bh, if ready { "Pick something to try on" } else { "Equip" });
         } else if nothing {
@@ -127,7 +127,7 @@ impl Locker {
             wardrobe::refresh(false); // Signed in again: reload the locker.
         }
         if matches!(l.state, State::Idle | State::Loading | State::NoAccount) {
-            ui.dots(c, lx + lw / 2.0, y + h / 2.0, theme::text_secondary());
+            ui.dots(c, lx + lw / 2.0, y + h / 2.0, theme::TEXT_SECONDARY);
             if l.state == State::Idle {
                 wardrobe::refresh(false);
             }
@@ -161,22 +161,22 @@ impl Locker {
             }
             let on = ui.anim_on(&format!("{id}#on"), self.slot == i, 16.0);
             let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-            c.round(tx, ty, tw, 30.0, 15.0, theme::mix(theme::mix(theme::subtle(), theme::subtle_hover(), hv), 0xFFF4F4F5, on));
+            c.round(tx, ty, tw, 30.0, 15.0, theme::mix(theme::mix(theme::SUBTLE, theme::SUBTLE_HOVER, hv), 0xFFF4F4F5, on));
             if on < 0.99 {
-                c.outline(tx, ty, tw, 30.0, 15.0, 1.0, theme::alpha(theme::hairline(), 1.0 - on));
+                c.outline(tx, ty, tw, 30.0, 15.0, 1.0, theme::alpha(theme::HAIRLINE, 1.0 - on));
             }
-            let fg = theme::mix(theme::mix(theme::text_secondary(), theme::text_strong(), hv), theme::solid_fg(), on);
+            let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::SOLID_FG, on);
             let lh = c.line_height(font::SEMIBOLD, 11.5);
             c.text(font::SEMIBOLD, 11.5, &label, tx + 14.0, ty + (30.0 - lh) / 2.0, fg);
             tx += tw + 6.0;
         }
         let items = wardrobe::owned_in(&l, SLOTS[self.slot]);
         let hy = ty + 50.0;
-        c.text(font::SEMIBOLD, 10.5, "YOUR LOCKER", lx, hy, theme::text_muted());
-        c.text(font::SEMIBOLD, 17.0, SLOT_NAMES[self.slot], lx, hy + 16.0, theme::text_strong());
+        c.text(font::SEMIBOLD, 10.5, "YOUR LOCKER", lx, hy, theme::TEXT_MUTED);
+        c.text(font::SEMIBOLD, 17.0, SLOT_NAMES[self.slot], lx, hy + 16.0, theme::TEXT_STRONG);
         let owned = if items.len() == 1 { "1 owned".to_owned() } else { format!("{} owned", items.len()) };
         let ow = c.text_width(font::MEDIUM, 11.5, &owned);
-        c.text(font::MEDIUM, 11.5, &owned, lx + lw - ow, hy + 22.0, theme::text_muted());
+        c.text(font::MEDIUM, 11.5, &owned, lx + lw - ow, hy + 22.0, theme::TEXT_MUTED);
         let gy = hy + 52.0;
         let gh = y + h - gy - if l.error.is_some() { 26.0 } else { 0.0 };
         let gap = 12.0;
@@ -200,10 +200,10 @@ impl Locker {
         self.scroll.end(ui, c, n.div_ceil(cols) as f32 * (th + gap) - gap);
         if items.is_empty() && gh > th + 120.0 {
             let msg = format!("Get {} in the Native Store in the launcher.", SLOT_NAMES[self.slot].to_lowercase());
-            c.icon(theme::I_STORE, 14.0, lx + 8.0, gy + th + 30.0, theme::text_muted());
+            c.icon(theme::I_STORE, 14.0, lx + 8.0, gy + th + 30.0, theme::TEXT_MUTED);
             let msg = c.ellipsize(font::REGULAR, 11.5, &msg, lw - 24.0);
             let mh = c.line_height(font::REGULAR, 11.5);
-            c.text(font::REGULAR, 11.5, &msg, lx + 22.0, gy + th + 30.0 - mh / 2.0, theme::text_muted());
+            c.text(font::REGULAR, 11.5, &msg, lx + 22.0, gy + th + 30.0 - mh / 2.0, theme::TEXT_MUTED);
         }
         if let Some(err) = &l.error {
             let err = c.ellipsize(font::MEDIUM, 11.5, err, lw);
@@ -224,7 +224,7 @@ impl Locker {
         let sel = self.pick.as_deref() == Some(key.as_str());
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let sl = ui.anim_on(&format!("{id}#s"), sel, 16.0);
-        c.round(x, y, w, h, 12.0, theme::mix(theme::panel(), theme::panel_hover(), hv.max(sl * 0.7)));
+        c.round(x, y, w, h, 12.0, theme::mix(CARD, CARD_HOVER, hv.max(sl * 0.7)));
         c.outline(
             x,
             y,
@@ -232,13 +232,13 @@ impl Locker {
             h,
             12.0,
             if sel { 1.5 } else { 1.0 },
-            theme::mix(theme::mix(theme::hairline(), theme::border_hover(), hv), 0xE6FFFFFF, sl),
+            theme::mix(theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv), 0xE6FFFFFF, sl),
         );
         let meta = 34.0;
         let (ix, iy, iw, ih) = (x + 8.0, y + 8.0, w - 16.0, h - meta - 12.0);
         c.round(ix, iy, iw, ih, 8.0, 0x40000000);
         match it {
-            None => c.icon(theme::I_BAN, 26.0, ix + iw / 2.0, iy + ih / 2.0, theme::mix(theme::text_muted(), theme::text_secondary(), hv)),
+            None => c.icon(theme::I_BAN, 26.0, ix + iw / 2.0, iy + ih / 2.0, theme::mix(theme::TEXT_MUTED, theme::TEXT_SECONDARY, hv)),
             Some(item) if item.is_cape() => {
                 let still = item.still_url.as_deref().map(|u| net::image(u, 4 * 1024 * 1024));
                 let strip = if item.animated() { item.strip_url.as_deref().map(|u| net::image(u, 4 * 1024 * 1024)) } else { None };
@@ -253,7 +253,7 @@ impl Locker {
                         c.image(&img, ix + (iw - dw) / 2.0, iy + 6.0, dw, dh, [1.0 / 64.0, 1.0 / 32.0, 11.0 / 64.0, 17.0 / 32.0], 0xFFFFFFFF);
                     }
                     (_, Some(Pic::Failed)) | (_, None) => {}
-                    _ => ui.dots(c, ix + iw / 2.0, iy + ih / 2.0, theme::text_muted()),
+                    _ => ui.dots(c, ix + iw / 2.0, iy + ih / 2.0, theme::TEXT_MUTED),
                 }
             }
             Some(item) => match item.still_url.as_deref().map(|u| net::image(u, 4 * 1024 * 1024)) {
@@ -262,8 +262,8 @@ impl Locker {
                     let (dw, dh) = (img.width as f32 * k, img.height as f32 * k);
                     c.image(&img, ix + (iw - dw) / 2.0, iy + (ih - dh) / 2.0, dw, dh, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
                 }
-                Some(Pic::Loading) => ui.dots(c, ix + iw / 2.0, iy + ih / 2.0, theme::text_muted()),
-                _ => slot_icon(c, SLOT_ICONS[self.slot], 22.0, ix + iw / 2.0, iy + ih / 2.0, theme::text_muted()),
+                Some(Pic::Loading) => ui.dots(c, ix + iw / 2.0, iy + ih / 2.0, theme::TEXT_MUTED),
+                _ => slot_icon(c, SLOT_ICONS[self.slot], 22.0, ix + iw / 2.0, iy + ih / 2.0, theme::TEXT_MUTED),
             },
         }
         if let Some(item) = it
@@ -274,23 +274,23 @@ impl Locker {
         let on = ui.anim_on(&format!("{id}#on"), is_worn, 14.0);
         if on > 0.01 {
             c.circle(x + w - 17.0, y + 17.0, 9.0, theme::alpha(0xFFF4F4F5, on));
-            c.icon(theme::I_CHECK, 11.0, x + w - 17.0, y + 17.0, theme::alpha(theme::solid_fg(), on));
+            c.icon(theme::I_CHECK, 11.0, x + w - 17.0, y + 17.0, theme::alpha(theme::SOLID_FG, on));
         }
         // The card's meta line.
-        c.fill(x + 1.0, y + h - meta, w - 2.0, 1.0, theme::hairline());
+        c.fill(x + 1.0, y + h - meta, w - 2.0, 1.0, theme::HAIRLINE);
         let my = y + h - meta / 2.0;
         if it.is_some_and(|i| l.busy.as_deref() == Some(i.id.as_str())) {
-            ui.dots(c, x + w / 2.0, my, theme::text_strong());
+            ui.dots(c, x + w / 2.0, my, theme::TEXT_STRONG);
         } else {
             let name = it.map_or("Nothing", Item::display);
             let tag = is_worn.then_some("Worn");
             let tag_w = tag.map_or(0.0, |t| c.text_width(font::MEDIUM, 10.0, t) + 8.0);
             let name = c.ellipsize(font::SEMIBOLD, 11.5, name, w - 22.0 - tag_w);
             let lh = c.line_height(font::SEMIBOLD, 11.5);
-            c.text(font::SEMIBOLD, 11.5, &name, x + 11.0, my - lh / 2.0, if is_worn || sel { theme::text_strong() } else { theme::text() });
+            c.text(font::SEMIBOLD, 11.5, &name, x + 11.0, my - lh / 2.0, if is_worn || sel { theme::TEXT_STRONG } else { theme::TEXT });
             if let Some(tag) = tag {
                 let th = c.line_height(font::MEDIUM, 10.0);
-                c.text(font::MEDIUM, 10.0, tag, x + w - 11.0 - tag_w + 8.0, my - th / 2.0, theme::accent());
+                c.text(font::MEDIUM, 10.0, tag, x + w - 11.0 - tag_w + 8.0, my - th / 2.0, theme::ACCENT);
             }
         }
     }
@@ -320,10 +320,10 @@ fn partner_tag(c: &mut Canvas, it: &Item, x: f32, y: f32, max_w: f32) {
 pub fn session_lock(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32) {
     let status = net::status();
     if status == net::Status::Checking {
-        ui.dots(c, x + w / 2.0, y + h / 2.0 - 24.0, theme::text_secondary());
+        ui.dots(c, x + w / 2.0, y + h / 2.0 - 24.0, theme::TEXT_SECONDARY);
         let title = net::lock_title();
         let tw = c.text_width(font::SEMIBOLD, 13.5, title);
-        c.text(font::SEMIBOLD, 13.5, title, x + (w - tw) / 2.0, y + h / 2.0, theme::text_strong());
+        c.text(font::SEMIBOLD, 13.5, title, x + (w - tw) / 2.0, y + h / 2.0, theme::TEXT_STRONG);
         return;
     }
     let icon = if status == net::Status::Offline { theme::I_WIFI_OFF } else { theme::I_LOCK };

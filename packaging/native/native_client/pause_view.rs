@@ -61,7 +61,7 @@ impl PauseView {
         let tw = c.text_width(font::BOLD, 17.0, &info.title);
         let ty = 18.0f32.max(y - 64.0);
         c.text(font::BOLD, 17.0, &info.title, (w_all - tw) / 2.0 + 1.0, ty + 1.0, 0x99000000);
-        c.text(font::BOLD, 17.0, &info.title, (w_all - tw) / 2.0, ty, theme::text_strong());
+        c.text(font::BOLD, 17.0, &info.title, (w_all - tw) / 2.0, ty, theme::TEXT_STRONG);
         let mut action = PauseAction::None;
         if button(ui, c, "pause:resume", x, y, bw, bh, &info.back) {
             action = PauseAction::Resume;

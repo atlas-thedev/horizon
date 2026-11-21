@@ -510,7 +510,7 @@ impl Behaviour for BossBars {
                 let col = BAR_COLORS[b.color.min(BAR_COLORS.len() - 1)];
                 let bh = 5.0 * s;
                 c.round(ix, ty, iw, bh, bh / 2.0, 0x66000000);
-                c.outline(ix, ty, iw, bh, bh / 2.0, 1.0, theme::hairline());
+                c.outline(ix, ty, iw, bh, bh / 2.0, 1.0, theme::HAIRLINE);
                 let p = self.shown[i].1.clamp(0.0, 1.0);
                 if p > 0.005 {
                     c.round(ix, ty, bh.max(iw * p), bh, bh / 2.0, col);

@@ -137,7 +137,7 @@ impl Widgets {
         let shown = ui.anim(&format!("{id}#v"), t, if drag { 40.0 } else { 18.0 });
         let hv = ui.anim_on(&format!("{id}#h"), over || drag, 14.0);
         let ty = y + h / 2.0 - 2.0;
-        c.round(x, ty, w, 4.0, 2.0, theme::subtle_hover());
+        c.round(x, ty, w, 4.0, 2.0, theme::SUBTLE_HOVER);
         c.round(x, ty, (w * shown).max(4.0), 4.0, 2.0, 0xFFF4F4F5);
         let kr = 7.0 + hv * 1.5;
         let kx = x + w * shown;
@@ -152,8 +152,8 @@ impl Widgets {
     /// A pill group; returns the (possibly new) selected index.
     #[allow(clippy::too_many_arguments)]
     pub fn segmented(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32, options: &[&str], value: usize) -> usize {
-        c.round(x, y, w, h, h / 2.0, theme::subtle());
-        c.outline(x, y, w, h, h / 2.0, 1.0, theme::hairline());
+        c.round(x, y, w, h, h / 2.0, theme::SUBTLE);
+        c.outline(x, y, w, h, h / 2.0, 1.0, theme::HAIRLINE);
         let fs = 11.5;
         // Segments are sized to their text, so a long option is never cut off.
         let mut seg: Vec<f32> = options.iter().map(|o| c.text_width(font::SEMIBOLD, fs, o) + 20.0).collect();
@@ -183,7 +183,7 @@ impl Widgets {
                 out = i;
             }
             let on = (1.0 - (sel - i as f32).abs()).max(0.0);
-            let fg = theme::mix(if over { theme::text_strong() } else { theme::text_secondary() }, theme::solid_fg(), on);
+            let fg = theme::mix(if over { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY }, theme::SOLID_FG, on);
             let label = c.ellipsize(font::SEMIBOLD, fs, options[i], seg[i] - 4.0);
             let tw = c.text_width(font::SEMIBOLD, fs, &label);
             let lh = c.line_height(font::SEMIBOLD, fs);
@@ -243,7 +243,7 @@ impl Widgets {
         }
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let lv = ui.anim_on(&format!("{id}#l"), wait, 12.0);
-        c.round(x, y, w, h, 8.0, theme::mix(theme::mix(theme::alpha(theme::panel(), 0.72), theme::alpha(theme::panel_hover(), 0.85), hv), 0x26D9A6DA, lv));
+        c.round(x, y, w, h, 8.0, theme::mix(theme::mix(0xB808090C, 0xD80E1014, hv), 0x26D9A6DA, lv));
         c.outline(
             x,
             y,
@@ -252,8 +252,8 @@ impl Widgets {
             8.0,
             1.0,
             theme::mix(
-                theme::mix(theme::hairline_strong(), theme::border_hover(), hv),
-                theme::alpha(theme::accent(), 0.7),
+                theme::mix(theme::HAIRLINE_STRONG, theme::BORDER_HOVER, hv),
+                theme::alpha(theme::ACCENT, 0.7),
                 lv,
             ),
         );
@@ -261,9 +261,9 @@ impl Widgets {
         let t = if wait { "Press a key\u{2026}".to_owned() } else { keys::name(out) };
         let t = c.ellipsize(font::SEMIBOLD, fs, &t, w - 12.0);
         let fg = if wait {
-            theme::alpha(theme::accent(), 0.6 + 0.4 * (0.5 + 0.5 * (ui.now / 220.0).sin()) as f32)
+            theme::alpha(theme::ACCENT, 0.6 + 0.4 * (0.5 + 0.5 * (ui.now / 220.0).sin()) as f32)
         } else {
-            theme::text_strong()
+            theme::TEXT_STRONG
         };
         let tw = c.text_width(font::SEMIBOLD, fs, &t);
         let lh = c.line_height(font::SEMIBOLD, fs);
@@ -292,7 +292,7 @@ impl Widgets {
         let (gx, gy) = (x, y + ROW);
         let mut changed = false;
         c.round(gx - 4.0, gy - 4.0, gs + 8.0, gs + 8.0, 8.0, 0xFF0B0C10);
-        c.outline(gx - 4.0, gy - 4.0, gs + 8.0, gs + 8.0, 8.0, 1.0, theme::hairline());
+        c.outline(gx - 4.0, gy - 4.0, gs + 8.0, gs + 8.0, 8.0, 1.0, theme::HAIRLINE);
         let mid = n / 2;
         for j in 0..n {
             for i in 0..n {
@@ -377,7 +377,7 @@ impl Widgets {
             if saved.is_empty() { "SAVED CROSSHAIRS  \u{b7}  none yet" } else { "SAVED CROSSHAIRS" },
             rx,
             by,
-            theme::text_muted(),
+            theme::TEXT_MUTED,
         );
         by += 18.0;
         let t = 40.0;
@@ -393,7 +393,7 @@ impl Widgets {
             let sel = Some(k) == cur;
             let ov = ui.hover(c, tx, by, t, t);
             c.round(tx, by, t, t, 7.0, if sel { 0x33B46CFF } else if ov { 0x1FFFFFFF } else { 0x12FFFFFF });
-            c.outline(tx, by, t, t, 7.0, 1.0, if sel { 0xFFB46CFF } else { theme::hairline() });
+            c.outline(tx, by, t, t, 7.0, 1.0, if sel { 0xFFB46CFF } else { theme::HAIRLINE });
             let pc = (t - 8.0) / n as f32;
             for j in 0..n {
                 for i in 0..n {
@@ -414,7 +414,7 @@ impl Widgets {
             "Drag to draw \u{b7} right-click erases \u{b7} the grid is your crosshair",
             gx - 4.0,
             gy + gs + 6.0,
-            theme::text_muted(),
+            theme::TEXT_MUTED,
         );
         changed
     }
@@ -436,12 +436,12 @@ impl Widgets {
         let missing = !value.is_empty() && !list.contains(&value);
         let over = ui.hover(c, bx, by, bw, bh);
         c.round(bx, by, bw, bh, 8.0, if over || open { 0x24FFFFFF } else { 0x14FFFFFF });
-        c.outline(bx, by, bw, bh, 8.0, 1.0, if open { 0x40FFFFFF } else { theme::hairline() });
+        c.outline(bx, by, bw, bh, 8.0, 1.0, if open { 0x40FFFFFF } else { theme::HAIRLINE });
         let shown = if missing { format!("{current} (unplugged)") } else { current };
         let shown = c.ellipsize(font::SEMIBOLD, 11.5, &shown, bw - 34.0);
         let lh = c.line_height(font::SEMIBOLD, 11.5);
-        c.text(font::SEMIBOLD, 11.5, &shown, bx + 10.0, by + (bh - lh) / 2.0, if missing { theme::danger() } else { theme::text_strong() });
-        c.icon(if open { theme::I_CHEVRON_UP } else { theme::I_CHEVRON_DOWN }, 12.0, bx + bw - 14.0, by + bh / 2.0, theme::text_muted());
+        c.text(font::SEMIBOLD, 11.5, &shown, bx + 10.0, by + (bh - lh) / 2.0, if missing { theme::DANGER } else { theme::TEXT_STRONG });
+        c.icon(if open { theme::I_CHEVRON_UP } else { theme::I_CHEVRON_DOWN }, 12.0, bx + bw - 14.0, by + bh / 2.0, theme::TEXT_MUTED);
         if ui.clicked(c, id, bx, by, bw, bh) {
             set_open_device(if open { None } else { Some(key) });
         }
@@ -456,11 +456,11 @@ impl Widgets {
                     c.round(x, ly, w, 28.0, 7.0, if sel { 0x1F22C55E } else { 0x14FFFFFF });
                 }
                 if sel {
-                    c.icon(theme::I_CHECK, 12.0, x + 14.0, ly + 14.0, theme::online());
+                    c.icon(theme::I_CHECK, 12.0, x + 14.0, ly + 14.0, theme::ONLINE);
                 }
                 let t = c.ellipsize(font::MEDIUM, 12.0, &shown, w - 40.0);
                 let th = c.line_height(font::MEDIUM, 12.0);
-                c.text(font::MEDIUM, 12.0, &t, x + 28.0, ly + (28.0 - th) / 2.0, if sel { theme::text_strong() } else { theme::text() });
+                c.text(font::MEDIUM, 12.0, &t, x + 28.0, ly + (28.0 - th) / 2.0, if sel { theme::TEXT_STRONG } else { theme::TEXT });
                 if ui.clicked(c, &format!("{id}#{i}"), x, ly, w, 28.0) {
                     if let Kind::Device { value, .. } = &mut s.kind {
                         *value = name;
@@ -501,7 +501,7 @@ impl Widgets {
         };
         let label_w = c.text_width(font::MEDIUM, fs, &label);
         let lh = c.line_height(font::MEDIUM, fs);
-        c.text(font::MEDIUM, fs, &label, x, y + (h - lh) / 2.0, theme::text());
+        c.text(font::MEDIUM, fs, &label, x, y + (h - lh) / 2.0, theme::TEXT);
         match s.kind.clone() {
             Kind::Pixels { .. } => changed = self.pixels_row(ui, c, id, x, y, w, s),
             Kind::Device { .. } => {
@@ -522,7 +522,7 @@ impl Widgets {
                 let sw = (w - label_w - vw - 36.0).clamp(70.0, 170.0);
                 let tw = c.text_width(font::SEMIBOLD, 11.5, &v);
                 let th = c.line_height(font::SEMIBOLD, 11.5);
-                c.text(font::SEMIBOLD, 11.5, &v, x + w - tw, y + (h - th) / 2.0, theme::text_secondary());
+                c.text(font::SEMIBOLD, 11.5, &v, x + w - tw, y + (h - th) / 2.0, theme::TEXT_SECONDARY);
                 changed = self.slider(ui, c, id, x + w - vw - sw, y + (h - 18.0) / 2.0, sw, s);
                 control_x = x + w - vw - sw - 6.0;
             }
@@ -591,9 +591,9 @@ impl Widgets {
                     Some(wn) => format!("{wn} (not active)"),
                 };
                 let hint = c.ellipsize(font::REGULAR, 10.0, &hint, w);
-                c.text(font::REGULAR, 10.0, &hint, x, y + ROW, if warning.is_none() { theme::text_muted() } else { theme::idle() });
+                c.text(font::REGULAR, 10.0, &hint, x, y + ROW, if warning.is_none() { theme::TEXT_MUTED } else { theme::IDLE });
                 let note = c.ellipsize(font::REGULAR, 10.0, "Esc cancels. Check Minecraft / other mods for conflicts.", w);
-                c.text(font::REGULAR, 10.0, &note, x, y + ROW + 15.0, theme::text_muted());
+                c.text(font::REGULAR, 10.0, &note, x, y + ROW + 15.0, theme::TEXT_MUTED);
             }
             Kind::Key { value, .. } => {
                 let v = self.keybind(ui, c, id, x + w - 110.0, y + (h - 28.0) / 2.0, 110.0, 28.0, value);

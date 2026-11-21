@@ -303,7 +303,7 @@ impl RelayView {
         c.push_clip(px, py, sbw, ph);
         c.round(px, py, sbw + 24.0, ph, 10.0, 0xFF07080B);
         c.pop_clip();
-        c.outline(px, py, pw, ph, 10.0, 1.0, theme::hairline_strong());
+        c.outline(px, py, pw, ph, 10.0, 1.0, theme::HAIRLINE_STRONG);
         if self.binding_key {
             if let Some((code, _)) = ui.keys.first().copied() {
                 if code != ui::KEY_ESCAPE {
@@ -325,14 +325,14 @@ impl RelayView {
             }
         } else {
             self.sidebar(ui, c, &snap, px, py, sbw, ph);
-            c.fill(px + sbw, py, 1.0, ph, theme::hairline());
+            c.fill(px + sbw, py, 1.0, ph, theme::HAIRLINE);
             let show_profile = self.profile_open && self.selected.as_deref().is_some_and(|s| s.starts_with("dm:")) && pw - sbw > 640.0;
             let pp = if show_profile { 270.0f32.min((pw - sbw) * 0.36) } else { 0.0 };
             if self.chat(ui, c, &snap, cfg, px + sbw + 1.0, py, pw - sbw - 1.0 - pp, ph) {
                 action = RelayAction::Close;
             }
             if pp > 0.0 {
-                c.fill(px + pw - pp, py, 1.0, ph, theme::hairline());
+                c.fill(px + pw - pp, py, 1.0, ph, theme::HAIRLINE);
                 self.profile_panel(ui, c, &snap, px + pw - pp + 1.0, py, pp - 1.0, ph);
             }
         }
@@ -396,8 +396,8 @@ impl RelayView {
         let wx = wordmark(c, x + pad + 2.0, y + 19.0);
         let dy = y + 19.0 + c.line_height(font::BOLD, 17.0) / 2.0;
         let live = match snap.link {
-            Link::Online => theme::online(),
-            Link::Connecting => theme::idle(),
+            Link::Online => theme::ONLINE,
+            Link::Connecting => theme::IDLE,
             _ => 0xFF52525B,
         };
         c.circle(wx + 8.0, dy, 3.0, live);
@@ -413,7 +413,7 @@ impl RelayView {
         }
         let hbx = x + w - pad - 28.0 - 32.0;
         if self.selected.is_none() {
-            c.round(hbx, y + 15.0, 28.0, 28.0, 7.0, theme::subtle_hover());
+            c.round(hbx, y + 15.0, 28.0, 28.0, 7.0, theme::SUBTLE_HOVER);
         }
         if ui.icon_button(c, "relay:home", hbx, y + 15.0, 28.0, theme::I_USERS, Some("Friends")) {
             self.go_home(0);
@@ -422,14 +422,14 @@ impl RelayView {
         // Search: icon + bare field in one box.
         let sf = ui.anim_on("relay:search#f", self.search.focused(ui), 14.0);
         c.round(x + pad, ty, w - pad * 2.0, 34.0, 7.0, theme::mix(0xFF0B0C10, 0xFF0E1014, sf));
-        c.outline(x + pad, ty, w - pad * 2.0, 34.0, 7.0, 1.0, theme::mix(theme::hairline(), 0x47FFFFFF, sf));
-        c.icon(theme::I_SEARCH, 13.0, x + pad + 15.0, ty + 17.0, theme::text_muted());
+        c.outline(x + pad, ty, w - pad * 2.0, 34.0, 7.0, 1.0, theme::mix(theme::HAIRLINE, 0x47FFFFFF, sf));
+        c.icon(theme::I_SEARCH, 13.0, x + pad + 15.0, ty + 17.0, theme::TEXT_MUTED);
         self.search.draw(ui, c, x + pad + 18.0, ty, w - pad * 2.0 - 18.0, 34.0, "Search conversations", 12.5);
         ty += 46.0;
         // Chats / Groups.
         let tw = (w - pad * 2.0) / 2.0;
         c.round(x + pad, ty, w - pad * 2.0, 34.0, 7.0, 0xFF0C0D11);
-        c.outline(x + pad, ty, w - pad * 2.0, 34.0, 7.0, 1.0, theme::hairline());
+        c.outline(x + pad, ty, w - pad * 2.0, 34.0, 7.0, 1.0, theme::HAIRLINE);
         let tab_pos = ui.anim("relay:tab", self.tab as f32, 16.0);
         c.shadow(x + pad + 3.0 + tab_pos * tw, ty + 4.0, tw - 6.0, 28.0, 5.0, 6.0, 0x66000000);
         c.round(x + pad + 3.0 + tab_pos * tw, ty + 3.0, tw - 6.0, 28.0, 5.0, 0xFF1F2027);
@@ -444,7 +444,7 @@ impl RelayView {
                 self.tab = i;
             }
             let lw = c.text_width(font::SEMIBOLD, 12.0, label) + if n > 0 { 24.0 } else { 0.0 };
-            let col = if self.tab == i { theme::text_strong() } else { theme::text_muted() };
+            let col = if self.tab == i { theme::TEXT_STRONG } else { theme::TEXT_MUTED };
             let lh = c.line_height(font::SEMIBOLD, 12.0);
             c.text(font::SEMIBOLD, 12.0, label, bx + (tw - lw) / 2.0, ty + 17.0 - lh / 2.0, col);
             if n > 0 {
@@ -452,7 +452,7 @@ impl RelayView {
             }
         }
         ty += 46.0;
-        c.fill(x, ty - 1.0, w, 1.0, theme::hairline());
+        c.fill(x, ty - 1.0, w, 1.0, theme::HAIRLINE);
         ty += 8.0;
         let list_h = y + h - ty - 8.0;
         let q = self.search.value().trim().to_lowercase();
@@ -491,7 +491,7 @@ impl RelayView {
                 ry = self.section(ui, c, "direct", "Direct messages", direct.len(), x + 8.0, ry, w - 16.0);
                 if !self.collapsed.contains("direct") {
                     if direct.is_empty() {
-                        c.text(font::REGULAR, 11.5, if q.is_empty() { "No direct messages" } else { "No matching chats" }, x + 18.0, ry + 6.0, theme::text_muted());
+                        c.text(font::REGULAR, 11.5, if q.is_empty() { "No direct messages" } else { "No matching chats" }, x + 18.0, ry + 6.0, theme::TEXT_MUTED);
                         ry += 30.0;
                     }
                     for f in direct {
@@ -525,7 +525,7 @@ impl RelayView {
                 if !self.collapsed.contains("groups") {
                     if rest.is_empty() {
                         let t = if q.is_empty() { "No groups yet. Create one in the launcher." } else { "No matching groups" };
-                        c.text(font::REGULAR, 11.5, t, x + 18.0, ry + 6.0, theme::text_muted());
+                        c.text(font::REGULAR, 11.5, t, x + 18.0, ry + 6.0, theme::TEXT_MUTED);
                         ry += 30.0;
                     }
                     for g in rest {
@@ -545,7 +545,7 @@ impl RelayView {
         if ui.clicked(c, &format!("relay:sec:{id}"), x, y, w, sh) && !self.collapsed.remove(id) {
             self.collapsed.insert(id.to_owned());
         }
-        let col = if over { theme::text_secondary() } else { theme::text_muted() };
+        let col = if over { theme::TEXT_SECONDARY } else { theme::TEXT_MUTED };
         caret(c, x + 12.0, y + sh / 2.0, !self.collapsed.contains(id), col);
         let lh = c.line_height(font::SEMIBOLD, 12.0);
         c.text(font::SEMIBOLD, 12.0, label, x + 22.0, y + (sh - lh) / 2.0, col);
@@ -553,7 +553,7 @@ impl RelayView {
             let n = count.to_string();
             let nw = c.text_width(font::REGULAR, 11.0, &n);
             let nh = c.line_height(font::REGULAR, 11.0);
-            c.text(font::REGULAR, 11.0, &n, x + w - 8.0 - nw, y + (sh - nh) / 2.0, theme::alpha(theme::text_muted(), 0.75));
+            c.text(font::REGULAR, 11.0, &n, x + w - 8.0 - nw, y + (sh - nh) / 2.0, theme::alpha(theme::TEXT_MUTED, 0.75));
         }
         y + sh + 2.0
     }
@@ -640,7 +640,7 @@ impl RelayView {
         let sv = ui.anim_on(&format!("rowsel:{key}"), sel, 14.0);
         c.round(x, y, w, h, 7.0, theme::mix(theme::alpha(0x0DFFFFFF, hv), 0x10FFFFFF, sv));
         if sv > 0.01 {
-            c.outline(x, y, w, h, 7.0, 1.0, theme::alpha(theme::hairline_strong(), sv));
+            c.outline(x, y, w, h, 7.0, 1.0, theme::alpha(theme::HAIRLINE_STRONG, sv));
             c.round(x, y + 8.0 + (h - 16.0) * (1.0 - sv) / 2.0, 2.0, (h - 16.0) * sv, 1.0, theme::alpha(theme::WHITE, sv));
         }
         let av = 36.0;
@@ -652,7 +652,7 @@ impl RelayView {
         } else {
             avatars::draw(c, skin, ax, ay, av, 7.0);
             c.circle(ax + av - 1.0, ay + av - 1.0, 5.5, ring);
-            let dot = if self.row_dot != 0 { self.row_dot } else if presence == 1 { theme::online() } else { 0xFF52525B };
+            let dot = if self.row_dot != 0 { self.row_dot } else if presence == 1 { theme::ONLINE } else { 0xFF52525B };
             c.circle(ax + av - 1.0, ay + av - 1.0, 3.5, dot);
         }
         let tx = ax + av + 10.0;
@@ -661,31 +661,31 @@ impl RelayView {
         let top_y = y + 9.0;
         let title_w = right - tx - time_w - 8.0 - if self.row_pinned { 16.0 } else { 0.0 };
         let shown = c.ellipsize(font::SEMIBOLD, 13.0, title, title_w);
-        c.text(font::SEMIBOLD, 13.0, &shown, tx, top_y, if sel { theme::text_strong() } else { theme::mix(theme::text(), theme::text_strong(), hv) });
+        c.text(font::SEMIBOLD, 13.0, &shown, tx, top_y, if sel { theme::TEXT_STRONG } else { theme::mix(theme::TEXT, theme::TEXT_STRONG, hv) });
         if self.row_pinned {
             let lh = c.line_height(font::SEMIBOLD, 13.0);
             let sw = c.text_width(font::SEMIBOLD, 13.0, &shown);
-            c.icon(theme::I_MAP_PIN, 10.0, tx + sw + 10.0, top_y + lh / 2.0, theme::text_muted());
+            c.icon(theme::I_MAP_PIN, 10.0, tx + sw + 10.0, top_y + lh / 2.0, theme::TEXT_MUTED);
         }
         if time_w > 0.0 {
-            c.text(font::REGULAR, 10.0, &self.row_time, right - time_w, top_y + 2.0, if unread > 0 { theme::text_strong() } else { theme::text_muted() });
+            c.text(font::REGULAR, 10.0, &self.row_time, right - time_w, top_y + 2.0, if unread > 0 { theme::TEXT_STRONG } else { theme::TEXT_MUTED });
         }
         let by = y + 28.0;
         let sub_w = right - tx - if unread > 0 { 26.0 } else { 0.0 } - if self.row_check > 0 { 16.0 } else { 0.0 };
         let lh = c.line_height(font::REGULAR, 11.0);
         if self.row_typing {
-            let tw2 = c.text(font::MEDIUM, 11.0, "typing", tx, by, theme::online());
-            ui.dots(c, tx + tw2 + 14.0, by + lh / 2.0, theme::online());
+            let tw2 = c.text(font::MEDIUM, 11.0, "typing", tx, by, theme::ONLINE);
+            ui.dots(c, tx + tw2 + 14.0, by + lh / 2.0, theme::ONLINE);
         } else {
             let s = c.ellipsize(font::REGULAR, 11.0, sub, sub_w);
-            let sw2 = c.text(font::REGULAR, 11.0, &s, tx, by, if unread > 0 { theme::text() } else { theme::text_muted() });
+            let sw2 = c.text(font::REGULAR, 11.0, &s, tx, by, if unread > 0 { theme::TEXT } else { theme::TEXT_MUTED });
             if self.row_check > 0 {
                 c.icon(
                     if self.row_check == 2 { theme::I_CHECKS } else { theme::I_CHECK },
                     11.0,
                     tx + sw2 + 9.0,
                     by + lh / 2.0,
-                    if self.row_check == 2 { 0xFF60A5FA } else { theme::text_muted() },
+                    if self.row_check == 2 { 0xFF60A5FA } else { theme::TEXT_MUTED },
                 );
             }
         }
@@ -716,9 +716,9 @@ impl RelayView {
         let ax = right - aw;
         let tx0 = ax - 25.0 - tabs_w;
         if tx0 > x + 130.0 {
-            c.icon(theme::I_USERS, 17.0, x + 32.0, y + bar_h / 2.0, theme::text_muted());
+            c.icon(theme::I_USERS, 17.0, x + 32.0, y + bar_h / 2.0, theme::TEXT_MUTED);
             let lh = c.line_height(font::BOLD, 14.0);
-            c.text(font::BOLD, 14.0, "Friends", x + 48.0, y + (bar_h - lh) / 2.0, theme::text_strong());
+            c.text(font::BOLD, 14.0, "Friends", x + 48.0, y + (bar_h - lh) / 2.0, theme::TEXT_STRONG);
         }
         let mut tx = tx0.max(x + 12.0);
         for i in 0..4 {
@@ -728,7 +728,7 @@ impl RelayView {
             let over = ui.hover(c, tx, by, bw, bh);
             let hv = ui.anim_on(&format!("relay:home:tab{i}"), over || on, 16.0);
             c.round(tx, by, bw, bh, 7.0, theme::alpha(0xFFFFFFFF, if on { 0.1 } else { 0.05 * hv }));
-            let col = if on { theme::text_strong() } else { theme::mix(theme::text_secondary(), 0xFFDDDDDD, hv) };
+            let col = if on { theme::TEXT_STRONG } else { theme::mix(theme::TEXT_SECONDARY, 0xFFDDDDDD, hv) };
             let lh = c.line_height(font::SEMIBOLD, 13.0);
             let lw = c.text(font::SEMIBOLD, 13.0, HOME_TABS[i], tx + 11.0, by + (bh - lh) / 2.0, col);
             if i == 2 {
@@ -749,7 +749,7 @@ impl RelayView {
             }
             tx += bw + 4.0;
         }
-        c.fill(ax - 13.0, y + bar_h / 2.0 - 9.0, 1.0, 18.0, theme::hairline_strong());
+        c.fill(ax - 13.0, y + bar_h / 2.0 - 9.0, 1.0, 18.0, theme::HAIRLINE_STRONG);
         {
             let (bh, by) = (30.0, y + (bar_h - 30.0) / 2.0);
             let on = self.home_tab == 4;
@@ -757,7 +757,7 @@ impl RelayView {
             let hv = ui.anim_on("relay:home:add", over, 16.0);
             c.round(ax, by, aw, bh, 9.0, if on { 0xFFFFFFFF } else { theme::alpha(0xFFFFFFFF, 0.06 + 0.06 * hv) });
             c.outline(ax, by, aw, bh, 9.0, 1.0, if on { 0xFFFFFFFF } else { theme::alpha(0xFFFFFFFF, 0.12 + 0.1 * hv) });
-            let col = if on { 0xFF000000 } else { theme::text_strong() };
+            let col = if on { 0xFF000000 } else { theme::TEXT_STRONG };
             c.icon(theme::I_USER_PLUS, 13.0, ax + 22.0, by + bh / 2.0, col);
             let lh = c.line_height(font::SEMIBOLD, 12.5);
             c.text(font::SEMIBOLD, 12.5, al, ax + 34.0, by + (bh - lh) / 2.0, col);
@@ -770,7 +770,7 @@ impl RelayView {
                 ui.focus_claimed = true;
             }
         }
-        c.fill(x, y + bar_h, w, 1.0, theme::hairline());
+        c.fill(x, y + bar_h, w, 1.0, theme::HAIRLINE);
         // Body.
         let (px, pw) = (x + 28.0, w - 56.0);
         let top = y + bar_h + 1.0;
@@ -801,7 +801,7 @@ impl RelayView {
                 }
                 for r in &snap.received {
                     if visible(cy, 68.0, v_top, view_h) {
-                        person_card(ui, c, &format!("req:{}", r.id), px, cy, pw, &r.name, r.skin.as_deref(), 0, "Incoming Friend Request", theme::text_muted());
+                        person_card(ui, c, &format!("req:{}", r.id), px, cy, pw, &r.name, r.skin.as_deref(), 0, "Incoming Friend Request", theme::TEXT_MUTED);
                         let bcy = cy + 34.0;
                         if circle_btn(ui, c, &format!("relay:req:ok:{}", r.id), px + pw - 18.0 - 17.0 - 42.0, bcy, theme::I_CHECK, 0xFF23A55A, "Accept") {
                             relay::respond(&r.id, "accept");
@@ -814,7 +814,7 @@ impl RelayView {
                 }
                 for r in &snap.sent {
                     if visible(cy, 68.0, v_top, view_h) {
-                        person_card(ui, c, &format!("req:{}", r.id), px, cy, pw, &r.name, r.skin.as_deref(), 0, "Outgoing Friend Request", theme::text_muted());
+                        person_card(ui, c, &format!("req:{}", r.id), px, cy, pw, &r.name, r.skin.as_deref(), 0, "Outgoing Friend Request", theme::TEXT_MUTED);
                         if ui.button(c, &format!("relay:req:cancel:{}", r.id), px + pw - 18.0 - 92.0, cy + 20.0, 92.0, 28.0, "Cancel", theme::I_X, ui::BTN_GLASS) {
                             relay::respond(&r.id, "cancel");
                         }
@@ -829,7 +829,7 @@ impl RelayView {
                 }
                 for b in &snap.blocked {
                     if visible(cy, 68.0, v_top, view_h) {
-                        person_card(ui, c, &format!("blk:{}", b.id), px, cy, pw, &b.name, b.skin.as_deref(), 0, "Blocked", theme::text_muted());
+                        person_card(ui, c, &format!("blk:{}", b.id), px, cy, pw, &b.name, b.skin.as_deref(), 0, "Blocked", theme::TEXT_MUTED);
                         if ui.button(c, &format!("relay:unblock:{}", b.id), px + pw - 18.0 - 92.0, cy + 20.0, 92.0, 28.0, "Unblock", theme::I_CHECK, ui::BTN_GLASS) {
                             relay::unblock(&b.id);
                         }
@@ -865,11 +865,11 @@ impl RelayView {
             ui.cursor_hand = true;
         }
         let line_color = if !f.online {
-            theme::text_muted()
+            theme::TEXT_MUTED
         } else if playing || !f.activity.is_empty() {
-            theme::mix(theme::online(), 0xFFFFFFFF, 0.35)
+            theme::mix(theme::ONLINE, 0xFFFFFFFF, 0.35)
         } else {
-            theme::text_secondary()
+            theme::TEXT_SECONDARY
         };
         person_card(ui, c, &format!("f:{}", f.id), x, y, w, f.display(), f.skin.as_deref(), f.dot(), &if f.online { f.line() } else { "Offline".to_owned() }, line_color);
         // "@handle" after the name, like the launcher.
@@ -878,13 +878,13 @@ impl RelayView {
         let nw = c.text_width(font::SEMIBOLD, 14.0, &shown);
         if tx + nw + 8.0 + 60.0 < x + w - actions_w {
             let handle = c.ellipsize(font::REGULAR, 12.0, &format!("@{}", f.name), x + w - actions_w - tx - nw - 8.0);
-            c.text(font::REGULAR, 12.0, &handle, tx + nw + 8.0, y + 17.0, theme::text_muted());
+            c.text(font::REGULAR, 12.0, &handle, tx + nw + 8.0, y + 17.0, theme::TEXT_MUTED);
         }
         let mut bx = x + w - 18.0 - 34.0;
         let bcy = y + ch / 2.0;
         let (bk, rk) = (format!("block:{}", f.id), format!("remove:{}", f.id));
         if self.armed.as_deref() == Some(bk.as_str()) {
-            c.round(bx, bcy - 17.0, 34.0, 34.0, 17.0, theme::alpha(theme::danger(), 0.25));
+            c.round(bx, bcy - 17.0, 34.0, 34.0, 17.0, theme::alpha(theme::DANGER, 0.25));
         }
         let tip = if self.armed.as_deref() == Some(bk.as_str()) { "Click again to block" } else { "Block" };
         if ui.icon_button(c, &format!("relay:fcard:block:{}", f.id), bx, bcy - 17.0, 34.0, theme::I_BAN, Some(tip)) {
@@ -898,7 +898,7 @@ impl RelayView {
         }
         bx -= 38.0;
         if self.armed.as_deref() == Some(rk.as_str()) {
-            c.round(bx, bcy - 17.0, 34.0, 34.0, 17.0, theme::alpha(theme::danger(), 0.25));
+            c.round(bx, bcy - 17.0, 34.0, 34.0, 17.0, theme::alpha(theme::DANGER, 0.25));
         }
         let tip = if self.armed.as_deref() == Some(rk.as_str()) { "Click again to remove" } else { "Remove Friend" };
         if ui.icon_button(c, &format!("relay:fcard:remove:{}", f.id), bx, bcy - 17.0, 34.0, theme::I_TRASH, Some(tip)) {
@@ -923,8 +923,8 @@ impl RelayView {
 
     /// ADD FRIEND: exact-name request box, plus live player search under it.
     fn add_panel(&mut self, ui: &mut Ui, c: &mut Canvas, snap: &Snapshot, x: f32, y: f32, w: f32) -> f32 {
-        c.text(font::BOLD, 15.0, "ADD FRIEND", x, y, theme::text_strong());
-        c.text(font::REGULAR, 12.5, "You can add friends with their exact Native or Minecraft username.", x, y + 24.0, theme::text_secondary());
+        c.text(font::BOLD, 15.0, "ADD FRIEND", x, y, theme::TEXT_STRONG);
+        c.text(font::REGULAR, 12.5, "You can add friends with their exact Native or Minecraft username.", x, y + 24.0, theme::TEXT_SECONDARY);
         let (fy, fh) = (y + 54.0, 50.0);
         if !ui.focus_claimed && ui.focus.is_none() && !self.settings_open && self.nick_for.is_none() {
             self.add_field.focus(ui);
@@ -960,14 +960,14 @@ impl RelayView {
         if query.chars().count() >= 2 {
             ry = home_title(c, "PLAYERS", x, ry);
             if snap.found.is_empty() {
-                c.text(font::REGULAR, 12.0, if snap.searching { "Searching\u{2026}" } else { "No Native player with that name." }, x, ry, theme::text_muted());
+                c.text(font::REGULAR, 12.0, if snap.searching { "Searching\u{2026}" } else { "No Native player with that name." }, x, ry, theme::TEXT_MUTED);
                 ry += 28.0;
             }
             for p in &snap.found {
                 let friend = snap.friends.iter().any(|f| f.id == p.id);
                 let pending = snap.sent.iter().any(|r| r.user_id == p.id);
                 let line = if friend { "Already friends" } else if pending { "Request sent" } else { "Native player" };
-                person_card(ui, c, &format!("find:{}", p.id), x, ry, w, &p.name, p.skin.as_deref(), 0, line, theme::text_muted());
+                person_card(ui, c, &format!("find:{}", p.id), x, ry, w, &p.name, p.skin.as_deref(), 0, line, theme::TEXT_MUTED);
                 if !friend && !pending && ui.button(c, &format!("relay:find:{}", p.id), x + w - 18.0 - 76.0, ry + 20.0, 76.0, 28.0, "Add", theme::I_USER_PLUS, ui::BTN_PRIMARY) {
                     relay::send_request(&p.name);
                 }
@@ -1003,16 +1003,16 @@ impl RelayView {
         ty += av + 12.0;
         // Name (+ Native+ mark), @handle, presence.
         let display = c.ellipsize(font::BOLD, 19.0, f.display(), iw - if plus { 26.0 } else { 0.0 });
-        c.text(font::BOLD, 19.0, &display, x + pad, ty, theme::text_strong());
+        c.text(font::BOLD, 19.0, &display, x + pad, ty, theme::TEXT_STRONG);
         if plus {
             let mx = x + pad + c.text_width(font::BOLD, 19.0, &display) + 7.0;
-            c.icon(theme::I_STAR, 14.0, mx + 8.0, ty + 11.0, theme::accent());
+            c.icon(theme::I_STAR, 14.0, mx + 8.0, ty + 11.0, theme::ACCENT);
             if ui.hover(c, mx, ty + 3.0, 17.0, 17.0) {
                 ui.tip("Native+ member");
             }
         }
         ty += 26.0;
-        c.text(font::REGULAR, 12.0, &format!("@{}", f.name), x + pad, ty, theme::text_muted());
+        c.text(font::REGULAR, 12.0, &format!("@{}", f.name), x + pad, ty, theme::TEXT_MUTED);
         ty += 19.0;
         let line = if f.online {
             f.line()
@@ -1022,7 +1022,7 @@ impl RelayView {
             "Offline".to_owned()
         };
         let line = c.ellipsize(font::MEDIUM, 11.5, &line, iw);
-        c.text(font::MEDIUM, 11.5, &line, x + pad, ty, if f.online { theme::mix(f.dot(), 0xFFFFFFFF, 0.45) } else { theme::text_muted() });
+        c.text(font::MEDIUM, 11.5, &line, x + pad, ty, if f.online { theme::mix(f.dot(), 0xFFFFFFFF, 0.45) } else { theme::TEXT_MUTED });
         ty += 26.0;
         match &p {
             None => {
@@ -1036,22 +1036,22 @@ impl RelayView {
                 if let Some(act) = activity {
                     ty = heading(c, "Activity", x + pad, ty);
                     let bh = 68.0;
-                    c.round(x + pad, ty, iw, bh, 12.0, theme::subtle());
-                    c.outline(x + pad, ty, iw, bh, 12.0, 1.0, theme::hairline());
-                    c.text(font::SEMIBOLD, 9.5, if f.server_address.is_empty() { "CURRENT ACTIVITY" } else { "PLAYING ON A SERVER" }, x + pad + 14.0, ty + 12.0, theme::text_muted());
+                    c.round(x + pad, ty, iw, bh, 12.0, theme::SUBTLE);
+                    c.outline(x + pad, ty, iw, bh, 12.0, 1.0, theme::HAIRLINE);
+                    c.text(font::SEMIBOLD, 9.5, if f.server_address.is_empty() { "CURRENT ACTIVITY" } else { "PLAYING ON A SERVER" }, x + pad + 14.0, ty + 12.0, theme::TEXT_MUTED);
                     c.round(x + pad + 14.0, ty + 28.0, 30.0, 30.0, 8.0, 0xFF000000);
-                    c.icon(if f.server_address.is_empty() { theme::I_PLAY } else { theme::I_SERVER }, 14.0, x + pad + 29.0, ty + 43.0, theme::online());
+                    c.icon(if f.server_address.is_empty() { theme::I_PLAY } else { theme::I_SERVER }, 14.0, x + pad + 29.0, ty + 43.0, theme::ONLINE);
                     let title = c.ellipsize(font::BOLD, 12.5, &act, iw - 68.0);
-                    c.text(font::BOLD, 12.5, &title, x + pad + 54.0, ty + 35.0, theme::text_strong());
+                    c.text(font::BOLD, 12.5, &title, x + pad + 54.0, ty + 35.0, theme::TEXT_STRONG);
                     ty += bh + 16.0;
                 }
                 if p.premium {
                     ty = heading(c, "Connections", x + pad, ty);
                     avatars::draw(c, f.skin.as_deref(), x + pad, ty, 32.0, 8.0);
-                    c.text(font::SEMIBOLD, 12.5, &f.name, x + pad + 42.0, ty + 1.0, theme::text_strong());
+                    c.text(font::SEMIBOLD, 12.5, &f.name, x + pad + 42.0, ty + 1.0, theme::TEXT_STRONG);
                     let nw = c.text_width(font::SEMIBOLD, 12.5, &f.name);
-                    c.icon(theme::I_CHECK_CIRCLE, 12.0, x + pad + 42.0 + nw + 10.0, ty + 8.0, theme::online());
-                    c.text(font::REGULAR, 11.0, "Minecraft \u{b7} Premium", x + pad + 42.0, ty + 18.0, theme::text_muted());
+                    c.icon(theme::I_CHECK_CIRCLE, 12.0, x + pad + 42.0 + nw + 10.0, ty + 8.0, theme::ONLINE);
+                    c.text(font::REGULAR, 11.0, "Minecraft \u{b7} Premium", x + pad + 42.0, ty + 18.0, theme::TEXT_MUTED);
                     ty += 46.0;
                 }
                 // Details.
@@ -1064,7 +1064,7 @@ impl RelayView {
                 if let Some(bio) = p.bio.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
                     ty = heading(c, "About me", x + pad, ty);
                     for l in common::wrap(c, font::REGULAR, 12.0, bio, iw) {
-                        c.text(font::REGULAR, 12.0, &l, x + pad, ty, theme::text());
+                        c.text(font::REGULAR, 12.0, &l, x + pad, ty, theme::TEXT);
                         ty += 18.0;
                     }
                     ty += 10.0;
@@ -1140,7 +1140,7 @@ impl RelayView {
         let (mx, my) = (self.menu_x.min(w_all - mw - 8.0), self.menu_y.min(h_all - mh - 8.0));
         c.shadow(mx, my + 6.0, mw, mh, 12.0, 24.0, 0x99000000);
         c.round(mx, my, mw, mh, 12.0, 0xFF121318);
-        c.outline(mx, my, mw, mh, 12.0, 1.0, theme::hairline_strong());
+        c.outline(mx, my, mw, mh, 12.0, 1.0, theme::HAIRLINE_STRONG);
         let mut picked = None;
         for (i, label) in labels.iter().enumerate() {
             let iy = my + 6.0 + i as f32 * ih;
@@ -1148,7 +1148,7 @@ impl RelayView {
             let over = ui.hover(c, mx + 6.0, iy, mw - 12.0, ih);
             let hv = ui.anim_on(&format!("relay:ctx:{i}"), over, 18.0);
             c.round(mx + 6.0, iy, mw - 12.0, ih, 8.0, theme::alpha(if danger { 0xFFEF4444 } else { 0xFFFFFFFF }, 0.1 * hv));
-            let col = if danger { theme::mix(0xFFFCA5A5, 0xFFFFFFFF, hv * 0.3) } else { theme::mix(theme::text(), theme::text_strong(), hv) };
+            let col = if danger { theme::mix(0xFFFCA5A5, 0xFFFFFFFF, hv * 0.3) } else { theme::mix(theme::TEXT, theme::TEXT_STRONG, hv) };
             c.icon(icons[i], 14.0, mx + 24.0, iy + ih / 2.0, col);
             let lh = c.line_height(font::MEDIUM, 12.5);
             c.text(font::MEDIUM, 12.5, label, mx + 40.0, iy + (ih - lh) / 2.0, col);
@@ -1190,10 +1190,10 @@ impl RelayView {
         let (dx, dy) = ((w_all - dw) / 2.0, (h_all - dh) / 2.0);
         c.shadow(dx, dy + 8.0, dw, dh, 10.0, 32.0, 0xAA000000);
         c.round(dx, dy, dw, dh, 10.0, 0xFF121318);
-        c.outline(dx, dy, dw, dh, 10.0, 1.0, theme::hairline_strong());
-        c.text(font::BOLD, 15.0, "Set nickname", dx + 20.0, dy + 18.0, theme::text_strong());
+        c.outline(dx, dy, dw, dh, 10.0, 1.0, theme::HAIRLINE_STRONG);
+        c.text(font::BOLD, 15.0, "Set nickname", dx + 20.0, dy + 18.0, theme::TEXT_STRONG);
         let shown = c.ellipsize(font::REGULAR, 12.0, &name, dw - 190.0);
-        c.text(font::REGULAR, 12.0, &format!("Only you see this name for {shown}."), dx + 20.0, dy + 42.0, theme::text_muted());
+        c.text(font::REGULAR, 12.0, &format!("Only you see this name for {shown}."), dx + 20.0, dy + 42.0, theme::TEXT_MUTED);
         let enter = self.nick.draw(ui, c, dx + 20.0, dy + 68.0, dw - 40.0, 38.0, "Nickname", 13.5);
         if ui.focus.is_none() {
             self.nick.focus(ui);
@@ -1224,8 +1224,8 @@ impl RelayView {
         }
         c.shadow(x, y + 6.0, w, h, 14.0, 26.0, 0xAA000000);
         c.round(x, y, w, h, 14.0, 0xFF101115);
-        c.outline(x, y, w, h, 14.0, 1.0, theme::hairline_strong());
-        c.text(font::SEMIBOLD, 13.5, "Chat settings", x + 16.0, y + 14.0, theme::text_strong());
+        c.outline(x, y, w, h, 14.0, 1.0, theme::HAIRLINE_STRONG);
+        c.text(font::SEMIBOLD, 13.5, "Chat settings", x + 16.0, y + 14.0, theme::TEXT_STRONG);
         let mut ry = y + 46.0;
         let mut dirty = false;
         for (title, sub, id, on) in [
@@ -1234,8 +1234,8 @@ impl RelayView {
             ("Activity status", "Show friends what you're playing", "set:activity", cfg.share_activity),
         ] {
             ui.interactive = true;
-            c.text(font::MEDIUM, 12.5, title, x + 16.0, ry - 2.0, theme::text());
-            c.text(font::REGULAR, 10.5, sub, x + 16.0, ry + 16.0, theme::text_muted());
+            c.text(font::MEDIUM, 12.5, title, x + 16.0, ry - 2.0, theme::TEXT);
+            c.text(font::REGULAR, 10.5, sub, x + 16.0, ry + 16.0, theme::TEXT_MUTED);
             if ui.toggle(c, id, x + w - 16.0 - 34.0, ry + 4.0, on) {
                 match id {
                     "set:title" => cfg.custom_title = !on,
@@ -1247,7 +1247,7 @@ impl RelayView {
             ry += 46.0;
         }
         // The key that opens the chat.
-        c.text(font::MEDIUM, 12.5, "Open chat key", x + 16.0, ry + 4.0, theme::text());
+        c.text(font::MEDIUM, 12.5, "Open chat key", x + 16.0, ry + 4.0, theme::TEXT);
         let label = if self.binding_key { "Press a key\u{2026}".to_owned() } else { super::keys::name(cfg.relay_key) };
         let bw = (c.text_width(font::SEMIBOLD, 12.0, &label) + 24.0).max(70.0);
         ui.interactive = true;
@@ -1255,7 +1255,7 @@ impl RelayView {
             self.binding_key = !self.binding_key;
         }
         ry += 44.0;
-        c.text(font::MEDIUM, 12.5, "Interface size", x + 16.0, ry + 4.0, theme::text());
+        c.text(font::MEDIUM, 12.5, "Interface size", x + 16.0, ry + 4.0, theme::TEXT);
         let pct = format!("{}%", (cfg.scale * 100.0).round() as i32);
         let pw = c.text_width(font::SEMIBOLD, 12.0, &pct);
         let bx = x + w - 16.0 - 30.0;
@@ -1264,7 +1264,7 @@ impl RelayView {
             dirty = true;
         }
         let lh = c.line_height(font::SEMIBOLD, 12.0);
-        c.text(font::SEMIBOLD, 12.0, &pct, bx - 12.0 - pw, ry + 13.0 - lh / 2.0, theme::text_strong());
+        c.text(font::SEMIBOLD, 12.0, &pct, bx - 12.0 - pw, ry + 13.0 - lh / 2.0, theme::TEXT_STRONG);
         if ui.button(c, "set:smaller", bx - 24.0 - pw - 30.0, ry - 2.0, 30.0, 30.0, "\u{2212}", 0, ui::BTN_GLASS) {
             cfg.scale = (((cfg.scale - 0.1) * 10.0).round() / 10.0).max(0.6);
             dirty = true;
@@ -1280,7 +1280,7 @@ fn wordmark(c: &mut Canvas, mut x: f32, y: f32) -> f32 {
     let s = "RELAY";
     for (i, ch) in s.chars().enumerate() {
         let t = ch.to_string();
-        c.text(font::BOLD, 17.0, &t, x, y, theme::text_strong());
+        c.text(font::BOLD, 17.0, &t, x, y, theme::TEXT_STRONG);
         x += c.text_width(font::BOLD, 17.0, &t) + if i < s.len() - 1 { 2.4 } else { 0.0 };
     }
     x
@@ -1341,29 +1341,29 @@ fn count_w(c: &mut Canvas, tab: usize, n: usize) -> f32 {
 }
 
 fn home_title(c: &mut Canvas, label: &str, x: f32, y: f32) -> f32 {
-    c.text(font::SEMIBOLD, 11.5, label, x, y, theme::text_muted());
+    c.text(font::SEMIBOLD, 11.5, label, x, y, theme::TEXT_MUTED);
     y + 26.0
 }
 
 /// Big muted icon + one line, like the launcher's empty friends list.
 fn home_empty(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32, icon: u32, text: &str) {
     let cy = y + (h * 0.22).clamp(50.0, 110.0);
-    c.icon(icon, 44.0, x + w / 2.0, cy, theme::alpha(theme::text_muted(), 0.85));
+    c.icon(icon, 44.0, x + w / 2.0, cy, theme::alpha(theme::TEXT_MUTED, 0.85));
     let tw = c.text_width(font::MEDIUM, 13.0, text);
-    c.text(font::MEDIUM, 13.0, text, x + (w - tw) / 2.0, cy + 38.0, theme::text_secondary());
+    c.text(font::MEDIUM, 13.0, text, x + (w - tw) / 2.0, cy + 38.0, theme::TEXT_SECONDARY);
 }
 
 fn heading(c: &mut Canvas, label: &str, x: f32, y: f32) -> f32 {
-    c.text(font::SEMIBOLD, 10.5, &label.to_uppercase(), x, y + 4.0, theme::text_muted());
+    c.text(font::SEMIBOLD, 10.5, &label.to_uppercase(), x, y + 4.0, theme::TEXT_MUTED);
     y + 26.0
 }
 
 /// "Member since ........ Oct 11, 2026" with a hairline under it.
 fn detail(c: &mut Canvas, label: &str, value: &str, x: f32, y: f32, w: f32) -> f32 {
-    c.text(font::REGULAR, 12.0, label, x, y, theme::text_muted());
+    c.text(font::REGULAR, 12.0, label, x, y, theme::TEXT_MUTED);
     let vw = c.text_width(font::SEMIBOLD, 12.0, value);
-    c.text(font::SEMIBOLD, 12.0, value, x + w - vw, y, theme::text_strong());
-    c.fill(x, y + 24.0, w, 1.0, theme::hairline());
+    c.text(font::SEMIBOLD, 12.0, value, x + w - vw, y, theme::TEXT_STRONG);
+    c.fill(x, y + 24.0, w, 1.0, theme::HAIRLINE);
     y + 32.0
 }
 
@@ -1385,7 +1385,7 @@ fn person_card(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, na
     let tx = ax + av + 14.0;
     let max_w = w - (tx - x) - 170.0;
     let name = c.ellipsize(font::SEMIBOLD, 14.0, if name.is_empty() { "Player" } else { name }, max_w);
-    c.text(font::SEMIBOLD, 14.0, &name, tx, y + 15.0, theme::text_strong());
+    c.text(font::SEMIBOLD, 14.0, &name, tx, y + 15.0, theme::TEXT_STRONG);
     let line = c.ellipsize(font::REGULAR, 12.0, line, max_w);
     c.text(font::REGULAR, 12.0, &line, tx, y + 36.0, line_color);
 }

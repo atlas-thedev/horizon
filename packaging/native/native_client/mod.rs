@@ -50,8 +50,6 @@ mod setting;
 mod status;
 mod status_modules;
 mod textfield;
-mod appearance;
-mod profiles;
 mod title_view;
 mod toasts;
 mod ui;
@@ -148,7 +146,6 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|cell| {
         let mut slot = cell.borrow_mut();
         let state = slot.get_or_insert_with(|| {
-            appearance::load(game_dir().as_deref());
             net::start(game_dir());
             relay::start();
             music::init(game_dir().as_deref());
@@ -1239,10 +1236,7 @@ pub(super) fn native_title_frame(
             state.title_overlay = 0;
         }
         let mut deferred = None;
-        let info = title_view::TitleInfo {
-            allows_multiplayer, game_dir: game_dir(), player: player.to_owned(),
-            servers: horizon_client::multiplayer::servers_file(&title.saves)
-        };
+        let info = title_view::TitleInfo { allows_multiplayer, game_dir: game_dir(), player: player.to_owned() };
         let overlay = if dialog.is_some() { 5 } else if servers.is_some() { 4 } else { state.title_overlay };
         if dialog.is_none() {
             state.servers_dialog.closed();
@@ -1312,17 +1306,11 @@ pub(super) fn native_title_frame(
                 }
             }
             _ => match state.title.draw(&mut state.ui, c, &info) {
-                Some(act @ (title_view::TitleAct::NativeMods | title_view::TitleAct::Settings | title_view::TitleAct::Cosmetics)) => {
+                Some(title_view::TitleAct::NativeMods) => {
                     state.title_overlay = 1;
                     state.editing = false;
                     state.who = player.to_owned();
                     state.menu.opened(state.ui.now);
-                    let tab = match act {
-                        title_view::TitleAct::Settings => menu::TAB_SETTINGS,
-                        title_view::TitleAct::Cosmetics => menu::TAB_COSMETICS,
-                        _ => menu::TAB_MODS,
-                    };
-                    state.menu.open_tab(tab, state.ui.now);
                 }
                 Some(title_view::TitleAct::Relay) => {
                     state.title_overlay = 2;
@@ -1543,7 +1531,7 @@ pub(super) fn native_title_apply(title: &mut horizon_client::title::Title, act: 
             with_state(|s| s.servers_classic = true);
             None
         }
-        TitleAct::NativeMods | TitleAct::Settings | TitleAct::Cosmetics | TitleAct::Relay | TitleAct::Classic => None,
+        TitleAct::NativeMods | TitleAct::Relay | TitleAct::Classic => None,
     }
 }
 

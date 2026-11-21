@@ -87,9 +87,9 @@ mod tests {
         c.begin(800, 600, 2.0);
         let w = c.text_width(font::REGULAR, 12.0, "Native");
         assert!(w > 20.0 && w < 60.0, "width {w}");
-        let advance = c.text(font::SEMIBOLD, 12.0, "Hi", 10.0, 10.0, theme::text());
+        let advance = c.text(font::SEMIBOLD, 12.0, "Hi", 10.0, 10.0, theme::TEXT);
         assert!(advance > 0.0);
-        c.round(0.0, 0.0, 100.0, 40.0, 8.0, theme::panel());
+        c.round(0.0, 0.0, 100.0, 40.0, 8.0, theme::PANEL);
         c.icon(theme::I_SEARCH, 16.0, 50.0, 50.0, theme::WHITE);
         c.icon(icons::MODS, 16.0, 80.0, 50.0, theme::WHITE);
         let mut batch = HudBatch::new([800, 600]);

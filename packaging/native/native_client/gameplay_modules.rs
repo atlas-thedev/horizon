@@ -50,7 +50,7 @@ fn comparison(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32, aspect: f32, mut d
         c.push_clip(v[0], v[1], v[2], v[3]);
         draw(c, v, i == 1);
         c.pop_clip();
-        c.outline(v[0], v[1], v[2], v[3], 6.0, 1.0, theme::hairline_strong());
+        c.outline(v[0], v[1], v[2], v[3], 6.0, 1.0, theme::HAIRLINE_STRONG);
         previews::caption(c, v, if i == 0 { "Vanilla" } else { "Native" }, i == 1);
     }
 }
@@ -179,14 +179,14 @@ impl Behaviour for ZoomModule {
         let edge = ((z - 1.0) * 0.08).min(0.55);
         c.gradient_v(x, y, w, h * 0.18, theme::alpha(0xFF000000, edge), 0);
         c.gradient_v(x, y + h * 0.82, w, h * 0.18, 0, theme::alpha(0xFF000000, edge));
-        previews::chip(c, &format!("{z:.1}x"), x + w / 2.0, y + 12.0, theme::text_strong());
+        previews::chip(c, &format!("{z:.1}x"), x + w / 2.0, y + 12.0, theme::TEXT_STRONG);
         let key = m.setting("key").map_or(-1, Setting::as_key);
         let hint = if key >= 0 {
             format!("Hold {} to zoom{}", super::keys::name(key), if m.bool("scroll") { ", scroll to adjust" } else { "" })
         } else {
             "Set a zoom key".to_owned()
         };
-        previews::chip(c, &hint, x + w / 2.0, y + h - 34.0, theme::text_secondary());
+        previews::chip(c, &hint, x + w / 2.0, y + h - 34.0, theme::TEXT_SECONDARY);
         true
     }
 }
@@ -227,8 +227,8 @@ impl Behaviour for Fullbright {
         c.pop_clip();
         c.fill(sx - 1.0, y, 2.0, h, 0xFFFFFFFF);
         c.circle(sx, y + h / 2.0, 9.0, 0xFFFFFFFF);
-        c.icon(theme::I_SUN, 11.0, sx, y + h / 2.0, theme::solid_fg());
-        previews::chip(c, "OFF", x + 44.0, y + h - 34.0, theme::text_secondary());
+        c.icon(theme::I_SUN, 11.0, sx, y + h / 2.0, theme::SOLID_FG);
+        previews::chip(c, "OFF", x + 44.0, y + h - 34.0, theme::TEXT_SECONDARY);
         previews::chip(c, "FULLBRIGHT", x + w - 64.0, y + h - 34.0, 0xFFFDE68A);
         true
     }
@@ -687,7 +687,7 @@ impl Behaviour for DamageTint {
             c.round(cx + 0.2 * k, base - k, 1.8 * k, k, k * 0.3, theme::mix(0xFF35496B, tint, if tint >> 24 > 0 { 0.6 } else { 0.0 }));
         };
         body(c, overlay);
-        previews::chip(c, if hurt { "Taking damage" } else { "Not hurt" }, x + w / 2.0, y + h - 34.0, if hurt { theme::text_strong() } else { theme::text_secondary() });
+        previews::chip(c, if hurt { "Taking damage" } else { "Not hurt" }, x + w / 2.0, y + h - 34.0, if hurt { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY });
         true
     }
 }
@@ -863,7 +863,7 @@ impl Behaviour for MotionBlur {
         c.fill(cx - 7.0, cy - 1.0, 14.0, 2.0, 0xE0FFFFFF);
         c.fill(cx - 1.0, cy - 7.0, 2.0, 14.0, 0xE0FFFFFF);
         c.pop_clip();
-        previews::chip(c, "Turning the camera", x + w / 2.0, y + h - 34.0, theme::text_secondary());
+        previews::chip(c, "Turning the camera", x + w / 2.0, y + h - 34.0, theme::TEXT_SECONDARY);
         true
     }
 }

@@ -146,7 +146,11 @@ patch(MENU,
       '            );\n',
       '            if super::native_client::native_title_active(title) {\n'
       '                let who = self.options.as_ref().map_or_else(|| "Player".into(), |o| o.player_name());\n'
+      '                let logo_width = batch.width.ceil();\n'
       '                super::native_client::native_title_background(batch);\n'
+      '                if matches!(title.mode, horizon_client::title::Mode::Main) {\n'
+      '                    horizon_client::title::draw_logo(&gui.atlas, batch, logo_width);\n'
+      '                }\n'
       '                super::native_client::native_title_frame(batch, title, &who, &gui.atlas, items, &mut self.menu.clipboard);\n'
       '            } else {\n'
       '                title.draw_with_items(\n'
@@ -195,7 +199,11 @@ patch(GAME, title_open +
       title_open +
       '                if native_client::native_title_active(title) {\n'
       '                    let who = self.options.player_name();\n'
+      '                    let logo_width = batch.width.ceil();\n'
       '                    native_client::native_title_background(&mut batch);\n'
+      '                    if matches!(title.mode, horizon_client::title::Mode::Main) {\n'
+      '                        horizon_client::title::draw_logo(&self.gui.atlas, &mut batch, logo_width);\n'
+      '                    }\n'
       '                    native_client::native_title_frame(&mut batch, title, &who, &self.gui.atlas, Some(&self.pack.item_renderer), &mut self.clipboard);\n'
       '                } else {\n'
       '                    title.draw_with_items(\n'

@@ -405,7 +405,7 @@ fn notice(c: &mut Canvas, w: f32, h: f32, text: &str, a: f32) {
     let (x, y) = ((w - tw) / 2.0, h * 0.7);
     c.push_alpha(a);
     c.round(x - 26.0, y - 7.0, tw + 38.0, lh + 14.0, 9.0, 0xB3000000);
-    c.icon(theme::I_MAP_PIN, 12.0, x - 12.0, y + lh / 2.0, theme::accent());
+    c.icon(theme::I_MAP_PIN, 12.0, x - 12.0, y + lh / 2.0, theme::ACCENT);
     c.text(font::SEMIBOLD, fs, text, x + 2.0, y, 0xFFFFFFFF);
     c.pop_alpha();
 }
