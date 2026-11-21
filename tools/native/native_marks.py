@@ -45,14 +45,27 @@ patch(CLIENT / 'client_lib.rs', 'pub mod discord_presence;\n',
 
 # The logo glyphs, first in the fonts the mod adds them to; their sheets come from the embedded bitmaps.
 FONT = RENDER / 'font.rs'
-patch(FONT, '        providers(&self.root, id, 0, &mut all);\n',
-      '        providers(&self.root, id, 0, &mut all);\n'
+font_text = FONT.read_text(encoding='utf-8')
+providers = ('        providers(&self.source, id, 0, &mut all);\n'
+             if 'providers(&self.source,' in font_text else '        providers(&self.root, id, 0, &mut all);\n')
+patch(FONT, providers, providers +
       '        if id == DEFAULT || id == "minecraft:uniform" {\n'
       '            all.splice(0..0, crate::native_marks::font_providers());\n'
       '        }\n')
 SHEET = '            let sheet = crate::hud::decode(&root.join(&path)).or_else(|first| {\n'
-if SHEET in FONT.read_text(encoding='utf-8') or 'crate::native_marks::sheet(file)\n                .unwrap_or_else' \
-        in FONT.read_text(encoding='utf-8'):
+SOURCE = ('        None => match source\n'
+          '            .read(&resource_path(file, "textures", ""))\n'
+          '            .map_err(Into::into)\n'
+          '            .and_then(|bytes| crate::hud::decode_bytes(&bytes))\n')
+if SOURCE in font_text or 'crate::native_marks::sheet(file).unwrap_or_else(|| {\n            source' in font_text:
+    patch(FONT, SOURCE,
+          '        None => match crate::native_marks::sheet(file).unwrap_or_else(|| {\n'
+          '            source\n'
+          '                .read(&resource_path(file, "textures", ""))\n'
+          '                .map_err(Into::into)\n'
+          '                .and_then(|bytes| crate::hud::decode_bytes(&bytes))\n'
+          '        })\n')
+elif SHEET in font_text or 'crate::native_marks::sheet(file)\n                .unwrap_or_else' in font_text:
     # Since 2026-11-13 a sheet the pack lacks is looked for in the default resources too.
     patch(FONT, SHEET,
           '            let sheet = crate::native_marks::sheet(file)\n'

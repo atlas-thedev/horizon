@@ -64,8 +64,10 @@ patch(HUD, '    CitGlint(u8),\n}\n',
       '    CitGlint(u8),\n'
       '    /// Drawn from a Native UI texture page (`native_pages.rs`): 0 the atlas, else an image.\n'
       '    Native(u16),\n}\n')
-patch(HUD, '    pub inline_profiles: Vec<serde_json::Value>,\n}\n',
-      '    pub inline_profiles: Vec<serde_json::Value>,\n'
+profiles = '    pub inline_profiles: Vec<std::sync::Arc<serde_json::Value>>,\n'
+if profiles not in HUD.read_text(encoding='utf-8'):
+    profiles = '    pub inline_profiles: Vec<serde_json::Value>,\n'
+patch(HUD, profiles + '}\n', profiles +
       '    /// The Native UI pages\' new pixels this frame (`native_pages.rs`).\n'
       '    pub native: Vec<NativeUpload>,\n}\n')
 patch(HUD, '            inline_profiles: Vec::new(),\n        }\n    }\n',

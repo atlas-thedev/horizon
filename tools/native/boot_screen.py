@@ -69,9 +69,10 @@ if not any(sig in paint.read_text(encoding='utf-8') for sig in PAINTS) \
 paint.write_text((native / 'packaging/native/boot_paint.rs').read_text(encoding='utf-8'), encoding='utf-8')
 
 # It repaints about 60 times a second now (300 ms would make the bar jump) and needs no console lines.
-# (the repaint loop moved from game.rs to game/loading_screen.rs upstream on 2026-11-13)
+# Upstream moved the repaint loop out of game.rs and later into game/runtime.
 REPAINT = r'&horizon_client::logging::recent_lines\(\),\s*\);\s*std::thread::sleep'
-patch_re(next((f for f in (CLIENT / 'game/loading_screen.rs', CLIENT / 'game.rs')
+patch_re(next((f for f in (CLIENT / 'game/runtime/loading_screen.rs',
+                           CLIENT / 'game/loading_screen.rs', CLIENT / 'game.rs')
                if f.is_file() and (re.search(REPAINT, f.read_text(encoding='utf-8'))
                                    or re.search(DONE_PAINT, f.read_text(encoding='utf-8')))), CLIENT / 'game.rs'),
          r'&horizon_client::logging::recent_lines\(\),(\s*\);\s*std::thread::sleep\(std::time::Duration::from_millis\()300(\)\);)',

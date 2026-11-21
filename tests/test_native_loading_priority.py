@@ -1,5 +1,6 @@
 """Guard Native's terrain screen against focus-loss pause/menu overlays."""
-import ast
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,39 +10,36 @@ ROOT = Path(__file__).resolve().parents[1]
 class NativeLoadingPriority(unittest.TestCase):
     def test_installer_pause_and_keyboard_hooks_are_unique_and_idempotent(self):
         source = (ROOT / 'tools/native/native_client.py').read_text(encoding='utf-8')
-        tree = ast.parse(source)
-        hooks = []
-        for node in tree.body:
-            if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
-                    and isinstance(node.value.func, ast.Name) and node.value.func.id == 'patch'):
-                continue
-            args = node.value.args
-            if len(args) != 3 or not isinstance(args[0], ast.Name):
-                continue
-            try:
-                old, new = ast.literal_eval(args[1]), ast.literal_eval(args[2])
-            except (ValueError, TypeError):
-                continue
-            if args[0].id == 'POINTER' or ('self.studio_replay.is_some() && self.captured' in old):
-                hooks.append((old, new))
-        self.assertEqual(len(hooks), 3)
-        for old, new in hooks:
-            if 'self.has_singleplayer_server()' in old or 'self.control.is_none()' in old:
-                self.assertIn('!self.remote_screen_up()', new)
-            else:
-                self.assertIn('if self.remote_screen_up()', new)
-            self.assertEqual(old.count('self.remote_screen_up()'), 0)
-            fixture = 'before\n' + old + 'after\n'
-            def apply(text):
-                if new in text:
-                    return text
-                if text.count(old) != 1:
-                    raise ValueError('upstream changed')
-                return text.replace(old, new)
-            patched = apply(fixture)
-            self.assertEqual(apply(patched), patched)
-            with self.assertRaises(ValueError):
-                apply(fixture.replace(old, 'changed'))
+        start = source.index('def patch(')
+        definition = source[start:source.index('\n\nif not', start)]
+        hooks = source[source.index('POINTER = '):source.index('# The Native title screen')]
+        patch_loading = compile(definition + '\n' + hooks, 'native_client.py', 'exec')
+        sys.path.insert(0, str(ROOT / 'tools/native'))
+        self.addCleanup(sys.path.pop, 0)
+        from native_moved import relocate
+
+        for replay, moved in [('self.studio_replay.is_some()', False), ('self.replay.playing()', True)]:
+            with self.subTest(replay=replay), tempfile.TemporaryDirectory() as tmp:
+                client = Path(tmp)
+                game = client / 'game.rs'
+                game.touch()
+                directory = client / ('game/runtime' if moved else 'game')
+                directory.mkdir(parents=True)
+                pointer = directory / 'pointer_capture.rs'
+                pointer.write_text(
+                    '        self.has_singleplayer_server()\n            && !self.is_published()\n'
+                    '            && self.control.is_none()\n            && self.screen == Screen::Playing\n',
+                    encoding='utf-8',
+                )
+                keys = directory / 'play_keys.rs' if moved else game
+                keys.write_text(f'                Screen::Playing => {{\n                    if {replay} && self.captured {{\n', encoding='utf-8')
+                scope = {'CLIENT': client, 'GAME': game, 'root': client, 'relocate': relocate}
+                exec(patch_loading, scope)
+                patched = pointer.read_text(), keys.read_text()
+                self.assertEqual(patched[0].count('!self.remote_screen_up()'), 2)
+                self.assertEqual(patched[1].count('if self.remote_screen_up()'), 1)
+                exec(patch_loading, scope)
+                self.assertEqual((pointer.read_text(), keys.read_text()), patched)
 
     def test_loading_guards_native_render_and_passes_input_to_game(self):
         source = (ROOT / 'packaging/native/native_client/mod.rs').read_text(encoding='utf-8')

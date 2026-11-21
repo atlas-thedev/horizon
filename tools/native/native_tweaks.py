@@ -40,6 +40,7 @@ def patch_any(*tries):
     """The first of several (path, old, new) whose `old` (or `new`) is there: one place upstream moved code from or
     to, by Nightly. The last one reports when none is."""
     for path, old, new in tries[:-1]:
+        path = relocate(path, old, new)
         text = path.read_text(encoding='utf-8') if path.is_file() else ''
         if new in text or text.count(old) == 1:
             return patch(path, old, new)
@@ -81,7 +82,10 @@ patch(RENDER / 'camera.rs',
       '    }\n')
 
 # Low Fire.
-patch_any((CLIENT / 'game/extras/pvp.rs',
+PVP = CLIENT / 'game/entities/pvp.rs'
+if not PVP.is_file():
+    PVP = CLIENT / 'game/extras/pvp.rs'
+patch_any((PVP,
            '        f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0\n',
            '        horizon_client::native_ui::tweaks::fire_lower(\n'
            '            f32::from(self.settings.extras.pvp.tweaks.fire_lower) / 100.0,\n'
@@ -93,7 +97,7 @@ patch_any((CLIENT / 'game/extras/pvp.rs',
            '            ),\n'))
 
 # Block Overlay and Damage Tint: the block outline and the hurt flash the renderer reads each frame.
-patch_any((CLIENT / 'game/extras/pvp.rs',
+patch_any((PVP,
            '    pub(in crate::game) fn pvp_render_frame(&self) -> Frame {\n'
            '        self.settings.extras.pvp.frame()\n',
            '    pub(in crate::game) fn pvp_render_frame(&self) -> Frame {\n'
@@ -104,7 +108,6 @@ patch_any((CLIENT / 'game/extras/pvp.rs',
 
 # Time Changer, Weather Changer and the Crosshair: what PvP & HUD already does for the same things.
 # (game/pvp.rs became game/extras/pvp.rs on 2026-11-13, its methods `pub(in crate::game)`.)
-PVP = CLIENT / 'game/extras/pvp.rs'
 _patch = patch
 if PVP.is_file():
     def patch(path, old, new):
@@ -142,21 +145,24 @@ patch = _patch
 
 # Zoom and Freelook: the hooks native mods use.
 HOOKS = CLIENT / 'game/native_hooks.rs'
-patch(HOOKS,
-      '        mod_api::dispatch_zoom(self, mod_api::mods(), zoom);\n',
-      '        mod_api::dispatch_zoom(self, mod_api::mods(), zoom);\n'
+ZOOM = '        mod_api::dispatch_zoom(self, mod_api::mods(), zoom);\n'
+ZOOM_TYPE = 'NativeZoom'
+POSE = '        mod_api::dispatch_camera_pose(self, mod_api::mods(), partial, position, yaw, pitch);\n'
+if HOOKS.with_suffix('').is_dir() and not HOOKS.is_file():
+    ZOOM = '        self.fire_zoom(zoom);\n'
+    ZOOM_TYPE = 'mod_api::Zoom'
+    POSE = '        self.fire_camera_pose(partial, position, yaw, pitch);\n'
+patch(HOOKS, ZOOM, ZOOM +
       '        if zoom.is_none()\n'
       '            && let Some(z) = horizon_client::native_ui::tweaks::zoom()\n'
       '        {\n'
-      '            *zoom = Some(NativeZoom {\n'
+      f'            *zoom = Some({ZOOM_TYPE} {{\n'
       '                factor: z.factor,\n'
       '                smooth: z.smooth,\n'
       '                turn: z.turn,\n'
       '            });\n'
       '        }\n')
-patch(HOOKS,
-      '        mod_api::dispatch_camera_pose(self, mod_api::mods(), partial, position, yaw, pitch);\n',
-      '        mod_api::dispatch_camera_pose(self, mod_api::mods(), partial, position, yaw, pitch);\n'
+patch(HOOKS, POSE, POSE +
       '        if let Some((turn, tilt)) = horizon_client::native_ui::tweaks::get().freelook {\n'
       '            *yaw += turn;\n'
       '            *pitch = (*pitch + tilt).clamp(-90.0, 90.0);\n'
@@ -167,26 +173,21 @@ FREELOOK = ('            self.mouse.on_move(0.0, 0.0, x, y, true, true);\n',
             '                self.mouse.on_move(0.0, 0.0, x, y, true, true);\n'
             '            }\n')
 # (game/window_handler.rs since 2026-11-13; game/repro.rs has a deeper copy for replays, which stays.)
-patch_any((CLIENT / 'game/window_handler.rs', *FREELOOK), (CLIENT / 'game.rs', *FREELOOK))
+patch_any((CLIENT / 'game/runtime/window_handler.rs', *FREELOOK),
+          (CLIENT / 'game/window_handler.rs', *FREELOOK), (CLIENT / 'game.rs', *FREELOOK))
 
 # Lag Free: the frame rate while the window is in the background (a hook that may only lower it).
-patch(HOOKS,
-      '        mod_api::dispatch_framerate_limit(\n'
-      '            self,\n'
-      '            mod_api::mods(),\n'
-      '            focused,\n'
-      '            minimized,\n'
-      '            in_world,\n'
-      '            limit,\n'
-      '        );\n',
-      '        mod_api::dispatch_framerate_limit(\n'
-      '            self,\n'
-      '            mod_api::mods(),\n'
-      '            focused,\n'
-      '            minimized,\n'
-      '            in_world,\n'
-      '            limit,\n'
-      '        );\n'
+LIMIT = ('        mod_api::dispatch_framerate_limit(\n'
+         '            self,\n'
+         '            mod_api::mods(),\n'
+         '            focused,\n'
+         '            minimized,\n'
+         '            in_world,\n'
+         '            limit,\n'
+         '        );\n')
+if not HOOKS.is_file():
+    LIMIT = '        self.fire_framerate_limit(focused, minimized, in_world, limit);\n'
+patch(HOOKS, LIMIT, LIMIT +
       '        if let Some(cap) = horizon_client::native_ui::tweaks::get().background_fps {\n'
       '            let cap = cap.max(1) as i32;\n'
       '            if *limit < 1 || cap < *limit {\n'
@@ -219,21 +220,30 @@ patch(SCORE,
       '            ),\n'
       '        );\n')
 DRAGON = CLIENT / 'game/dragon.rs'
-patch(DRAGON,
-      '        let draws = hud_overlays::boss_overlay(\n',
-      '        let draws = horizon_client::native_ui::tweaks::bars_draws(\n'
-      '            batch.width as i32,\n'
-      '            batch.height as i32,\n'
-      '            &bars,\n'
-      '            hud_overlays::boss_overlay(\n')
-patch(DRAGON,
-      '            &bars,\n'
-      '            &self.gui.atlas.font,\n'
-      '        );\n',
-      '            &bars,\n'
-      '            &self.gui.atlas.font,\n'
-      '            ),\n'
-      '        );\n')
+if not DRAGON.is_file():
+    DRAGON = CLIENT / 'game/mobs/dragon.rs'
+    BOSS = '        hud_overlays::boss_overlay(w, h, &bars, &self.gui.atlas.font, |index, at| {\n'
+    patch(DRAGON, BOSS, '        let draws = ' + BOSS.lstrip())
+    patch(DRAGON, '            !cancel\n        })\n    }\n    /// The dragon fight',
+          '            !cancel\n        });\n'
+          '        horizon_client::native_ui::tweaks::bars_draws(w, h, &bars, draws)\n'
+          '    }\n    /// The dragon fight')
+else:
+    patch(DRAGON,
+          '        let draws = hud_overlays::boss_overlay(\n',
+          '        let draws = horizon_client::native_ui::tweaks::bars_draws(\n'
+          '            batch.width as i32,\n'
+          '            batch.height as i32,\n'
+          '            &bars,\n'
+          '            hud_overlays::boss_overlay(\n')
+    patch(DRAGON,
+          '            &bars,\n'
+          '            &self.gui.atlas.font,\n'
+          '        );\n',
+          '            &bars,\n'
+          '            &self.gui.atlas.font,\n'
+          '            ),\n'
+          '        );\n')
 
 # Discord RPC: the module switches the game's Rich Presence off, and its custom status is the top line everywhere
 # (menus, singleplayer, servers, hosting), with what the player does moved under it, as in the Java mod.
@@ -392,7 +402,8 @@ if 'fn native_finish(' not in text:
         text = text.replace(SHOWN, '        let blurred = native_blur(self, encoder, shown);\n'
                                    '        self.draw_onto(encoder, screen, blurred.as_ref().unwrap_or(shown), pipeline, timing);\n')
         TAA = None
-    for old, count in (('            self.finish_with(encoder, screen, &target.group, timing.as_deref_mut());\n', 2),
+    copies = 1 if '    fn taa_frame(&self)' in text else 2
+    for old, count in (('            self.finish_with(encoder, screen, &target.group, timing.as_deref_mut());\n', copies),
                        (TAA, 1)):
         if old is None:
             continue
@@ -406,42 +417,45 @@ if 'fn native_finish(' not in text:
 # EquipmentAssetManager reads the equipment assets of EVERY namespace and reloads them with the packs. Upstream reads
 # only `minecraft` and the content mods' namespaces, at startup only, and packs only those namespaces' entity textures,
 # so armour from a pack namespace was invisible on the body (its icon in the slot still showed).
-patch(CLIENT / 'game/armor_stands.rs',
-      '        let namespaces = std::iter::once("minecraft".to_owned())\n'
-      '            .chain(horizon_client::mod_content::namespaces(root));\n',
-      '        // Native: every namespace of the root, the resource packs\' own too (a server pack\'s armour).\n'
-      '        let namespaces = std::iter::once("minecraft".to_owned()).chain(\n'
-      '            std::fs::read_dir(root.join("assets"))\n'
-      '                .into_iter()\n'
-      '                .flatten()\n'
-      '                .flatten()\n'
-      '                .filter_map(|e| e.file_name().into_string().ok())\n'
-      '                .filter(|n| n != "minecraft"),\n'
-      '        );\n')
-patch(CLIENT / 'game/armor_stands.rs',
-      '        let fresh = Self::load(root, None);\n'
-      '        self.trim_overrides = fresh.trim_overrides;\n',
-      '        let fresh = Self::load(root, None);\n'
-      '        // Native: the packs\' equipment assets change with the packs, like the trims.\n'
-      '        self.equipment = fresh.equipment;\n'
-      '        self.trim_overrides = fresh.trim_overrides;\n')
-patch(RENDER / 'hud.rs',
-      '        let assets = root.join("assets");\n'
-      '        // A native mod\'s particle type names its textures `<ns>:particle/<path>`\n',
-      '        // Native: every namespace\'s armour layers (`<ns>:entity/equipment/...`), which a resource pack\'s\n'
-      '        // equipment assets name; the content mods\' are packed above with all their entity textures.\n'
-      '        if folders.contains(&"entity")\n'
-      '            && let Ok(all) = fs::read_dir(root.join("assets"))\n'
-      '        {\n'
-      '            for ns in all.flatten() {\n'
-      '                let name = ns.file_name().to_string_lossy().into_owned();\n'
-      '                if name != "minecraft" && !namespaces.contains(&name) {\n'
-      '                    walk(&ns.path().join("textures/entity/equipment"), &mut files);\n'
-      '                }\n'
-      '            }\n'
-      '        }\n'
-      '        let assets = root.join("assets");\n'
-      '        // A native mod\'s particle type names its textures `<ns>:particle/<path>`\n')
+ARMOR = CLIENT / 'game/entities/armor_stands.rs'
+upstream_pack_armor = ARMOR.is_file() and 'EquipmentAssetManager reads resolved resources in every namespace' in ARMOR.read_text(encoding='utf-8')
+if not upstream_pack_armor:
+    patch(CLIENT / 'game/armor_stands.rs',
+          '        let namespaces = std::iter::once("minecraft".to_owned())\n'
+          '            .chain(horizon_client::mod_content::namespaces(root));\n',
+          '        // Native: every namespace of the root, the resource packs\' own too (a server pack\'s armour).\n'
+          '        let namespaces = std::iter::once("minecraft".to_owned()).chain(\n'
+          '            std::fs::read_dir(root.join("assets"))\n'
+          '                .into_iter()\n'
+          '                .flatten()\n'
+          '                .flatten()\n'
+          '                .filter_map(|e| e.file_name().into_string().ok())\n'
+          '                .filter(|n| n != "minecraft"),\n'
+          '        );\n')
+    patch(CLIENT / 'game/armor_stands.rs',
+          '        let fresh = Self::load(root, None);\n'
+          '        self.trim_overrides = fresh.trim_overrides;\n',
+          '        let fresh = Self::load(root, None);\n'
+          '        // Native: the packs\' equipment assets change with the packs, like the trims.\n'
+          '        self.equipment = fresh.equipment;\n'
+          '        self.trim_overrides = fresh.trim_overrides;\n')
+    patch(RENDER / 'hud.rs',
+          '        let assets = root.join("assets");\n'
+          '        // A native mod\'s particle type names its textures `<ns>:particle/<path>`\n',
+          '        // Native: every namespace\'s armour layers (`<ns>:entity/equipment/...`), which a resource pack\'s\n'
+          '        // equipment assets name; the content mods\' are packed above with all their entity textures.\n'
+          '        if folders.contains(&"entity")\n'
+          '            && let Ok(all) = fs::read_dir(root.join("assets"))\n'
+          '        {\n'
+          '            for ns in all.flatten() {\n'
+          '                let name = ns.file_name().to_string_lossy().into_owned();\n'
+          '                if name != "minecraft" && !namespaces.contains(&name) {\n'
+          '                    walk(&ns.path().join("textures/entity/equipment"), &mut files);\n'
+          '                }\n'
+          '            }\n'
+          '        }\n'
+          '        let assets = root.join("assets");\n'
+          '        // A native mod\'s particle type names its textures `<ns>:particle/<path>`\n')
 # Their tests: upstream's one that wanted pack namespaces unread now wants them read (when it is still there).
 LOADING_TESTS = CLIENT / 'game/entity_model_loading_tests.rs'
 UNREAD = ('    // Not a content root: other namespaces stay unread, as before.\n'

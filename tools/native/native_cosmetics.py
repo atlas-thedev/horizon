@@ -16,7 +16,7 @@ import shutil
 import sys
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))  # also when run through runpy (the tests)
-from native_moved import relocate  # noqa: E402
+from native_moved import game_sources, relocate  # noqa: E402
 
 root = pathlib.Path(sys.argv[1]).resolve()
 native = pathlib.Path(sys.argv[2]).resolve()
@@ -38,8 +38,11 @@ def patch(path, old, new):
 if not (CLIENT / 'native_skins.rs').exists():
     raise SystemExit('native_cosmetics: run native_skins.py first.')
 
-shutil.copyfile(native / 'packaging/native/native_cosmetics.rs', CLIENT / 'game/native_cosmetics.rs')
-patch(CLIENT / 'game.rs', 'mod cosmetics;\n', 'mod cosmetics;\nmod native_cosmetics;\n')
+sources = game_sources(CLIENT)
+native_file = sources / 'native_cosmetics.rs'
+shutil.copyfile(native / 'packaging/native/native_cosmetics.rs', native_file)
+if sources == CLIENT / 'game':
+    patch(CLIENT / 'game.rs', 'mod cosmetics;\n', 'mod cosmetics;\nmod native_cosmetics;\n')
 
 # Items made in code (an NCM model) rather than read from a file: `Item` keeps private fields (its animated parts),
 # so it gets a constructor that finds them, and its top, as `parse` does.
@@ -86,16 +89,18 @@ patch(root / 'crates/horizon-cosmetics/src/item.rs',
       '    }\n\n'
       '    /// Reads and checks an item file.\n')
 
-COSMETICS = CLIENT / 'game/cosmetics.rs'
-PLAYER_HOOKS = CLIENT / 'game/player_hooks.rs'
+COSMETICS = relocate(CLIENT / 'game/cosmetics.rs', 'fn covered(gear: Gear, slot: Slot)', 'fn native_others_shown(')
+PLAYER_HOOKS = relocate(CLIENT / 'game/player_hooks.rs', 'fn player_layers_geometry(', 'fn player_layers_geometry(')
 # Since 2026-11-13 Horizon's cosmetics draw through the player hooks (game/player_hooks.rs, `PlayerDraw`), whose
 # sprites are 64×64 skin slots: Native's are drawn from there too, after the crates' layers (native_cosmetics_draw.rs).
 HOOKED = PLAYER_HOOKS.is_file() and 'fn player_layers_geometry(' in PLAYER_HOOKS.read_text(encoding='utf-8')
 if HOOKED:
-    shutil.copyfile(native / 'packaging/native/native_cosmetics_draw.rs', CLIENT / 'game/native_cosmetics_draw.rs')
+    draw = PLAYER_HOOKS.with_name('native_cosmetics_draw.inc')
+    shutil.copyfile(native / 'packaging/native/native_cosmetics_draw.rs', draw)
     hooks_text = PLAYER_HOOKS.read_text(encoding='utf-8')
-    if 'include!("native_cosmetics_draw.rs");' not in hooks_text:
-        PLAYER_HOOKS.write_text(hooks_text.rstrip('\n') + '\n\ninclude!("native_cosmetics_draw.rs");\n', encoding='utf-8')
+    if 'include!("native_cosmetics_draw.inc");' not in hooks_text:
+        hooks_text = hooks_text.replace('include!("native_cosmetics_draw.rs");', '')
+        PLAYER_HOOKS.write_text(hooks_text.rstrip('\n') + '\n\ninclude!("native_cosmetics_draw.inc");\n', encoding='utf-8')
     patch(PLAYER_HOOKS,
           '        engine::player_layers(&model, &mut draw);\n        draw.bounds\n',
           '        engine::player_layers(&model, &mut draw);\n        draw.native_cosmetics(false);\n        draw.bounds\n')
@@ -115,13 +120,17 @@ if HOOKED:
                              'pub(super) fn native_others_shown() -> bool {\n'
                              '    service(|s| s.others() == Others::Shown)\n'
                              '}\n', encoding='utf-8')
-    NATIVE_FILE = CLIENT / 'game/native_cosmetics.rs'
     OTHERS = 'self.settings.extras.effective_others() == horizon_cosmetics::prefs::Others::Shown'
-    native_text = NATIVE_FILE.read_text(encoding='utf-8')
+    native_text = native_file.read_text(encoding='utf-8')
     if native_text.count(OTHERS) != 1:
         raise SystemExit('native_cosmetics: packaging/native/native_cosmetics.rs no longer asks effective_others once; '
                          'update tools/native/native_cosmetics.py.')
-    NATIVE_FILE.write_text(native_text.replace(OTHERS, 'super::cosmetics::native_others_shown()'), encoding='utf-8')
+    native_text = native_text.replace(OTHERS, 'super::cosmetics::native_others_shown()')
+    if sources != CLIENT / 'game':
+        for name in ('head', 'chest', 'legs', 'feet'):
+            native_text = native_text.replace(f'm.extra.{name}.is_some()',
+                                              f'm.extra.slot_stack(horizon_items::equipment::{name.upper()}).is_some()')
+    native_file.write_text(native_text, encoding='utf-8')
 else:
     # What the avatar wears: Horizon's items (and an emote's props), then Native's.
     patch(COSMETICS,
@@ -207,7 +216,9 @@ patch(CLIENT / 'game/remote.rs',
       '        }\n')
 
 # Under a hood (native_skins.rs `hooded`) the helmet and the head item are not drawn either.
-ARMOR_STANDS = CLIENT / 'game/armor_stands.rs'
+ARMOR_STANDS = relocate(CLIENT / 'game/armor_stands.rs',
+                        '        self.stack_armor_layers(&self.armor)\n',
+                        '        self.stack_armor_layers(&armor)\n')
 patch(ARMOR_STANDS,
       '        self.stack_armor_layers(&self.armor)\n',
       '        let mut armor = self.armor.clone();\n'
@@ -215,12 +226,22 @@ patch(ARMOR_STANDS,
       '            armor[0] = None;\n'
       '        }\n'
       '        self.stack_armor_layers(&armor)\n')
-patch(ARMOR_STANDS,
-      '                (e.head.as_deref(), e.armor[0].as_ref()),\n',
-      '                (\n'
-      '                    e.head.as_deref().filter(|_| !horizon_client::native_skins::hooded(m.id)),\n'
-      '                    e.armor[0].as_ref(),\n'
-      '                ),\n')
+EQUIPMENT = '                .map(|slot| e.slot_stack(slot).map(|stack| (&*stack.item, Some(stack)))),\n'
+if EQUIPMENT in ARMOR_STANDS.read_text(encoding='utf-8') or 'slot == horizon_items::equipment::HEAD && horizon_client::native_skins::hooded' in ARMOR_STANDS.read_text(encoding='utf-8'):
+    patch(ARMOR_STANDS, EQUIPMENT,
+          '                .map(|slot| {\n'
+          '                    if slot == horizon_items::equipment::HEAD && horizon_client::native_skins::hooded(m.id) {\n'
+          '                        return None;\n'
+          '                    }\n'
+          '                    e.slot_stack(slot).map(|stack| (&*stack.item, Some(stack)))\n'
+          '                }),\n')
+else:
+    patch(ARMOR_STANDS,
+          '                (e.head.as_deref(), e.armor[0].as_ref()),\n',
+          '                (\n'
+          '                    e.head.as_deref().filter(|_| !horizon_client::native_skins::hooded(m.id)),\n'
+          '                    e.armor[0].as_ref(),\n'
+          '                ),\n')
 patch(CLIENT / 'game/mob_blocks.rs',
       '        // The layer also draws on an invisible mob.\n',
       '        if horizon_client::native_skins::hooded(mob.id) {\n'

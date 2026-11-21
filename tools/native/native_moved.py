@@ -1,25 +1,33 @@
-"""Upstream splits big files (game.rs into game/*.rs, ...). A patch anchor that left the file a script names is looked
-for in that file's own folder (`game.rs` -> `game/`): when exactly one file there holds it, the patch goes there.
-Anything else (gone, or in several files) still fails the build, so nothing is patched in the wrong place."""
+"""Find precise upstream patch anchors after Rust modules move or split."""
 import pathlib
 
 
+def game_sources(client):
+    """Place Native modules where either generation of the game discovers them."""
+    game = client / 'game'
+    if '/game_modules.rs' in (client / 'game.rs').read_text(encoding='utf-8'):
+        game = game / 'native'
+        game.mkdir(exist_ok=True)
+        (game / '.game-area').touch()
+    return game
+
+
 def relocate(path, old, done):
-    """The file to patch: `path` when it holds `old` (or `done`, the patched text), else the one file under
-    `path`'s folder that does. `path` itself when none or several do (the caller then reports it)."""
+    """Use the named file or a unique anchor in the split or relocated module."""
     path = pathlib.Path(path)
     text = path.read_text(encoding='utf-8') if path.is_file() else ''
     if done in text or text.count(old) == 1:
         return path
     folder = path.with_suffix('')
+    if not folder.is_dir() and not path.is_file():
+        # For example, game/remote.rs became game/network/remote/mod.rs.
+        folder = path.parent
     if not folder.is_dir():
         return path
     found = []
     for f in sorted(folder.rglob('*.rs')):
         t = f.read_text(encoding='utf-8')
-        if done in t:
-            return f
-        if t.count(old) == 1:
+        if done in t or t.count(old) == 1:
             found.append(f)
         elif t.count(old) > 1:
             return path

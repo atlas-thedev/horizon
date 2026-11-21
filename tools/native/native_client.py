@@ -13,8 +13,9 @@ instead of shipping a client that silently has no Native modules. Safe to run ag
 """
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))  # also when run through runpy (the tests)
-from native_moved import relocate  # noqa: E402
+from native_moved import game_sources, relocate  # noqa: E402
 import pathlib
+import re
 import shutil
 import sys
 
@@ -38,7 +39,8 @@ def patch(path, old, new):
 if not (root / 'crates/horizon-client-render/src/native_ui').is_dir():
     raise SystemExit('native_client: run native_ui.py first.')
 
-target = CLIENT / 'game/native_client'
+sources = game_sources(CLIENT)
+target = sources / 'native_client'
 if target.exists():
     shutil.rmtree(target)
 shutil.copytree(native / 'packaging/native/native_client', target)
@@ -53,6 +55,32 @@ if 'realm: bool,' in (CLIENT / 'title.rs').read_text(encoding='utf-8'):
                              'update tools/native/native_client.py.')
         text = text.replace(old, old[:-2] + ', realm: false }')
     menu.write_text(text, encoding='utf-8')
+
+if sources != CLIENT / 'game':
+    menu = target / 'mod.rs'
+    text = menu.read_text(encoding='utf-8')
+    for old, new in {
+        'super::perspective::CameraType': 'horizon_client::camera::CameraType',
+        'self.keys.contains(&code)': 'self.keys.raw(&code)',
+        'self.native_clock()': 'self.clock()',
+        'self.native_mod_screen': 'self.mod_screen',
+        'Outcome::None => None,': 'Outcome::None | Outcome::Open(_) => None,',
+    }.items():
+        if old not in text:
+            raise SystemExit(f'native_client: missing compatibility anchor {old!r} in {menu}')
+        text = text.replace(old, new)
+    text = re.sub(r'self\.translate\(("[^"]+"), ("[^"]+")\)',
+                  r'self.translate(\1).unwrap_or_else(|| \2.into())', text)
+    old_click = ('    let saves = title.saves.clone();\n'
+                 '    let outcome = match &mut title.mode {\n'
+                 '        Mode::Multiplayer(screen) => screen.click(Some(id), 0.0, 0.0, (0.0, 0.0), &saves),\n'
+                 '        _ => return None,\n'
+                 '    };\n')
+    if text.count(old_click) != 1:
+        raise SystemExit(f'native_client: changed server list click handler in {menu}')
+    text = text.replace(old_click, '    let outcome = title.multiplayer_click(Some(id), 0.0, 0.0, (0.0, 0.0));\n')
+    menu.write_text(text, encoding='utf-8')
+    patch(CLIENT / 'title.rs', '    pub(crate) fn multiplayer_click(\n', '    pub fn multiplayer_click(\n')
 
 # Native Music decodes songs with symphonia and plays them through cpal; Native Voice adds Opus, WebRTC's audio
 # processing and AES-GCM. The lock file learns the new packages when the build resolves them, so the builds run
@@ -69,7 +97,8 @@ patch(root / 'crates/horizon-client/Cargo.toml',
       'aes-gcm = "0.10"\n')
 
 GAME = CLIENT / 'game.rs'
-patch(GAME, 'mod cosmetics;\n', 'mod cosmetics;\nmod native_client;\n')
+if sources == CLIENT / 'game':
+    patch(GAME, 'mod cosmetics;\n', 'mod cosmetics;\nmod native_client;\n')
 # Over the HUD, the screens and the toasts; under the debug overlay, as in the Java mod.
 patch(GAME, '        self.draw_debug_overlay(&mut batch, size);\n',
       '        self.native_ui_frame(&mut batch);\n        self.draw_debug_overlay(&mut batch, size);\n')
@@ -104,6 +133,7 @@ patch(GAME, escape, done)
 # stay the game's), on the boot menu and on the title a world returns to. What it asks for goes through the
 # game's own title actions.
 MENU = CLIENT / 'game/startup_menu.rs'
+menu_phases = '                &mut |_, _| {},\n' if sources != CLIENT / 'game' else ''
 patch(MENU,
       '            title.draw_with_items(\n'
       '                &gui.atlas,\n'
@@ -112,6 +142,7 @@ patch(MENU,
       '                self.menu.cursor,\n'
       '                self.settings.file.bool("hideSplashTexts"),\n'
       '                self.settings.file.bool("hideServerAddress"),\n'
+      + menu_phases +
       '            );\n',
       '            if super::native_client::native_title_active(title) {\n'
       '                let who = self.options.as_ref().map_or_else(|| "Player".into(), |o| o.player_name());\n'
@@ -125,6 +156,7 @@ patch(MENU,
       '                    self.menu.cursor,\n'
       '                    self.settings.file.bool("hideSplashTexts"),\n'
       '                    self.settings.file.bool("hideServerAddress"),\n'
+      + ('    ' + menu_phases if menu_phases else '') +
       '                );\n'
       '            }\n'
       '            super::native_client::native_title_restore_frame(batch, title);\n')
@@ -146,8 +178,10 @@ patch(MENU, MENU_FOCUS,
       '        {\n'
       '            return Ok(());\n'
       '        }\n' + MENU_FOCUS)
-patch(GAME,
-      '            if let Some(title) = &self.title {\n'
+title_open = ('            if drawn && let Some(title) = &self.title {\n'
+              if menu_phases else '            if let Some(title) = &self.title {\n')
+in_game_phases = '                    &mut |phase, batch| self.draw_screen_phase(batch, phase),\n' if menu_phases else ''
+patch(GAME, title_open +
       '                title.draw_with_items(\n'
       '                    &self.gui.atlas,\n'
       '                    Some(&self.pack.item_renderer),\n'
@@ -155,9 +189,10 @@ patch(GAME,
       '                    self.cursor,\n'
       '                    self.settings.file.bool("hideSplashTexts"),\n'
       '                    self.settings.file.bool("hideServerAddress"),\n'
+      + in_game_phases +
       '                );\n'
       '            }\n',
-      '            if let Some(title) = &self.title {\n'
+      title_open +
       '                if native_client::native_title_active(title) {\n'
       '                    let who = self.options.player_name();\n'
       '                    native_client::native_title_background(&mut batch);\n'
@@ -170,6 +205,7 @@ patch(GAME,
       '                        self.cursor,\n'
       '                        self.settings.file.bool("hideSplashTexts"),\n'
       '                        self.settings.file.bool("hideServerAddress"),\n'
+      + ('    ' + in_game_phases if in_game_phases else '') +
       '                    );\n'
       '                }\n'
       '                native_client::native_title_restore_frame(&mut batch, title);\n'

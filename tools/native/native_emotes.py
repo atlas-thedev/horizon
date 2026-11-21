@@ -6,15 +6,16 @@ import sys
 from pathlib import Path
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))  # also when run through runpy (the tests)
-from native_moved import relocate  # noqa: E402
+from native_moved import game_sources, relocate  # noqa: E402
 native = Path(__file__).resolve().parents[2]
 root = Path(sys.argv[1]).resolve() if len(sys.argv)>1 else Path.cwd()
 client = root/'crates/horizon-client/src'
+sources = game_sources(client)
 shutil.copyfile(native/'packaging/native/native_emotes.rs', client/'native_emotes.rs')
 shutil.copyfile(native/'packaging/native/native_emote_props.rs', client/'native_emote_props.rs')
-shutil.copyfile(native/'packaging/native/native_emote_renderer.rs', client/'game/native_emote_renderer.rs')
+shutil.copyfile(native/'packaging/native/native_emote_renderer.rs', sources/'native_emote_renderer.rs')
 # Native cosmetics must already be installed, as in the release workflow.
-p = client/'game/native_cosmetics.rs'
+p = sources/'native_cosmetics.rs'
 s = p.read_text(encoding='utf-8')
 marker = '// Native emote props share the bounded cosmetic atlas packer'
 if marker not in s:
@@ -29,8 +30,8 @@ def install(path, old, new, marker):
         s = s.replace(old, new, 1)
         path.write_text(s, encoding='utf-8')
 
-shutil.copyfile(native/'packaging/native/native_emote_preview.rs', client/'game/native_client/emote_props_preview.rs')
-p = client/'game/native_client/boxes.rs'
+shutil.copyfile(native/'packaging/native/native_emote_preview.rs', sources/'native_client/emote_props_preview.rs')
+p = sources/'native_client/boxes.rs'
 s = p.read_text(encoding='utf-8')
 marker = '// Native emote prop texels: participate in the same sorted list as the avatar.'
 if marker not in s:
@@ -43,12 +44,12 @@ if marker not in s:
         s=s.replace(old,new,1)
     s += "\n" + (native/'packaging/native/native_emote_preview_boxes.rs').read_text(encoding='utf-8')
     p.write_text(s,encoding='utf-8')
-install(client/'game/native_client/mod.rs', 'mod emote_wheel;', 'mod emote_wheel;\nmod emote_props_preview;', 'mod emote_props_preview;')
-install(client/'game/native_client/preview3d.rs',
+install(sources/'native_client/mod.rs', 'mod emote_wheel;', 'mod emote_wheel;\nmod emote_props_preview;', 'mod emote_props_preview;')
+install(sources/'native_client/preview3d.rs',
         'pub fn draw_wheel(c: &mut Canvas, skin: &Arc<Image>, slim: bool, p: [[f32; 6]; 6], rect: [f32; 4]) {',
         'pub fn draw_wheel(c: &mut Canvas, skin: &Arc<Image>, slim: bool, p: [[f32; 6]; 6], rect: [f32; 4], props: Option<(String, Arc<horizon_client::native_emote_props::PropClip>, u64)>) {',
         'props: Option<(String, Arc<horizon_client::native_emote_props::PropClip>, u64)>')
-install(client/'game/native_client/preview3d.rs',
+install(sources/'native_client/preview3d.rs',
         '    let [rx,ry,rw,rh] = rect;\n    let unit =',
         '    let prop_quads = props.as_ref().and_then(|(_,clip,time)|clip.quads(*time));\n'
         '    if let Some(quads) = &prop_quads {\n'
@@ -61,7 +62,7 @@ install(client/'game/native_client/preview3d.rs',
         '    }\n'
         '    let [rx,ry,rw,rh] = rect;\n    let unit =', 'let prop_quads = props.as_ref()')
 # Anchor the final b.end specifically to draw_wheel, which is the last function in this file.
-p = client/'game/native_client/preview3d.rs'
+p = sources/'native_client/preview3d.rs'
 s = p.read_text(encoding='utf-8')
 marker = 'super::emote_props_preview::draw(&mut b,hash,clip,quads);'
 if marker not in s:
@@ -69,15 +70,19 @@ if marker not in s:
     at=s.index('    b.end(c);',start)
     s=s[:at]+'    if let (Some((hash,clip,_)),Some(quads))=(&props,&prop_quads) {\n        '+marker+'\n    }\n'+s[at:]
     p.write_text(s,encoding='utf-8')
-install(client/'game/native_client/emote_wheel.rs',
+install(sources/'native_client/emote_wheel.rs',
         '                preview3d::draw_wheel(c, &skin, slim, pose, rect);',
         '                preview3d::draw_wheel(c, &skin, slim, pose, rect, native_emotes::preview_props(hash, if active { Some(hover_elapsed) } else { None }));',
         'preview3d::draw_wheel(c, &skin, slim, pose, rect, native_emotes::preview_props')
 
-install(client/'game.rs', 'mod native_cosmetics;', 'mod native_cosmetics;\nmod native_emote_renderer;', 'mod native_emote_renderer;')
+if sources == client/'game':
+    install(client/'game.rs', 'mod native_cosmetics;', 'mod native_cosmetics;\nmod native_emote_renderer;', 'mod native_emote_renderer;')
 install(client/'game.rs', '    fn render_frame(&mut self) -> Result<bool> {',
         '    fn render_frame(&mut self) -> Result<bool> {\n        self.native_emote_prop_uploads();', 'self.native_emote_prop_uploads();')
-install(client/'game/creatures.rs',
+creatures = client/'game/mobs/creatures/mod.rs'
+if not creatures.is_file():
+    creatures = client/'game/creatures.rs'
+install(creatures,
         '            let layers = horizon_client::mobs::render::layers_shown(mob);',
         '            let layers = horizon_client::mobs::render::layers_shown(mob);\n'
         '            if is_player && layers && !layers_only && !mob.invisible {\n'
