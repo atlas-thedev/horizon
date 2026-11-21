@@ -91,7 +91,7 @@ pub fn pair(x: f32, y: f32, w: f32, h: f32, aspect: f32) -> [[f32; 4]; 2] {
 pub fn chip(c: &mut Canvas, text: &str, cx: f32, y: f32, fg: u32) {
     let tw = c.text_width(font::SEMIBOLD, 10.5, text) + 20.0;
     c.round(cx - tw / 2.0, y, tw, 22.0, 11.0, 0xC0000000);
-    c.outline(cx - tw / 2.0, y, tw, 22.0, 11.0, 1.0, theme::HAIRLINE_STRONG);
+    c.outline(cx - tw / 2.0, y, tw, 22.0, 11.0, 1.0, theme::hairline_strong());
     let lh = c.line_height(font::SEMIBOLD, 10.5);
     c.text(font::SEMIBOLD, 10.5, text, cx - tw / 2.0 + 10.0, y + (22.0 - lh) / 2.0, fg);
 }
@@ -108,7 +108,7 @@ pub fn caption(c: &mut Canvas, view: &[f32; 4], text: &str, good: bool) {
         text,
         vx + (half - tw) / 2.0 + 9.0,
         top + vh + 8.0 + (20.0 - lh) / 2.0,
-        if good { theme::ONLINE } else { theme::TEXT_SECONDARY },
+        if good { theme::online() } else { theme::text_secondary() },
     );
 }
 

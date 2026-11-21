@@ -298,21 +298,21 @@ impl Ui {
         let r = (h / 2.0).min(10.0);
         let (bg, border, fg) = match style {
             BTN_PRIMARY => {
-                let bg = theme::mix(theme::mix(0xFFF4F4F5, 0xFFFFFFFF, hv), 0xFFD4D4D8, pr);
-                (bg, 0, theme::SOLID_FG)
+                let bg = theme::mix(theme::mix(theme::accent(), theme::text_strong(), hv * 0.12), theme::panel_pressed(), pr * 0.18);
+                (bg, 0, theme::solid_fg())
             }
             BTN_GHOST => (
-                theme::alpha(theme::SUBTLE_HOVER, hv),
+                theme::alpha(theme::subtle_hover(), hv),
                 0,
-                theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv),
+                theme::mix(theme::text_secondary(), theme::text_strong(), hv),
             ),
-            BTN_DANGER => (theme::mix(0x26EF4444, 0x40EF4444, hv), 0x4DEF4444, 0xFFFCA5A5),
+            BTN_DANGER => (theme::alpha(theme::danger(), 0.15 + 0.10 * hv), theme::alpha(theme::danger(), 0.3), theme::mix(theme::danger(), theme::text_strong(), 0.46)),
             _ => {
-                let bg = theme::mix(theme::mix(0xB808090C, 0xD80E1014, hv), 0xE014171D, pr);
+                let bg = theme::mix(theme::mix(theme::alpha(theme::panel(), 0.94), theme::panel_hover(), hv), theme::panel_pressed(), pr);
                 (
                     bg,
-                    theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv),
-                    theme::mix(theme::TEXT, theme::TEXT_STRONG, hv),
+                    theme::mix(theme::hairline(), theme::border_hover(), hv),
+                    theme::mix(theme::text(), theme::text_strong(), hv),
                 )
             }
         };
@@ -345,8 +345,8 @@ impl Ui {
         let over = self.hover(c, x, y, size, size);
         let click = self.clicked(c, id, x, y, size, size);
         let hv = self.anim_on(&format!("{id}#h"), over, 16.0);
-        c.round(x, y, size, size, (size / 2.0).min(8.0), theme::alpha(theme::SUBTLE_HOVER, hv));
-        c.icon(icon, size * 0.5, x + size / 2.0, y + size / 2.0, theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, hv));
+        c.round(x, y, size, size, (size / 2.0).min(8.0), theme::alpha(theme::subtle_hover(), hv));
+        c.icon(icon, size * 0.5, x + size / 2.0, y + size / 2.0, theme::mix(theme::text_muted(), theme::text_strong(), hv));
         if over && let Some(t) = tooltip {
             self.pending_tooltip = Some(t.to_owned());
         }
@@ -360,7 +360,7 @@ impl Ui {
         let t = self.anim_on(&format!("{id}#t"), on, 14.0);
         c.round(x, y, w, h, h / 2.0, theme::mix(0x33FFFFFF, 0xFFF4F4F5, t));
         let k = h - 6.0;
-        c.circle(x + 3.0 + k / 2.0 + t * (w - 6.0 - k), y + h / 2.0, k / 2.0, theme::mix(0xFFD4D4D8, theme::SOLID_FG, t));
+        c.circle(x + 3.0 + k / 2.0 + t * (w - 6.0 - k), y + h / 2.0, k / 2.0, theme::mix(0xFFD4D4D8, theme::solid_fg(), t));
         click
     }
 
@@ -381,9 +381,9 @@ impl Ui {
         let y = (self.my + 16.0).min(c.height() - h - 4.0);
         c.shadow(x, y + 2.0, w, h, 6.0, 8.0, 0x66000000);
         c.round(x, y, w, h, 6.0, 0xF0141418);
-        c.outline(x, y, w, h, 6.0, 1.0, theme::HAIRLINE_STRONG);
+        c.outline(x, y, w, h, 6.0, 1.0, theme::hairline_strong());
         let lh = c.line_height(font::MEDIUM, size);
-        c.text(font::MEDIUM, size, &tip, x + 8.0, y + (h - lh) / 2.0, theme::TEXT);
+        c.text(font::MEDIUM, size, &tip, x + 8.0, y + (h - lh) / 2.0, theme::text());
     }
 
     /// A spinner of three pulsing dots.

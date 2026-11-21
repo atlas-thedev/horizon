@@ -244,7 +244,7 @@ impl Wheel {
                 outer,
                 a,
                 b,
-                if active { theme::TEXT_SECONDARY } else { theme::HAIRLINE_STRONG },
+                if active { theme::text_secondary() } else { theme::hairline_strong() },
             );
             sector(
                 c,
@@ -313,7 +313,7 @@ impl Wheel {
                     (outer * 0.13).min(24.0),
                     x,
                     y - outer * 0.03,
-                    theme::TEXT_MUTED,
+                    theme::text_muted(),
                 );
             }
             let fs = (outer * 0.065).min(11.0);
@@ -325,11 +325,11 @@ impl Wheel {
                 &label,
                 x - tw / 2.0,
                 label_y,
-                if active { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY },
+                if active { theme::text_strong() } else { theme::text_secondary() },
             );
             c.text(font::REGULAR, 9.0, &(slot + 1).to_string(),
                 cx + angle.cos() * outer * 0.90 - 3.0,
-                cy + angle.sin() * outer * 0.90 - 5.0, theme::TEXT_MUTED);
+                cy + angle.sin() * outer * 0.90 - 5.0, theme::text_muted());
         }
         let title = horizon_client::lang::get("native.emotes.title");
         let tw = c.text_width(font::SEMIBOLD, 16.0, &title);
@@ -339,13 +339,13 @@ impl Wheel {
             &title,
             cx - tw / 2.0,
             cy - outer - 29.0,
-            theme::TEXT_STRONG,
+            theme::text_strong(),
         );
         c.circle(cx, cy, inner - 7.0, 0xb008090c);
-        c.icon(theme::I_X, 14.0, cx, cy - 7.0, theme::TEXT_SECONDARY);
+        c.icon(theme::I_X, 14.0, cx, cy - 7.0, theme::text_secondary());
         let cancel = horizon_client::lang::get("native.emotes.cancel");
         let cw = c.text_width(font::REGULAR, 10.0, &cancel);
-        c.text(font::REGULAR, 10.0, &cancel, cx - cw / 2.0, cy + 7.0, theme::TEXT_MUTED);
+        c.text(font::REGULAR, 10.0, &cancel, cx - cw / 2.0, cy + 7.0, theme::text_muted());
         let count = format!(
             "{} {} / {}",
             horizon_client::lang::get("native.emotes.page"),
@@ -360,11 +360,11 @@ impl Wheel {
             &count,
             cx - tw / 2.0,
             footer,
-            theme::TEXT,
+            theme::text(),
         );
         if pages > 1 {
-            c.icon(theme::I_CHEVRON_LEFT, 15.0, cx - 72.0, footer + 7.0, theme::TEXT_SECONDARY);
-            c.icon(theme::I_CHEVRON_RIGHT, 15.0, cx + 72.0, footer + 7.0, theme::TEXT_SECONDARY);
+            c.icon(theme::I_CHEVRON_LEFT, 15.0, cx - 72.0, footer + 7.0, theme::text_secondary());
+            c.icon(theme::I_CHEVRON_RIGHT, 15.0, cx + 72.0, footer + 7.0, theme::text_secondary());
             if ui.clicked(c, "emote:prev", cx - 88.0, footer - 6.0, 32.0, 28.0) {
                 self.change_page(-1, pages);
             }
@@ -385,7 +385,7 @@ impl Wheel {
             &hint,
             cx - tw / 2.0,
             footer + 26.0,
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         if ui.pressed && self.selected.is_some() {
             return self.select();

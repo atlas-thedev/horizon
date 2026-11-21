@@ -15,8 +15,6 @@ use super::widgets::Widgets;
 use crate::native_ui::{Canvas, font, icons, theme};
 use std::sync::Arc;
 
-const CARD: u32 = 0xB808090C;
-const CARD_HOVER: u32 = 0xD80E1014;
 
 pub struct MusicView {
     list: Scroll,
@@ -67,7 +65,7 @@ impl MusicView {
         let cw = if wide { 196.0f32.min(w * 0.24) } else { 0.0 };
         if wide {
             self.library(ui, c, cfg, x, y, cw, h);
-            c.fill(x + cw + 12.0, y, 1.0, h, theme::HAIRLINE);
+            c.fill(x + cw + 12.0, y, 1.0, h, theme::hairline());
         }
         let (gx, gw) = if wide { (x + cw + 26.0, w - cw - 26.0) } else { (x, w) };
         let card_h = 112.0;
@@ -87,7 +85,7 @@ impl MusicView {
             15.0,
             vx - 16.0,
             ty + th / 2.0,
-            theme::TEXT_SECONDARY,
+            theme::text_secondary(),
         );
         if self.widgets.slider(ui, c, "music:vol", vx, ty + (th - 18.0) / 2.0, vw, &mut self.volume) {
             cfg.music_volume = self.volume.as_f32() / 100.0;
@@ -112,7 +110,7 @@ impl MusicView {
         if iw > 40.0 {
             let shown = c.ellipsize(font::MEDIUM, 11.5, &info, iw);
             let lh = c.line_height(font::MEDIUM, 11.5);
-            c.text(font::MEDIUM, 11.5, &shown, gx + sw + 14.0, ty + (th - lh) / 2.0, if err.is_some() { theme::DANGER } else { theme::TEXT_MUTED });
+            c.text(font::MEDIUM, 11.5, &shown, gx + sw + 14.0, ty + (th - lh) / 2.0, if err.is_some() { theme::danger() } else { theme::text_muted() });
         }
 
         // Songs.
@@ -135,7 +133,7 @@ impl MusicView {
 
     #[allow(clippy::too_many_arguments)]
     fn library(&mut self, ui: &mut Ui, c: &mut Canvas, cfg: &mut UiConfig, x: f32, y: f32, w: f32, h: f32) {
-        c.text(font::SEMIBOLD, 10.0, "LIBRARY", x + 6.0, y + 2.0, theme::TEXT_MUTED);
+        c.text(font::SEMIBOLD, 10.0, "LIBRARY", x + 6.0, y + 2.0, theme::text_muted());
         let lists = music::playlists();
         let all = music::library();
         let chosen = music::playlist();
@@ -152,7 +150,7 @@ impl MusicView {
 
         // Folder, refresh, quieter in calls.
         let fy = y + h - foot_h + 10.0;
-        c.fill(x, fy - 10.0, w, 1.0, theme::HAIRLINE);
+        c.fill(x, fy - 10.0, w, 1.0, theme::hairline());
         if ui.button(c, "music:folder", x, fy, w - 38.0, 32.0, "Music folder", theme::I_FOLDER_OPEN, ui::BTN_GHOST) {
             music::open_folder();
         }
@@ -161,13 +159,13 @@ impl MusicView {
         }
         let qy = fy + 44.0;
         let lh = c.line_height(font::MEDIUM, 11.5);
-        c.text(font::MEDIUM, 11.5, "Quieter in calls", x + 2.0, qy + 10.0 - lh / 2.0, theme::TEXT_SECONDARY);
+        c.text(font::MEDIUM, 11.5, "Quieter in calls", x + 2.0, qy + 10.0 - lh / 2.0, theme::text_secondary());
         if ui.toggle(c, "music:duck", x + w - 34.0, qy, cfg.music_duck) {
             cfg.music_duck = !cfg.music_duck;
             cfg.save();
         }
         let hint = c.ellipsize(font::REGULAR, 10.0, "MP3, OGG, WAV \u{b7} all instances", w);
-        c.text(font::REGULAR, 10.0, &hint, x + 2.0, qy + 30.0, theme::TEXT_MUTED);
+        c.text(font::REGULAR, 10.0, &hint, x + 2.0, qy + 30.0, theme::text_muted());
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -179,21 +177,21 @@ impl MusicView {
         }
         let sel = ui.anim_on(&format!("{id}#on"), on, 16.0);
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-        c.round(x, y, w, h, 10.0, theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv * 0.7), 0x16FFFFFF, sel));
+        c.round(x, y, w, h, 10.0, theme::mix(theme::alpha(theme::subtle_hover(), hv * 0.7), 0x16FFFFFF, sel));
         if sel > 0.01 {
-            c.outline(x, y, w, h, 10.0, 1.0, theme::alpha(theme::HAIRLINE_STRONG, sel));
+            c.outline(x, y, w, h, 10.0, 1.0, theme::alpha(theme::hairline_strong(), sel));
             c.round(x - 5.0, y + (h - 18.0 * sel) / 2.0, 3.0, 18.0 * sel, 1.5, theme::alpha(theme::WHITE, sel));
         }
-        let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::TEXT_STRONG, sel);
+        let fg = theme::mix(theme::mix(theme::text_secondary(), theme::text_strong(), hv), theme::text_strong(), sel);
         c.icon(icon, 15.0, x + 22.0, y + h / 2.0, fg);
         let n = count.to_string();
         let nw = c.text_width(font::MEDIUM, 10.5, &n);
         let name = c.ellipsize(font::SEMIBOLD, 12.5, label, w - 40.0 - nw - 30.0);
         let lh = c.line_height(font::SEMIBOLD, 12.5);
         c.text(font::SEMIBOLD, 12.5, &name, x + 40.0, y + (h - lh) / 2.0, fg);
-        c.round(x + w - nw - 22.0, y + (h - 20.0) / 2.0, nw + 12.0, 20.0, 10.0, theme::mix(theme::SUBTLE, 0xFFF4F4F5, sel));
+        c.round(x + w - nw - 22.0, y + (h - 20.0) / 2.0, nw + 12.0, 20.0, 10.0, theme::mix(theme::subtle(), 0xFFF4F4F5, sel));
         let nh = c.line_height(font::MEDIUM, 10.5);
-        c.text(font::MEDIUM, 10.5, &n, x + w - nw - 16.0, y + (h - nh) / 2.0, theme::mix(theme::TEXT_MUTED, theme::SOLID_FG, sel));
+        c.text(font::MEDIUM, 10.5, &n, x + w - nw - 16.0, y + (h - nh) / 2.0, theme::mix(theme::text_muted(), theme::solid_fg(), sel));
         y + h
     }
 
@@ -219,9 +217,9 @@ impl MusicView {
         let text = c.ellipsize(font::SEMIBOLD, 11.5, label, 140.0);
         let (w, h) = (c.text_width(font::SEMIBOLD, 11.5, &text) + 24.0, 26.0);
         let over = ui.hover(c, x, y, w, h);
-        c.round(x, y, w, h, h / 2.0, if on { 0xFFF4F4F5 } else if over { theme::SUBTLE_HOVER } else { theme::SUBTLE });
+        c.round(x, y, w, h, h / 2.0, if on { 0xFFF4F4F5 } else if over { theme::subtle_hover() } else { theme::subtle() });
         let lh = c.line_height(font::SEMIBOLD, 11.5);
-        c.text(font::SEMIBOLD, 11.5, &text, x + 12.0, y + (h - lh) / 2.0, if on { theme::SOLID_FG } else { theme::TEXT_SECONDARY });
+        c.text(font::SEMIBOLD, 11.5, &text, x + 12.0, y + (h - lh) / 2.0, if on { theme::solid_fg() } else { theme::text_secondary() });
         if ui.clicked(c, id, x, y, w, h) && !on {
             music::set_playlist(playlist);
             self.list.reset();
@@ -233,8 +231,8 @@ impl MusicView {
 
     #[allow(clippy::too_many_arguments)]
     fn now_playing(&mut self, ui: &mut Ui, c: &mut Canvas, cfg: &mut UiConfig, x: f32, y: f32, w: f32, h: f32) {
-        c.round(x, y, w, h, 12.0, CARD);
-        c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE);
+        c.round(x, y, w, h, 12.0, theme::panel());
+        c.outline(x, y, w, h, 12.0, 1.0, theme::hairline());
         let t = music::current();
         let on = music::playing();
         let cs = h - 24.0;
@@ -255,7 +253,7 @@ impl MusicView {
         let press = ui.anim_on("music:play#p", ui.is_pressing("music:play"), 22.0);
         let ph = ui.anim_on("music:play#h", p_over, 14.0);
         c.circle(ccx, ccy, pr * (1.0 - 0.06 * press), theme::mix(0xFFF4F4F5, 0xFFFFFFFF, ph));
-        c.icon(if on { theme::I_PAUSE } else { theme::I_PLAY }, 16.0, ccx + if on { 0.0 } else { 1.5 }, ccy, theme::SOLID_FG);
+        c.icon(if on { theme::I_PAUSE } else { theme::I_PLAY }, 16.0, ccx + if on { 0.0 } else { 1.5 }, ccy, theme::solid_fg());
         if ui.clicked(c, "music:play", ccx - pr, ccy - pr, pr * 2.0, pr * 2.0) {
             music::toggle();
         }
@@ -281,10 +279,10 @@ impl MusicView {
         let tx = x + 12.0 + cs + 16.0;
         let tw = ccx - ctrl_w / 2.0 - 16.0 - tx;
         let status = if t.is_none() { "NOTHING PLAYING" } else if on { "NOW PLAYING" } else { "PAUSED" };
-        c.text(font::SEMIBOLD, 10.0, status, tx, y + 14.0, theme::TEXT_MUTED);
+        c.text(font::SEMIBOLD, 10.0, status, tx, y + 14.0, theme::text_muted());
         let title = t.as_ref().map_or("Pick a song".to_owned(), |t| t.title());
         let title = c.ellipsize(font::SEMIBOLD, 16.0, &title, tw);
-        c.text(font::SEMIBOLD, 16.0, &title, tx, y + 29.0, theme::TEXT_STRONG);
+        c.text(font::SEMIBOLD, 16.0, &title, tx, y + 29.0, theme::text_strong());
         let sub = match &t {
             None => "Your songs play here, in menus and in game".to_owned(),
             Some(t) => match (t.album(), t.artist()) {
@@ -293,7 +291,7 @@ impl MusicView {
             },
         };
         let sub = c.ellipsize(font::REGULAR, 12.0, &sub, tw);
-        c.text(font::REGULAR, 12.0, &sub, tx, y + 50.0, theme::TEXT_SECONDARY);
+        c.text(font::REGULAR, 12.0, &sub, tx, y + 50.0, theme::text_secondary());
         if tw > 60.0 && t.is_some() {
             music::bars(&mut self.bars);
             sound_bars(c, &self.bars, tx, y + 66.0, tw.min(220.0), 14.0, if on { 0.55 } else { 0.18 });
@@ -321,7 +319,7 @@ impl MusicView {
         }
         let frac = self.seek_drag.unwrap_or(if dur > 0 { (pos as f32 / dur as f32).min(1.0) } else { 0.0 });
         let hv = ui.anim_on("music:seek#h", over || drag, 14.0);
-        c.round(sx, sy, sw, 4.0, 2.0, theme::SUBTLE_HOVER);
+        c.round(sx, sy, sw, 4.0, 2.0, theme::subtle_hover());
         c.round(sx, sy, (sw * frac).max(4.0), 4.0, 2.0, theme::mix(0xFFD4D4D8, 0xFFFFFFFF, hv));
         if hv > 0.01 {
             c.circle(sx + sw * frac, sy + 2.0, 6.0 * hv, 0xFFFFFFFF);
@@ -331,17 +329,17 @@ impl MusicView {
         }
         let ly = sy + 2.0 - c.line_height(font::MEDIUM, 10.5) / 2.0;
         let lwid = c.text_width(font::MEDIUM, 10.5, &left);
-        c.text(font::MEDIUM, 10.5, &left, sx - 10.0 - lwid, ly, theme::TEXT_MUTED);
-        c.text(font::MEDIUM, 10.5, &right, sx + sw + 10.0, ly, theme::TEXT_MUTED);
+        c.text(font::MEDIUM, 10.5, &left, sx - 10.0 - lwid, ly, theme::text_muted());
+        c.text(font::MEDIUM, 10.5, &right, sx + sw + 10.0, ly, theme::text_muted());
     }
 
     // ── search + songs ───────────────────────────────────────────────────
 
     fn search_box(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
         let fa = ui.anim_on("music:search#f", self.search.focused(ui), 14.0);
-        c.round(x, y, w, h, h / 2.0, theme::mix(CARD, 0xE00E1014, fa));
-        c.outline(x, y, w, h, h / 2.0, 1.0, theme::mix(theme::HAIRLINE_STRONG, theme::BORDER_HOVER, fa));
-        c.icon(theme::I_SEARCH, 14.0, x + 18.0, y + h / 2.0, theme::TEXT_MUTED);
+        c.round(x, y, w, h, h / 2.0, theme::mix(theme::panel(), theme::alpha(theme::panel_hover(), 0.88), fa));
+        c.outline(x, y, w, h, h / 2.0, 1.0, theme::mix(theme::hairline_strong(), theme::border_hover(), fa));
+        c.icon(theme::I_SEARCH, 14.0, x + 18.0, y + h / 2.0, theme::text_muted());
         c.push_clip(x + 30.0, y + 1.0, w - 42.0, h - 2.0);
         self.search.draw(ui, c, x + 20.0, y, w - 24.0, h, "Search songs", 12.5);
         c.pop_clip();
@@ -378,8 +376,8 @@ impl MusicView {
             let over = ui.hover(c, x, at, w, row_h) && c.in_clip(ui.mx, ui.my);
             let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
             let sel = ui.anim_on(&format!("{id}#on"), playing_this, 16.0);
-            c.round(x, at, w, row_h, 10.0, theme::mix(theme::mix(CARD, CARD_HOVER, hv), 0x16FFFFFF, sel));
-            c.outline(x, at, w, row_h, 10.0, 1.0, theme::mix(theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, hv), theme::HAIRLINE_STRONG, sel));
+            c.round(x, at, w, row_h, 10.0, theme::mix(theme::mix(theme::panel(), theme::panel_hover(), hv), 0x16FFFFFF, sel));
+            c.outline(x, at, w, row_h, 10.0, 1.0, theme::mix(theme::mix(theme::hairline(), theme::hairline_strong(), hv), theme::hairline_strong(), sel));
             if sel > 0.01 {
                 c.round(x - 5.0, at + (row_h - 18.0 * sel) / 2.0, 3.0, 18.0 * sel, 1.5, theme::alpha(theme::WHITE, sel));
             }
@@ -387,15 +385,15 @@ impl MusicView {
             if playing_this && on {
                 for b in 0..3 {
                     let bh = 4.0 + 8.0 * (0.5 + 0.5 * ((ui.now / (150.0 + f64::from(b) * 40.0) + f64::from(b) * 1.7).sin() as f32));
-                    c.round(ix - 6.0 + b as f32 * 5.0, mid + 6.0 - bh, 3.0, bh, 1.0, theme::TEXT_STRONG);
+                    c.round(ix - 6.0 + b as f32 * 5.0, mid + 6.0 - bh, 3.0, bh, 1.0, theme::text_strong());
                 }
             } else if over {
-                c.icon(theme::I_PLAY, 12.0, ix, mid, theme::TEXT_STRONG);
+                c.icon(theme::I_PLAY, 12.0, ix, mid, theme::text_strong());
             } else {
                 let n = (i + 1).to_string();
                 let nw = c.text_width(font::MEDIUM, 11.0, &n);
                 let nh = c.line_height(font::MEDIUM, 11.0);
-                c.text(font::MEDIUM, 11.0, &n, ix - nw / 2.0, mid - nh / 2.0, if playing_this { theme::TEXT_STRONG } else { theme::TEXT_MUTED });
+                c.text(font::MEDIUM, 11.0, &n, ix - nw / 2.0, mid - nh / 2.0, if playing_this { theme::text_strong() } else { theme::text_muted() });
             }
             let th = row_h - 14.0;
             cover_art(c, Some(s), x + 42.0, at + 7.0, th, 6.0);
@@ -406,21 +404,21 @@ impl MusicView {
             let album_x = if album_col { x + w * 0.58 } else { 0.0 };
             let tw = (if album_col { album_x - 16.0 } else { x + w - 18.0 - dw - 12.0 }) - tx;
             let error = s.error();
-            let title_color = if playing_this { theme::TEXT_STRONG } else if error.is_some() { theme::TEXT_MUTED } else { theme::TEXT };
+            let title_color = if playing_this { theme::text_strong() } else if error.is_some() { theme::text_muted() } else { theme::text() };
             let title = c.ellipsize(font::SEMIBOLD, 12.5, &s.title(), tw);
             c.text(font::SEMIBOLD, 12.5, &title, tx, at + 8.0, title_color);
             let sub = error.clone().or_else(|| s.artist()).unwrap_or_else(|| "Unknown artist".to_owned());
             let sub = c.ellipsize(font::REGULAR, 11.0, &sub, tw);
-            c.text(font::REGULAR, 11.0, &sub, tx, at + 25.0, if error.is_some() { theme::DANGER } else { theme::TEXT_MUTED });
+            c.text(font::REGULAR, 11.0, &sub, tx, at + 25.0, if error.is_some() { theme::danger() } else { theme::text_muted() });
             if let (true, Some(album)) = (album_col, s.album()) {
                 let aw = x + w - 18.0 - dw - 16.0 - album_x;
                 let album = c.ellipsize(font::REGULAR, 11.5, &album, aw);
                 let ah = c.line_height(font::REGULAR, 11.5);
-                c.text(font::REGULAR, 11.5, &album, album_x, mid - ah / 2.0, theme::TEXT_MUTED);
+                c.text(font::REGULAR, 11.5, &album, album_x, mid - ah / 2.0, theme::text_muted());
             }
             if dw > 0.0 {
                 let dh = c.line_height(font::MEDIUM, 11.0);
-                c.text(font::MEDIUM, 11.0, &d, x + w - 18.0 - dw, mid - dh / 2.0, theme::TEXT_MUTED);
+                c.text(font::MEDIUM, 11.0, &d, x + w - 18.0 - dw, mid - dh / 2.0, theme::text_muted());
             }
             if ui.clicked(c, &id, x, at, w, row_h) {
                 if playing_this { music::toggle() } else { music::play(s) }
@@ -435,7 +433,7 @@ impl MusicView {
     #[allow(clippy::too_many_arguments)]
     fn empty_library(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
         if music::scanning() {
-            ui.dots(c, x + w / 2.0, y + h / 2.0 - 20.0, theme::TEXT_MUTED);
+            ui.dots(c, x + w / 2.0, y + h / 2.0 - 20.0, theme::text_muted());
             return;
         }
         let eh = h.min(220.0);
@@ -444,7 +442,7 @@ impl MusicView {
         if let Some(f) = music::folder() {
             let p = c.ellipsize(font::REGULAR, 10.5, &f.to_string_lossy(), w - 40.0);
             let pw = c.text_width(font::REGULAR, 10.5, &p);
-            c.text(font::REGULAR, 10.5, &p, x + (w - pw) / 2.0, by, theme::TEXT_MUTED);
+            c.text(font::REGULAR, 10.5, &p, x + (w - pw) / 2.0, by, theme::text_muted());
         }
         if ui.button(c, "music:folder:big", x + w / 2.0 - 84.0, by + 24.0, 168.0, 34.0, "Open music folder", theme::I_FOLDER_OPEN, ui::BTN_PRIMARY) {
             music::open_folder();
@@ -458,12 +456,12 @@ fn control(ui: &mut Ui, c: &mut Canvas, id: &str, cx: f32, cy: f32, size: f32, i
     let over = ui.hover(c, cx - size / 2.0, cy - size / 2.0, size, size);
     let hv = ui.anim_on(&format!("{id}#h"), over, 16.0);
     if hv > 0.01 {
-        c.circle(cx, cy, size / 2.0, theme::alpha(theme::SUBTLE_HOVER, hv));
+        c.circle(cx, cy, size / 2.0, theme::alpha(theme::subtle_hover(), hv));
     }
-    let fg = if on { theme::TEXT_STRONG } else { theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, hv) };
+    let fg = if on { theme::text_strong() } else { theme::mix(theme::text_muted(), theme::text_strong(), hv) };
     c.icon(icon, size * 0.5, cx, cy, fg);
     if on {
-        c.circle(cx, cy + size / 2.0 - 1.0, 1.8, theme::TEXT_STRONG); // The dot under an option that is on.
+        c.circle(cx, cy + size / 2.0 - 1.0, 1.8, theme::text_strong()); // The dot under an option that is on.
     }
     if over {
         ui.cursor_hand = true;
@@ -481,8 +479,8 @@ pub fn cover_art(c: &mut Canvas, t: Option<&Arc<Track>>, x: f32, y: f32, size: f
         return;
     }
     c.round(x, y, size, size, radius, 0x14FFFFFF);
-    c.outline(x, y, size, size, radius, 1.0, theme::HAIRLINE);
-    c.icon(icons::MUSIC, (size * 0.42).max(10.0), x + size / 2.0, y + size / 2.0, theme::TEXT_MUTED);
+    c.outline(x, y, size, size, radius, 1.0, theme::hairline());
+    c.icon(icons::MUSIC, (size * 0.42).max(10.0), x + size / 2.0, y + size / 2.0, theme::text_muted());
 }
 
 /// Monochrome sound bars, rising from the bottom.

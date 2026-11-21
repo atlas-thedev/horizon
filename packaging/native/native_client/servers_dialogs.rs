@@ -54,8 +54,8 @@ fn dialog_box(ui: &mut Ui, c: &mut Canvas, f: &mut TextField, x: f32, y: f32, w:
     let focused = f.focused(ui);
     let fa = ui.anim_on(&format!("{}#box", f.id), focused, 14.0);
     let over = ui.hover(c, x, y, w, h);
-    c.round(x, y, w, h, 8.0, theme::SUBTLE);
-    c.outline(x, y, w, h, 8.0, 1.0, theme::mix(if over { theme::HAIRLINE_STRONG } else { theme::HAIRLINE }, theme::BORDER_HOVER, fa));
+    c.round(x, y, w, h, 8.0, theme::subtle());
+    c.outline(x, y, w, h, 8.0, 1.0, theme::mix(if over { theme::hairline_strong() } else { theme::hairline() }, theme::border_hover(), fa));
     let button_width = if paste { 74.0f32.min((w - 40.0).max(0.0)) } else { 0.0 };
     if paste && button_width > 8.0 {
         let label = tr("native.servers.paste", "Paste");
@@ -122,7 +122,7 @@ impl ServerDialog {
         let (x, y) = ((w_all - w) / 2.0, (h_all - h) / 2.0);
         c.push_alpha(a);
         c.round(x, y, w, h, 12.0, 0xFF0A0B0E);
-        c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE_STRONG);
+        c.outline(x, y, w, h, 12.0, 1.0, theme::hairline_strong());
         let title = match info {
             DialogInfo::Delete { .. } => tr("selectServer.delete", "Delete"),
             DialogInfo::Direct { .. } => tr("selectServer.direct", "Direct Connection"),
@@ -130,7 +130,7 @@ impl ServerDialog {
             DialogInfo::Edit { add: true, .. } => tr("selectServer.add", "Add Server"),
         };
         let shown = c.ellipsize(font::BOLD, 16.0, &title, w - 40.0);
-        c.text(font::BOLD, 16.0, &shown, x + 20.0, y + 20.0, theme::TEXT_STRONG);
+        c.text(font::BOLD, 16.0, &shown, x + 20.0, y + 20.0, theme::text_strong());
 
         let escape = ui.keys.iter().any(|(k, _)| *k == ui::KEY_ESCAPE);
         let enter = ui.keys.iter().any(|(k, _)| *k == ui::KEY_ENTER || *k == ui::KEY_KP_ENTER);
@@ -138,10 +138,10 @@ impl ServerDialog {
         let mut fy = y + 56.0;
         if let DialogInfo::Delete { name } = info {
             let n = c.ellipsize(font::SEMIBOLD, 13.5, name, w - 40.0);
-            c.text(font::SEMIBOLD, 13.5, &n, x + 20.0, fy, theme::TEXT_STRONG);
+            c.text(font::SEMIBOLD, 13.5, &n, x + 20.0, fy, theme::text_strong());
             let warning = tr("selectServer.deleteWarning", "'%s' will be lost forever! (A long time!)").replace("%1$s", name).replace("%s", name);
             let warn = c.ellipsize(font::MEDIUM, 11.5, &warning, w - 40.0);
-            c.text(font::MEDIUM, 11.5, &warn, x + 20.0, fy + 22.0, theme::TEXT_MUTED);
+            c.text(font::MEDIUM, 11.5, &warn, x + 20.0, fy + 22.0, theme::text_muted());
             submit |= enter;
         } else {
             // the dialog always owns the keyboard: a click on its background must not leave typing going nowhere
@@ -158,7 +158,7 @@ impl ServerDialog {
                         self.name.select_all();
                     }
                 }
-                c.text(font::SEMIBOLD, 10.5, &tr("addServer.enterName", "Server Name").to_uppercase(), x + 20.0, fy, theme::TEXT_MUTED);
+                c.text(font::SEMIBOLD, 10.5, &tr("addServer.enterName", "Server Name").to_uppercase(), x + 20.0, fy, theme::text_muted());
                 let placeholder = tr("selectServer.defaultName", "Minecraft Server");
                 if dialog_box(ui, c, &mut self.name, x + 20.0, fy + 16.0, w - 40.0, &placeholder, false) {
                     if self.address.is_empty() {
@@ -169,14 +169,14 @@ impl ServerDialog {
                 }
                 fy += 66.0;
             }
-            c.text(font::SEMIBOLD, 10.5, &tr("addServer.enterIp", "Server Address").to_uppercase(), x + 20.0, fy, theme::TEXT_MUTED);
+            c.text(font::SEMIBOLD, 10.5, &tr("addServer.enterIp", "Server Address").to_uppercase(), x + 20.0, fy, theme::text_muted());
             if dialog_box(ui, c, &mut self.address, x + 20.0, fy + 16.0, w - 40.0, "play.example.net", true) {
                 submit = true;
             }
             if edit {
                 // Server Resource Packs: Enabled, Disabled, Prompt
                 fy += 66.0;
-                c.text(font::SEMIBOLD, 10.5, &tr("addServer.resourcePack", "Server Resource Packs").to_uppercase(), x + 20.0, fy, theme::TEXT_MUTED);
+                c.text(font::SEMIBOLD, 10.5, &tr("addServer.resourcePack", "Server Resource Packs").to_uppercase(), x + 20.0, fy, theme::text_muted());
                 let label = packs_label(self.packs);
                 if ui.button(c, "servers:dlg:packs", x + 20.0, fy + 16.0, w - 40.0, 36.0, &label, 0, ui::BTN_GLASS) {
                     self.packs = match self.packs {

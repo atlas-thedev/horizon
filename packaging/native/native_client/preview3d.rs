@@ -304,7 +304,7 @@ impl PlayerPreview {
             });
         }
         self.b.end(c);
-        let _ = theme::TEXT;
+        let _ = theme::text();
     }
 
     #[allow(clippy::too_many_arguments)]

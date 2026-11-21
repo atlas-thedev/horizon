@@ -6,14 +6,6 @@ name: native build
 on:
   schedule:
     - cron: '41 */6 * * *'
-  # A change to the patches or this workflow rebuilds even if this Nightly already has a release.
-  # (Rebuilt after reverting #3 so the published client matches main.)
-  push:
-    branches: [main]
-    paths:
-      - 'tools/native/**'
-      - 'packaging/native/**'
-      - '.github/workflows/native-build.yml'
   workflow_dispatch:
     inputs:
       force:
@@ -22,6 +14,10 @@ on:
         default: false
       nightly:
         description: Release tag to build (native-YYYY-MM-DD-<commit>); empty builds the newest Nightly
+        type: string
+        default: ''
+      suffix:
+        description: Suffix for a new release of the selected Nightly
         type: string
         default: ''
 permissions:
@@ -49,6 +45,7 @@ jobs:
         id: up
         env:
           REQUESTED: ${{ inputs.nightly }}
+          SUFFIX: ${{ inputs.suffix }}
         run: |
           python - <<'PY'
           import json, os, re, subprocess
@@ -67,13 +64,17 @@ jobs:
               if not m:
                   raise SystemExit(f'Unexpected Nightly title: {name!r}')
               date, short = m.groups()
+          suffix = os.environ.get('SUFFIX', '').strip()
+          if suffix and (not requested or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{0,23}', suffix)):
+              raise SystemExit('A release suffix needs a pinned Nightly and 1–24 letters, numbers, dots, underscores or hyphens.')
+          tag = f'native-{date}-{short}' + (f'-{suffix}' if suffix else '')
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
-              f.write(f'date={date}\nshort={short}\ntag=native-{date}-{short}\nname={name}\n')
+              f.write(f'date={date}\nshort={short}\ntag={tag}\nname={name}\n')
           PY
       - name: Skip when already built
         id: need
         run: |
-          if [ "${{ inputs.force }}" != "true" ] && [ "${{ github.event_name }}" != "push" ] && gh release view "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          if [ "${{ inputs.force }}" != "true" ] && gh release view "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "build=false" >> "$GITHUB_OUTPUT"
             echo "${{ steps.up.outputs.tag }} already exists"
           else
@@ -137,8 +138,10 @@ jobs:
           cd dist
           sha256sum horizon-client-windows-x64.exe > SHA256SUMS
           printf '%s\n' '{"upstream_release":"${{ steps.up.outputs.name }}","upstream_commit":"${{ steps.up.outputs.short }}"}' > compat.json
-          gh release delete "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2> /dev/null || true
+          if [ "${{ inputs.force }}" = "true" ]; then
+            gh release delete "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2> /dev/null || true
+          fi
           gh release create "${{ steps.up.outputs.tag }}" horizon-client-windows-x64.exe SHA256SUMS compat.json \
-            --repo "$GITHUB_REPOSITORY" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Native engine for ${{ steps.up.outputs.name }}" \
             --notes "Rebranded Horizon client built from upstream's ${{ steps.up.outputs.name }} (MIT, see NATIVE.md)."

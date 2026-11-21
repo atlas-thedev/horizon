@@ -35,8 +35,6 @@ const PILL_R: f32 = 13.0;
 const CHIPS: [&str; 6] = ["All", "Favorites", "HUD", "Mechanic", "Visual", "Settings"];
 const CHIP_ICONS: [u32; 6] = [theme::I_GRID, theme::I_HEART, theme::I_LAYOUT, theme::I_MOUSE, theme::I_EYE, theme::I_SLIDERS];
 pub const PANEL_BG: u32 = 0xF205060A;
-pub const CARD: u32 = 0xB808090C;
-pub const CARD_HOVER: u32 = 0xD80E1014;
 /// Card state colours (everything else stays monochrome like the rest of the Native UI).
 const ON: u32 = 0xFF22C55E;
 const OFF: u32 = 0xFFEF4444;
@@ -72,6 +70,7 @@ pub struct Menu {
     grid: Scroll,
     detail: Scroll,
     prefs: Scroll,
+    appearance: super::appearance::Appearance,
     pub widgets: Widgets,
     shown_at: f64,
     page_at: f64,
@@ -132,6 +131,7 @@ impl Menu {
             grid: Scroll::new("grid"),
             detail: Scroll::new("detail"),
             prefs: Scroll::new("prefs"),
+            appearance: super::appearance::Appearance::default(),
             widgets: Widgets::default(),
             shown_at: 0.0,
             page_at: 0.0,
@@ -273,7 +273,7 @@ impl Menu {
         if let Some(logo) = self.logo.clone() {
             c.stamp(LOGO_KEY, &logo, x0 + (rw - 32.0) / 2.0, y0 + 16.0, 32.0, 32.0, true, 0xFFFFFFFF);
         }
-        c.fill(x0 + 16.0, y0 + 60.0, rw - 32.0, 1.0, theme::HAIRLINE);
+        c.fill(x0 + 16.0, y0 + 60.0, rw - 32.0, 1.0, theme::hairline());
         let rx = x0 + (rw - RAIL) / 2.0;
         let mut ty = y0 + 74.0;
         let tab_icons =
@@ -310,14 +310,14 @@ impl Menu {
             if px > mx + tb_w + 20.0 {
                 c.shadow(px, y0 + 3.0, pw, tb_h, PILL_R, 18.0, 0x66000000);
                 c.round(px, y0, pw, tb_h, PILL_R, PANEL_BG);
-                c.outline(px, y0, pw, tb_h, PILL_R, 1.0, theme::HAIRLINE_STRONG);
+                c.outline(px, y0, pw, tb_h, PILL_R, 1.0, theme::hairline_strong());
                 let (ax, ay) = (px + 7.0, y0 + (tb_h - av) / 2.0);
                 avatar(c, who, ax, ay, av, 7.0);
                 // Online dot, bottom-right of the head.
                 c.circle(ax + av - 3.0, ay + av - 3.0, 5.0, 0xFF05060A);
-                c.circle(ax + av - 3.0, ay + av - 3.0, 3.5, theme::ONLINE);
+                c.circle(ax + av - 3.0, ay + av - 3.0, 3.5, theme::online());
                 let lh = c.line_height(font::SEMIBOLD, 12.0);
-                c.text(font::SEMIBOLD, 12.0, who, ax + av + 11.0, y0 + (tb_h - lh) / 2.0, theme::TEXT);
+                c.text(font::SEMIBOLD, 12.0, who, ax + av + 11.0, y0 + (tb_h - lh) / 2.0, theme::text());
             }
         }
 
@@ -326,7 +326,7 @@ impl Menu {
         let ph = wh - tb_h - 10.0;
         panel(c, mx, py, mw, ph);
         let hh = 60.0;
-        c.fill(mx + 1.0, py + hh, mw - 2.0, 1.0, theme::HAIRLINE);
+        c.fill(mx + 1.0, py + hh, mw - 2.0, 1.0, theme::hairline());
         let (bx, by, bw, bh) = (mx + 20.0, py + hh + 16.0, mw - 40.0, ph - hh - 32.0);
         let pe = ease(clamp01(((ui.now - self.page_at) / 220.0) as f32));
         match self.tab {
@@ -344,7 +344,7 @@ impl Menu {
                     self.draw_search(ui, c, mx + mw - 20.0 - sw, py + (hh - 34.0) / 2.0, sw, 34.0);
                     let cw = 184.0f32.min(bw * 0.24);
                     self.categories(ui, c, mods, bx, by, cw, bh);
-                    c.fill(bx + cw + 12.0, by, 1.0, bh, theme::HAIRLINE);
+                    c.fill(bx + cw + 12.0, by, 1.0, bh, theme::hairline());
                     let (gx, gw) = (bx + cw + 26.0, bw - cw - 26.0);
                     let ge = ease(clamp01(((ui.now - self.grid_at) / 220.0) as f32));
                     c.push_alpha(ge);
@@ -357,9 +357,9 @@ impl Menu {
                 if self.tab == TAB_COSMETICS {
                     let store = "Get more in the Native Store";
                     let sw = c.text_width(font::MEDIUM, 11.5, store);
-                    c.icon(theme::I_STORE, 14.0, mx + mw - 20.0 - sw - 12.0, py + hh / 2.0, theme::TEXT_MUTED);
+                    c.icon(theme::I_STORE, 14.0, mx + mw - 20.0 - sw - 12.0, py + hh / 2.0, theme::text_muted());
                     let lh = c.line_height(font::MEDIUM, 11.5);
-                    c.text(font::MEDIUM, 11.5, store, mx + mw - 20.0 - sw, py + (hh - lh) / 2.0, theme::TEXT_MUTED);
+                    c.text(font::MEDIUM, 11.5, store, mx + mw - 20.0 - sw, py + (hh - lh) / 2.0, theme::text_muted());
                 }
                 c.push_alpha(pe);
                 let a = self.other_tab(ui, c, cfg, bx, by + (1.0 - pe) * 10.0, bw, bh);
@@ -414,13 +414,13 @@ impl Menu {
         let w = if grid_tab { 206.0 } else { 120.0 };
         c.shadow(x, y + 3.0, w, h, PILL_R, 18.0, 0x66000000);
         c.round(x, y, w, h, PILL_R, PANEL_BG);
-        c.outline(x, y, w, h, PILL_R, 1.0, theme::HAIRLINE_STRONG);
+        c.outline(x, y, w, h, PILL_R, 1.0, theme::hairline_strong());
         let mut action = Action::None;
         if ui.button(c, "menu:tb:hud", x + 4.0, y + 4.0, 112.0, h - 8.0, "Edit HUD", theme::I_MOVE, ui::BTN_GHOST) {
             action = Action::EditHud;
         }
         if grid_tab {
-            c.fill(x + 122.0, y + 10.0, 1.0, h - 20.0, theme::HAIRLINE_STRONG);
+            c.fill(x + 122.0, y + 10.0, 1.0, h - 20.0, theme::hairline_strong());
             if pill_icon(ui, c, "menu:tb:grid", x + 130.0, y + 4.0, h - 8.0, theme::I_GRID, !self.list_view) {
                 self.list_view = false;
             }
@@ -434,9 +434,9 @@ impl Menu {
     fn draw_search(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
         let f = self.search.focused(ui);
         let fa = ui.anim_on("menu:search#f", f, 14.0);
-        c.round(x, y, w, h, h / 2.0, theme::mix(0xB808090C, 0xE00E1014, fa));
-        c.outline(x, y, w, h, h / 2.0, 1.0, theme::mix(theme::HAIRLINE_STRONG, theme::BORDER_HOVER, fa));
-        c.icon(theme::I_SEARCH, 14.0, x + 18.0, y + h / 2.0, theme::TEXT_MUTED);
+        c.round(x, y, w, h, h / 2.0, theme::mix(theme::alpha(theme::panel(), 0.72), theme::alpha(theme::panel_hover(), 0.88), fa));
+        c.outline(x, y, w, h, h / 2.0, 1.0, theme::mix(theme::hairline_strong(), theme::border_hover(), fa));
+        c.icon(theme::I_SEARCH, 14.0, x + 18.0, y + h / 2.0, theme::text_muted());
         let clear = !self.search.is_empty();
         if ui.pressed && ui.hover(c, x, y, w - if clear { 32.0 } else { 0.0 }, h) {
             self.search.focus(ui);
@@ -547,7 +547,7 @@ impl Menu {
         let mut click = ui.clicked(c, &id, x, y, w, h - 44.0);
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let on = ui.anim_on(&format!("{id}#on"), m.state.enabled, 14.0);
-        c.round(x, y, w, h, 12.0, theme::mix(CARD, CARD_HOVER, hv));
+        c.round(x, y, w, h, 12.0, theme::mix(theme::panel(), theme::panel_hover(), hv));
         if on > 0.01 {
             glow(c, x, y, w, (h - 44.0) * 0.9, 12.0, theme::alpha(0x14FFFFFF, on));
         }
@@ -558,7 +558,7 @@ impl Menu {
             h,
             12.0,
             1.0,
-            theme::mix(theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, on), theme::BORDER_HOVER, hv),
+            theme::mix(theme::mix(theme::hairline(), theme::hairline_strong(), on), theme::border_hover(), hv),
         );
         let iy = y + (h - 44.0) * 0.42;
         c.icon(
@@ -566,11 +566,11 @@ impl Menu {
             30.0,
             x + w / 2.0,
             iy - hv * 2.0,
-            theme::mix(theme::mix(0xFF52525B, theme::TEXT_SECONDARY, hv), theme::TEXT_STRONG, on),
+            theme::mix(theme::mix(0xFF52525B, theme::text_secondary(), hv), theme::text_strong(), on),
         );
         let name = c.ellipsize(font::SEMIBOLD, 12.5, &label(m.state.name), w - 20.0);
         let nw = c.text_width(font::SEMIBOLD, 12.5, &name);
-        c.text(font::SEMIBOLD, 12.5, &name, x + (w - nw) / 2.0, y + h - 44.0 - 26.0, theme::mix(theme::TEXT, theme::TEXT_STRONG, on));
+        c.text(font::SEMIBOLD, 12.5, &name, x + (w - nw) / 2.0, y + h - 44.0 - 26.0, theme::mix(theme::text(), theme::text_strong(), on));
         if heart(ui, c, &format!("{id}:fav"), &mut m.state.favorite, x + w - 32.0, y + 8.0, over) {
             click = false;
             mods.changed();
@@ -605,15 +605,15 @@ impl Menu {
         let click = ui.clicked(c, &id, x, y, w - 96.0, h);
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let on = ui.anim_on(&format!("{id}#on"), m.state.enabled, 14.0);
-        c.round(x, y, w, h, 12.0, theme::mix(CARD, CARD_HOVER, hv));
-        c.outline(x, y, w, h, 12.0, 1.0, theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv));
-        c.round(x + 12.0, y + 12.0, 36.0, 36.0, 10.0, theme::mix(theme::SUBTLE_HOVER, 0xFFF4F4F5, on));
-        c.icon(m.state.icon, 17.0, x + 30.0, y + 30.0, theme::mix(theme::TEXT, theme::SOLID_FG, on));
+        c.round(x, y, w, h, 12.0, theme::mix(theme::panel(), theme::panel_hover(), hv));
+        c.outline(x, y, w, h, 12.0, 1.0, theme::mix(theme::hairline(), theme::border_hover(), hv));
+        c.round(x + 12.0, y + 12.0, 36.0, 36.0, 10.0, theme::mix(theme::subtle_hover(), 0xFFF4F4F5, on));
+        c.icon(m.state.icon, 17.0, x + 30.0, y + 30.0, theme::mix(theme::text(), theme::solid_fg(), on));
         let tw = w - 160.0;
         let name = c.ellipsize(font::SEMIBOLD, 13.0, &label(m.state.name), tw);
-        c.text(font::SEMIBOLD, 13.0, &name, x + 60.0, y + 12.0, theme::TEXT_STRONG);
+        c.text(font::SEMIBOLD, 13.0, &name, x + 60.0, y + 12.0, theme::text_strong());
         let desc = c.ellipsize(font::REGULAR, 11.0, &label(m.state.description), tw);
-        c.text(font::REGULAR, 11.0, &desc, x + 60.0, y + 31.0, theme::TEXT_MUTED);
+        c.text(font::REGULAR, 11.0, &desc, x + 60.0, y + 31.0, theme::text_muted());
         let mut fav_changed = heart(ui, c, &format!("{id}:fav"), &mut m.state.favorite, x + w - 84.0, y + 18.0, true);
         let enabled = m.state.enabled;
         let toggled = ui.toggle(c, &format!("{id}:t"), x + w - 46.0, y + 20.0, enabled);
@@ -631,7 +631,7 @@ impl Menu {
     /// Category list on the left of the mods grid (Feather style): icon, name, count, a marker on the active one.
     #[allow(clippy::too_many_arguments)]
     fn categories(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &Modules, x: f32, y: f32, w: f32, h: f32) {
-        c.text(font::SEMIBOLD, 10.0, "CATEGORIES", x + 6.0, y + 2.0, theme::TEXT_MUTED);
+        c.text(font::SEMIBOLD, 10.0, "CATEGORIES", x + 6.0, y + 2.0, theme::text_muted());
         let mut ry = y + 24.0;
         let rh = 38.0;
         for (i, name) in CHIPS.iter().enumerate() {
@@ -646,27 +646,27 @@ impl Menu {
             }
             let on = ui.anim_on(&format!("{id}#on"), self.chip == i, 16.0);
             let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-            c.round(x, ry, w, rh, 10.0, theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv * 0.7), 0x16FFFFFF, on));
+            c.round(x, ry, w, rh, 10.0, theme::mix(theme::alpha(theme::subtle_hover(), hv * 0.7), 0x16FFFFFF, on));
             if on > 0.01 {
-                c.outline(x, ry, w, rh, 10.0, 1.0, theme::alpha(theme::HAIRLINE_STRONG, on));
+                c.outline(x, ry, w, rh, 10.0, 1.0, theme::alpha(theme::hairline_strong(), on));
                 c.round(x - 5.0, ry + (rh - 18.0 * on) / 2.0, 3.0, 18.0 * on, 1.5, theme::alpha(theme::WHITE, on));
             }
-            let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::TEXT_STRONG, on);
+            let fg = theme::mix(theme::mix(theme::text_secondary(), theme::text_strong(), hv), theme::text_strong(), on);
             c.icon(CHIP_ICONS[i], 15.0, x + 22.0, ry + rh / 2.0, fg);
             let lh = c.line_height(font::SEMIBOLD, 12.5);
             c.text(font::SEMIBOLD, 12.5, name, x + 40.0, ry + (rh - lh) / 2.0, fg);
             let count = n.to_string();
             let nw = c.text_width(font::MEDIUM, 10.5, &count);
-            c.round(x + w - nw - 22.0, ry + (rh - 20.0) / 2.0, nw + 12.0, 20.0, 10.0, theme::mix(theme::SUBTLE, 0xFFF4F4F5, on));
+            c.round(x + w - nw - 22.0, ry + (rh - 20.0) / 2.0, nw + 12.0, 20.0, 10.0, theme::mix(theme::subtle(), 0xFFF4F4F5, on));
             let nh = c.line_height(font::MEDIUM, 10.5);
-            c.text(font::MEDIUM, 10.5, &count, x + w - nw - 16.0, ry + (rh - nh) / 2.0, theme::mix(theme::TEXT_MUTED, theme::SOLID_FG, on));
+            c.text(font::MEDIUM, 10.5, &count, x + w - nw - 16.0, ry + (rh - nh) / 2.0, theme::mix(theme::text_muted(), theme::solid_fg(), on));
             ry += rh + 4.0;
         }
         let active = mods.all.iter().filter(|m| m.state.enabled).count();
         let a = format!("{active} of {} enabled", mods.all.len());
         c.circle(x + 10.0, y + h - 12.0, 3.5, ON);
         let ah = c.line_height(font::MEDIUM, 11.0);
-        c.text(font::MEDIUM, 11.0, &a, x + 20.0, y + h - 12.0 - ah / 2.0, theme::TEXT_MUTED);
+        c.text(font::MEDIUM, 11.0, &a, x + 20.0, y + h - 12.0 - ah / 2.0, theme::text_muted());
     }
 
     // ── A module's page ──────────────────────────────────────────────────
@@ -690,7 +690,7 @@ impl Menu {
             return Action::None;
         }
         let div_x = back_x + back_w + 14.0;
-        c.fill(div_x, y + 16.0, 1.0, hh - 32.0, theme::HAIRLINE);
+        c.fill(div_x, y + 16.0, 1.0, hh - 32.0, theme::hairline());
 
         let (name, category, icon, enabled, is_hud) = {
             let m = &mods.all[mi];
@@ -698,11 +698,11 @@ impl Menu {
         };
         let ic = 36.0;
         let (ix, iy) = (div_x + 16.0, y + (hh - ic) / 2.0);
-        c.round(ix, iy, ic, ic, 10.0, if enabled { 0xFFF4F4F5 } else { theme::SUBTLE_HOVER });
-        c.icon(icon, 18.0, ix + ic / 2.0, iy + ic / 2.0, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });
+        c.round(ix, iy, ic, ic, 10.0, if enabled { 0xFFF4F4F5 } else { theme::subtle_hover() });
+        c.icon(icon, 18.0, ix + ic / 2.0, iy + ic / 2.0, if enabled { theme::solid_fg() } else { theme::text_strong() });
         let tx = ix + ic + 12.0;
-        c.text(font::SEMIBOLD, 15.0, &name, tx, y + 15.0, theme::TEXT_STRONG);
-        c.text(font::MEDIUM, 10.0, &category.to_uppercase(), tx, y + 34.0, theme::TEXT_MUTED);
+        c.text(font::SEMIBOLD, 15.0, &name, tx, y + 15.0, theme::text_strong());
+        c.text(font::MEDIUM, 10.0, &category.to_uppercase(), tx, y + 34.0, theme::text_muted());
         let heart_x = tx + c.text_width(font::SEMIBOLD, 15.0, &name) + 12.0;
         if heart(ui, c, "menu:page:fav", &mut mods.all[mi].state.favorite, heart_x, y + 18.0, true) {
             mods.changed();
@@ -757,8 +757,8 @@ impl Menu {
     /// The live preview: the module drawn large over a game scene, inside its own card.
     #[allow(clippy::too_many_arguments)]
     fn stage(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, mi: usize, x: f32, y: f32, w: f32, h: f32) {
-        c.round(x, y, w, h, 12.0, CARD);
-        c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE);
+        c.round(x, y, w, h, 12.0, theme::panel());
+        c.outline(x, y, w, h, 12.0, 1.0, theme::hairline());
         let inset = 6.0;
         let (ix, iy, iw, ih) = (x + inset, y + inset, w - inset * 2.0, h - inset * 2.0);
         c.push_clip(ix, iy, iw, ih);
@@ -789,36 +789,36 @@ impl Menu {
             set_hud_scale(m, keep);
         } else if !m.behaviour.preview(&m.state, c, &sample, ui.now, ix, iy, iw, ih) {
             let cy = iy + ih / 2.0;
-            c.circle(ix + iw / 2.0, cy, 32.0, if enabled { 0xFFF4F4F5 } else { theme::SUBTLE_HOVER });
-            c.icon(m.state.icon, 24.0, ix + iw / 2.0, cy, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });
+            c.circle(ix + iw / 2.0, cy, 32.0, if enabled { 0xFFF4F4F5 } else { theme::subtle_hover() });
+            c.icon(m.state.icon, 24.0, ix + iw / 2.0, cy, if enabled { theme::solid_fg() } else { theme::text_strong() });
         }
         c.pop_clip();
         // Tag in the corner.
         let tag = if enabled { "LIVE PREVIEW" } else { "PREVIEW  \u{b7}  OFF" };
         let tw = c.text_width(font::SEMIBOLD, 9.5, tag) + 18.0;
         c.round(ix + 10.0, iy + 10.0, tw, 20.0, 10.0, 0xB0000000);
-        c.outline(ix + 10.0, iy + 10.0, tw, 20.0, 10.0, 1.0, theme::HAIRLINE);
+        c.outline(ix + 10.0, iy + 10.0, tw, 20.0, 10.0, 1.0, theme::hairline());
         let lh = c.line_height(font::SEMIBOLD, 9.5);
-        c.text(font::SEMIBOLD, 9.5, tag, ix + 19.0, iy + 10.0 + (20.0 - lh) / 2.0, theme::TEXT_SECONDARY);
+        c.text(font::SEMIBOLD, 9.5, tag, ix + 19.0, iy + 10.0 + (20.0 - lh) / 2.0, theme::text_secondary());
     }
 
     /// What the module does, then its options in foldable sections (like a game client's module screen).
     #[allow(clippy::too_many_arguments)]
     fn settings_panel(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &UiConfig, mi: usize, x: f32, y: f32, w: f32, h: f32) {
-        c.round(x, y, w, h, 12.0, CARD);
-        c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE);
+        c.round(x, y, w, h, 12.0, theme::panel());
+        c.outline(x, y, w, h, 12.0, 1.0, theme::hairline());
         let pad = 18.0;
         let desc = label(mods.all[mi].state.description);
         let text_w = w - pad * 2.0 - 26.0;
         let desc_h = wrap_height(c, font::REGULAR, 11.5, &desc, text_w, 16.0, 2);
         let info_h = 34.0f32.max(desc_h + 20.0);
         let iy = y + info_h / 2.0;
-        c.circle(x + pad + 8.0, iy, 8.0, theme::SUBTLE_HOVER);
+        c.circle(x + pad + 8.0, iy, 8.0, theme::subtle_hover());
         let iw = c.text_width(font::BOLD, 10.0, "i");
         let ih = c.line_height(font::BOLD, 10.0);
-        c.text(font::BOLD, 10.0, "i", x + pad + 8.0 - iw / 2.0, iy - ih / 2.0, theme::TEXT_SECONDARY);
-        wrap(c, font::REGULAR, 11.5, &desc, x + pad + 26.0, y + (info_h - desc_h) / 2.0, text_w, 16.0, theme::TEXT_SECONDARY, 2);
-        c.fill(x + 1.0, y + info_h, w - 2.0, 1.0, theme::HAIRLINE);
+        c.text(font::BOLD, 10.0, "i", x + pad + 8.0 - iw / 2.0, iy - ih / 2.0, theme::text_secondary());
+        wrap(c, font::REGULAR, 11.5, &desc, x + pad + 26.0, y + (info_h - desc_h) / 2.0, text_w, 16.0, theme::text_secondary(), 2);
+        c.fill(x + 1.0, y + info_h, w - 2.0, 1.0, theme::hairline());
 
         let top = y + info_h + 1.0;
         let ph = h - info_h - 2.0;
@@ -857,14 +857,14 @@ impl Menu {
             12.0,
             x + pad + 6.0,
             y + hh / 2.0,
-            theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, hv),
+            theme::mix(theme::text_muted(), theme::text_strong(), hv),
         );
         let lh = c.line_height(font::SEMIBOLD, 12.5);
-        c.text(font::SEMIBOLD, 12.5, title, x + pad + 22.0, y + (hh - lh) / 2.0, theme::TEXT_STRONG);
+        c.text(font::SEMIBOLD, 12.5, title, x + pad + 22.0, y + (hh - lh) / 2.0, theme::text_strong());
         let count = format!("{} {}", rows.len(), if rows.len() == 1 { "option" } else { "options" });
         let cw = c.text_width(font::REGULAR, 10.5, &count);
         let ch = c.line_height(font::REGULAR, 10.5);
-        c.text(font::REGULAR, 10.5, &count, x + w - pad - 8.0 - cw, y + (hh - ch) / 2.0, theme::TEXT_MUTED);
+        c.text(font::REGULAR, 10.5, &count, x + w - pad - 8.0 - cw, y + (hh - ch) / 2.0, theme::text_muted());
         if over {
             ui.cursor_hand = true;
         }
@@ -878,7 +878,7 @@ impl Menu {
         let (rx, rw) = (x + pad + 4.0, w - pad * 2.0 - 14.0);
         for (n, si) in rows.iter().enumerate() {
             if n > 0 {
-                c.fill(rx, y, rw, 1.0, theme::HAIRLINE);
+                c.fill(rx, y, rw, 1.0, theme::hairline());
             }
             let current = match part {
                 Part::Keybind => Some(&mods.all[mi].state.toggle_key),
@@ -932,6 +932,7 @@ impl Menu {
         let mut ry = y - off;
         let cw = lw - 6.0;
         ry = self.group(ui, c, "general", x, ry, cw, theme::I_SLIDERS, "General", "How Native looks and talks to you", Group::General);
+        ry = self.appearance.draw(ui, c, x, ry, cw);
         ry = self.group(ui, c, "keys", x, ry, cw, theme::I_KEYBOARD, "Controls", "Click a key, then press the one you want", Group::Keys);
         let (y2, a) = self.hud_card(ui, c, mods, x, ry, cw);
         ry = y2;
@@ -948,7 +949,7 @@ impl Menu {
             "Saved automatically to config/native-ui.json and config/native-modules.json.",
             x + 4.0,
             ry,
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         ry += 28.0;
         self.prefs.end(ui, c, ry + off - y);
@@ -1023,7 +1024,7 @@ impl Menu {
         card_head(c, x, y, w, icon, title, hint);
         let mut cy = y + head;
         for s in rows {
-            c.fill(x + 18.0, cy, w - 36.0, 1.0, theme::HAIRLINE);
+            c.fill(x + 18.0, cy, w - 36.0, 1.0, theme::hairline());
             let sid = s.id;
             let rh = Widgets::row_height(s);
             self.widgets.row(ui, c, &format!("menu:pref:{sid}"), x + 18.0, cy, w - 36.0, s, None);
@@ -1081,7 +1082,7 @@ impl Menu {
         let bg = if armed {
             theme::mix(0x26EF4444, 0x40EF4444, hv)
         } else {
-            theme::mix(theme::SUBTLE, theme::SUBTLE_HOVER, hv)
+            theme::mix(theme::subtle(), theme::subtle_hover(), hv)
         };
         let sy = y + pr * 1.5;
         c.round(x, sy, w, h, 12.0, bg);
@@ -1092,20 +1093,20 @@ impl Menu {
             h,
             12.0,
             1.0,
-            if armed { 0x4DEF4444 } else { theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, hv) },
+            if armed { 0x4DEF4444 } else { theme::mix(theme::hairline(), theme::hairline_strong(), hv) },
         );
         let fg = if armed {
             0xFFFCA5A5
         } else if danger {
-            theme::mix(theme::TEXT_SECONDARY, 0xFFFCA5A5, hv)
+            theme::mix(theme::text_secondary(), 0xFFFCA5A5, hv)
         } else {
-            theme::TEXT_STRONG
+            theme::text_strong()
         };
         c.icon(icon, 15.0, x + 22.0, sy + 22.0, fg);
         let t = c.ellipsize(font::SEMIBOLD, 12.0, title, w - 24.0);
         c.text(font::SEMIBOLD, 12.0, &t, x + 12.0, sy + h - 36.0, fg);
         let hnt = c.ellipsize(font::REGULAR, 10.5, hint, w - 24.0);
-        c.text(font::REGULAR, 10.5, &hnt, x + 12.0, sy + h - 19.0, theme::TEXT_MUTED);
+        c.text(font::REGULAR, 10.5, &hnt, x + 12.0, sy + h - 19.0, theme::text_muted());
         if over {
             ui.cursor_hand = true;
         }
@@ -1121,12 +1122,12 @@ impl Menu {
         let av = 56.0;
         avatar(c, name, x + 18.0, y + 18.0, av, 12.0);
         c.circle(x + 18.0 + av - 4.0, y + 18.0 + av - 4.0, 7.0, 0xFF05060A);
-        c.circle(x + 18.0 + av - 4.0, y + 18.0 + av - 4.0, 5.0, theme::ONLINE);
+        c.circle(x + 18.0 + av - 4.0, y + 18.0 + av - 4.0, 5.0, theme::online());
         let tx = x + 18.0 + av + 14.0;
         let n = c.ellipsize(font::SEMIBOLD, 16.0, name, w - (tx - x) - 16.0);
-        c.text(font::SEMIBOLD, 16.0, &n, tx, y + 24.0, theme::TEXT_STRONG);
+        c.text(font::SEMIBOLD, 16.0, &n, tx, y + 24.0, theme::text_strong());
         let status = c.ellipsize(font::REGULAR, 11.0, "Native Client \u{b7} Rust Edition", w - (tx - x) - 16.0);
-        c.text(font::REGULAR, 11.0, &status, tx, y + 48.0, theme::TEXT_MUTED);
+        c.text(font::REGULAR, 11.0, &status, tx, y + 48.0, theme::text_muted());
         let on = mods.all.iter().filter(|m| m.state.enabled).count();
         let sy = y + 92.0;
         let sw = (w - 36.0 - 10.0) / 2.0;
@@ -1146,11 +1147,11 @@ impl Menu {
         if let Some(logo) = self.logo.clone() {
             c.image(&logo, x + 18.0, y + 16.0, lg, lg, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
         }
-        c.text(font::SEMIBOLD, 14.0, "Native Client", x + 18.0 + lg + 12.0, y + 17.0, theme::TEXT_STRONG);
-        c.text(font::REGULAR, 11.0, "Rust Edition  \u{b7}  Minecraft 26.3", x + 18.0 + lg + 12.0, y + 36.0, theme::TEXT_MUTED);
-        c.fill(x + 18.0, y + 64.0, w - 36.0, 1.0, theme::HAIRLINE);
+        c.text(font::SEMIBOLD, 14.0, "Native Client", x + 18.0 + lg + 12.0, y + 17.0, theme::text_strong());
+        c.text(font::REGULAR, 11.0, "Rust Edition  \u{b7}  Minecraft 26.3", x + 18.0 + lg + 12.0, y + 36.0, theme::text_muted());
+        c.fill(x + 18.0, y + 64.0, w - 36.0, 1.0, theme::hairline());
         let t = c.ellipsize(font::REGULAR, 11.0, "Updates install from the launcher. playnative.net", w - 36.0);
-        c.text(font::REGULAR, 11.0, &t, x + 18.0, y + 80.0, theme::TEXT_SECONDARY);
+        c.text(font::REGULAR, 11.0, &t, x + 18.0, y + 80.0, theme::text_secondary());
         y + h
     }
 }
@@ -1219,12 +1220,12 @@ pub fn avatar(c: &mut Canvas, name: &str, x: f32, y: f32, s: f32, r: f32) {
         return;
     }
     c.round(x, y, s, s, r, theme::mix(0xFF1B1D24, theme::name_color(Some(name)), 0.35));
-    c.outline(x, y, s, s, r, 1.0, theme::HAIRLINE_STRONG);
+    c.outline(x, y, s, s, r, 1.0, theme::hairline_strong());
     let initial = name.chars().next().map_or_else(|| "?".to_owned(), |ch| ch.to_uppercase().collect());
     let size = (s * 0.46).max(9.0);
     let tw = c.text_width(font::BOLD, size, &initial);
     let lh = c.line_height(font::BOLD, size);
-    c.text(font::BOLD, size, &initial, x + (s - tw) / 2.0, y + (s - lh) / 2.0, theme::TEXT_STRONG);
+    c.text(font::BOLD, size, &initial, x + (s - tw) / 2.0, y + (s - lh) / 2.0, theme::text_strong());
 }
 
 /// Top-down sheen inside a rounded box; the top corners follow the radius so nothing pokes out of the outline.
@@ -1239,12 +1240,12 @@ pub fn glow(c: &mut Canvas, x: f32, y: f32, w: f32, gh: f32, r: f32, top: u32) {
 pub fn panel(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
     c.shadow(x, y + 4.0, w, h, 16.0, 24.0, 0x88000000);
     c.round(x, y, w, h, 16.0, PANEL_BG);
-    c.outline(x, y, w, h, 16.0, 1.0, theme::HAIRLINE_STRONG);
+    c.outline(x, y, w, h, 16.0, 1.0, theme::hairline_strong());
 }
 
 pub fn header(c: &mut Canvas, title: &str, x: f32, y: f32, h: f32) -> f32 {
     let lh = c.line_height(font::SEMIBOLD, 18.0);
-    c.text(font::SEMIBOLD, 18.0, title, x + 20.0, y + (h - lh) / 2.0, theme::TEXT_STRONG);
+    c.text(font::SEMIBOLD, 18.0, title, x + 20.0, y + (h - lh) / 2.0, theme::text_strong());
     x + 20.0 + c.text_width(font::SEMIBOLD, 18.0, title)
 }
 
@@ -1261,13 +1262,13 @@ fn rail_tile_sized(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, s: f32
     let click = ui.clicked(c, id, x, y, s, s);
     let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
     let sel = ui.anim_on(&format!("{id}#on"), on, 16.0);
-    c.round(x, y, s, s, 15.0, theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv * 0.85), 0x16FFFFFF, sel));
+    c.round(x, y, s, s, 15.0, theme::mix(theme::alpha(theme::subtle_hover(), hv * 0.85), 0x16FFFFFF, sel));
     if sel > 0.01 {
-        c.outline(x, y, s, s, 15.0, 1.0, theme::alpha(theme::HAIRLINE_STRONG, sel));
+        c.outline(x, y, s, s, 15.0, 1.0, theme::alpha(theme::hairline_strong(), sel));
         let bh = 18.0 * sel;
         c.round(x - 5.0, y + (s - bh) / 2.0, 3.0, bh, 1.5, theme::alpha(theme::WHITE, sel));
     }
-    let fg = theme::mix(theme::mix(theme::TEXT_MUTED, theme::TEXT_SECONDARY, hv), theme::TEXT_STRONG, sel);
+    let fg = theme::mix(theme::mix(theme::text_muted(), theme::text_secondary(), hv), theme::text_strong(), sel);
     c.icon(icon, 24.0 * s / RAIL, x + s / 2.0, y + s / 2.0, fg);
     if over {
         ui.tip(label);
@@ -1281,8 +1282,8 @@ fn pill_icon(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, s: f32, icon
     let click = ui.clicked(c, id, x, y, s, s);
     let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
     let sel = ui.anim_on(&format!("{id}#on"), on, 16.0);
-    c.round(x, y, s, s, 9.0, theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv), 0xFFF4F4F5, sel));
-    c.icon(icon, 14.0, x + s / 2.0, y + s / 2.0, theme::mix(theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, hv), theme::SOLID_FG, sel));
+    c.round(x, y, s, s, 9.0, theme::mix(theme::alpha(theme::subtle_hover(), hv), 0xFFF4F4F5, sel));
+    c.icon(icon, 14.0, x + s / 2.0, y + s / 2.0, theme::mix(theme::mix(theme::text_muted(), theme::text_strong(), hv), theme::solid_fg(), sel));
     click
 }
 
@@ -1298,11 +1299,11 @@ fn heart(ui: &mut Ui, c: &mut Canvas, id: &str, favorite: &mut bool, x: f32, y: 
     let hv = ui.anim_on(&format!("{id}#h"), over, 16.0);
     let fav = ui.anim_on(&format!("{id}#f"), *favorite, 14.0);
     if v > 0.01 {
-        c.round(x, y, s, s, s / 2.0, theme::alpha(theme::SUBTLE_HOVER, hv * v));
-        let col = theme::alpha(theme::mix(theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, hv), theme::TEXT_STRONG, fav), v);
+        c.round(x, y, s, s, s / 2.0, theme::alpha(theme::subtle_hover(), hv * v));
+        let col = theme::alpha(theme::mix(theme::mix(theme::text_muted(), theme::text_strong(), hv), theme::text_strong(), fav), v);
         // Pinned: a solid white heart (the icon font only has outlines, so stack shrinking copies to fill it).
         if fav > 0.01 {
-            let fill = theme::alpha(theme::TEXT_STRONG, fav * v);
+            let fill = theme::alpha(theme::text_strong(), fav * v);
             let mut fs = 11.5;
             while fs >= 2.5 {
                 c.icon(theme::I_HEART, fs, x + s / 2.0, y + s / 2.0, fill);
@@ -1337,35 +1338,35 @@ fn state_button(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h
 fn card_frame(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32) {
     let over = ui.hover(c, x, y, w, h);
     let hv = ui.anim_on(id, over, 10.0);
-    c.round(x, y, w, h, 16.0, theme::mix(CARD, CARD_HOVER, hv));
+    c.round(x, y, w, h, 16.0, theme::mix(theme::panel(), theme::panel_hover(), hv));
     glow(c, x, y, w, h.min(70.0), 16.0, 0x0AFFFFFF);
-    c.outline(x, y, w, h, 16.0, 1.0, theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, hv));
+    c.outline(x, y, w, h, 16.0, 1.0, theme::mix(theme::hairline(), theme::hairline_strong(), hv));
 }
 
 fn card_head(c: &mut Canvas, x: f32, y: f32, w: f32, icon: u32, title: &str, hint: &str) {
     let ic = 34.0;
-    c.round(x + 18.0, y + 14.0, ic, ic, 10.0, theme::SUBTLE_HOVER);
-    c.outline(x + 18.0, y + 14.0, ic, ic, 10.0, 1.0, theme::HAIRLINE);
-    c.icon(icon, 16.0, x + 18.0 + ic / 2.0, y + 14.0 + ic / 2.0, theme::TEXT_STRONG);
+    c.round(x + 18.0, y + 14.0, ic, ic, 10.0, theme::subtle_hover());
+    c.outline(x + 18.0, y + 14.0, ic, ic, 10.0, 1.0, theme::hairline());
+    c.icon(icon, 16.0, x + 18.0 + ic / 2.0, y + 14.0 + ic / 2.0, theme::text_strong());
     let tx = x + 18.0 + ic + 14.0;
-    c.text(font::SEMIBOLD, 14.0, title, tx, y + 15.0, theme::TEXT_STRONG);
+    c.text(font::SEMIBOLD, 14.0, title, tx, y + 15.0, theme::text_strong());
     let hint = c.ellipsize(font::REGULAR, 11.0, hint, w - (tx - x) - 18.0);
-    c.text(font::REGULAR, 11.0, &hint, tx, y + 34.0, theme::TEXT_MUTED);
+    c.text(font::REGULAR, 11.0, &hint, tx, y + 34.0, theme::text_muted());
 }
 
 fn stat(c: &mut Canvas, x: f32, y: f32, w: f32, value: &str, label: &str) {
-    c.round(x, y, w, 44.0, 10.0, theme::SUBTLE);
-    c.text(font::BOLD, 15.0, value, x + 12.0, y + 6.0, theme::TEXT_STRONG);
+    c.round(x, y, w, 44.0, 10.0, theme::subtle());
+    c.text(font::BOLD, 15.0, value, x + 12.0, y + 6.0, theme::text_strong());
     let l = c.ellipsize(font::REGULAR, 10.5, label, w - 24.0);
-    c.text(font::REGULAR, 10.5, &l, x + 12.0, y + 25.0, theme::TEXT_MUTED);
+    c.text(font::REGULAR, 10.5, &l, x + 12.0, y + 25.0, theme::text_muted());
 }
 
 pub fn disabled(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32, label: &str) {
-    c.round(x, y, w, h, 10.0, theme::SUBTLE);
-    c.outline(x, y, w, h, 10.0, 1.0, theme::HAIRLINE);
+    c.round(x, y, w, h, 10.0, theme::subtle());
+    c.outline(x, y, w, h, 10.0, 1.0, theme::hairline());
     let tw = c.text_width(font::SEMIBOLD, 12.5, label);
     let lh = c.line_height(font::SEMIBOLD, 12.5);
-    c.text(font::SEMIBOLD, 12.5, label, x + (w - tw) / 2.0, y + (h - lh) / 2.0, theme::TEXT_MUTED);
+    c.text(font::SEMIBOLD, 12.5, label, x + (w - tw) / 2.0, y + (h - lh) / 2.0, theme::text_muted());
 }
 
 /// Word-wraps text into at most `max_lines` lines; the last one is ellipsized. Returns the y below it.
@@ -1425,13 +1426,13 @@ pub fn wrap_height(c: &mut Canvas, face: usize, size: f32, text: &str, w: f32, l
 
 pub fn empty(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32, icon: u32, title: &str, body: &str) {
     let cy = y + h / 2.0 - 34.0;
-    c.circle(x + w / 2.0, cy, 22.0, theme::SUBTLE_HOVER);
-    c.icon(icon, 18.0, x + w / 2.0, cy, theme::TEXT_SECONDARY);
+    c.circle(x + w / 2.0, cy, 22.0, theme::subtle_hover());
+    c.icon(icon, 18.0, x + w / 2.0, cy, theme::text_secondary());
     let tw = c.text_width(font::SEMIBOLD, 13.5, title);
-    c.text(font::SEMIBOLD, 13.5, title, x + (w - tw) / 2.0, cy + 32.0, theme::TEXT_STRONG);
+    c.text(font::SEMIBOLD, 13.5, title, x + (w - tw) / 2.0, cy + 32.0, theme::text_strong());
     let b = c.ellipsize(font::REGULAR, 11.5, body, w - 24.0);
     let bw = c.text_width(font::REGULAR, 11.5, &b);
-    c.text(font::REGULAR, 11.5, &b, x + (w - bw) / 2.0, cy + 54.0, theme::TEXT_MUTED);
+    c.text(font::REGULAR, 11.5, &b, x + (w - bw) / 2.0, cy + 54.0, theme::text_muted());
 }
 
 pub fn ease(t: f32) -> f32 {

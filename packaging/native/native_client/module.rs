@@ -216,7 +216,7 @@ impl Hud {
             return;
         }
         c.round(x, y, w, h, 6.0 * s, theme::alpha(0xFF08090C, a));
-        c.outline(x, y, w, h, 6.0 * s, 1.0, theme::alpha(theme::HAIRLINE, (a * 1.6).min(1.0)));
+        c.outline(x, y, w, h, 6.0 * s, 1.0, theme::alpha(theme::hairline(), (a * 1.6).min(1.0)));
     }
 
     /// Corner brackets around a module (Brackets style).

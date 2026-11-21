@@ -55,7 +55,7 @@ pub fn badge(c: &mut Canvas, right_x: f32, cy: f32, n: i32) {
     let s = if n > 99 { "99+".to_owned() } else { n.to_string() };
     let tw = c.text_width(font::BOLD, 10.5, &s);
     let bw = (tw + 10.0).max(18.0);
-    c.round(right_x - bw, cy - 9.0, bw, 18.0, 9.0, theme::DANGER);
+    c.round(right_x - bw, cy - 9.0, bw, 18.0, 9.0, theme::danger());
     let lh = c.line_height(font::BOLD, 10.5);
     c.text(font::BOLD, 10.5, &s, right_x - bw + (bw - tw) / 2.0, cy - lh / 2.0, 0xFFFFFFFF);
 }
@@ -64,14 +64,14 @@ pub fn badge(c: &mut Canvas, right_x: f32, cy: f32, n: i32) {
 #[allow(clippy::too_many_arguments)]
 pub fn empty(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32, icon: u32, title: &str, body: &str) {
     let cy = y + h / 2.0 - 34.0;
-    c.round(x + w / 2.0 - 22.0, cy - 22.0, 44.0, 44.0, 12.0, theme::SUBTLE);
-    c.icon(icon, 20.0, x + w / 2.0, cy, theme::TEXT_SECONDARY);
+    c.round(x + w / 2.0 - 22.0, cy - 22.0, 44.0, 44.0, 12.0, theme::subtle());
+    c.icon(icon, 20.0, x + w / 2.0, cy, theme::text_secondary());
     let tw = c.text_width(font::SEMIBOLD, 13.5, title);
-    c.text(font::SEMIBOLD, 13.5, title, x + (w - tw) / 2.0, cy + 32.0, theme::TEXT_STRONG);
+    c.text(font::SEMIBOLD, 13.5, title, x + (w - tw) / 2.0, cy + 32.0, theme::text_strong());
     let mut ly = cy + 54.0;
     for line in wrap(c, font::REGULAR, 11.5, body, (w - 48.0).min(280.0)) {
         let lw = c.text_width(font::REGULAR, 11.5, &line);
-        c.text(font::REGULAR, 11.5, &line, x + (w - lw) / 2.0, ly, theme::TEXT_MUTED);
+        c.text(font::REGULAR, 11.5, &line, x + (w - lw) / 2.0, ly, theme::text_muted());
         ly += 17.0;
     }
 }

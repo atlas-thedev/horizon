@@ -2,7 +2,6 @@
 //! their coordinates and distance. Add one where you stand or from coordinates on the clipboard; rename, recolour,
 //! pick an icon, hide, copy or delete. Outside a world it browses the waypoints of the worlds you have been to.
 use super::keys;
-use super::menu::{CARD, CARD_HOVER};
 use super::scroll::Scroll;
 use super::textfield::TextField;
 use super::ui::{self, Ui};
@@ -69,13 +68,13 @@ impl WaypointsView {
         } else {
             "Not in a world".into()
         };
-        c.text(font::SEMIBOLD, 14.0, &title, x, y + 2.0, theme::TEXT_STRONG);
+        c.text(font::SEMIBOLD, 14.0, &title, x, y + 2.0, theme::text_strong());
         let hint = if in_world {
             format!("Press {key} to add one where you stand, hold it to mark the block you look at.")
         } else {
             "Join a world to add waypoints. These are the ones you saved before.".into()
         };
-        c.text(font::MEDIUM, 11.5, &hint, x, y + 24.0, theme::TEXT_MUTED);
+        c.text(font::MEDIUM, 11.5, &hint, x, y + 24.0, theme::text_muted());
         let mut bx = x + w;
         if let Some(wk) = here.world.as_deref() {
             bx -= 118.0;
@@ -122,7 +121,7 @@ impl WaypointsView {
             }
         }
         ty += 38.0;
-        c.fill(x, ty - 8.0, w, 1.0, theme::HAIRLINE);
+        c.fill(x, ty - 8.0, w, 1.0, theme::hairline());
 
         // the list
         let Some(world) = world else {
@@ -172,8 +171,8 @@ impl WaypointsView {
         let open = self.editing == Some(p.id);
         let h = if open { ROW + EDIT } else { ROW };
         let over = ui.hover(c, x, y, w, ROW);
-        c.round(x, y, w, h, 12.0, if over || open { CARD_HOVER } else { CARD });
-        c.outline(x, y, w, h, 12.0, 1.0, if open { theme::HAIRLINE_STRONG } else { theme::HAIRLINE });
+        c.round(x, y, w, h, 12.0, if over || open { theme::panel_hover() } else { theme::panel() });
+        c.outline(x, y, w, h, 12.0, 1.0, if open { theme::hairline_strong() } else { theme::hairline() });
         let cy = y + ROW / 2.0;
         c.push_alpha(if p.visible { 1.0 } else { 0.45 });
         c.circle(x + 28.0, cy, 15.0, theme::alpha(p.color, 0.95));
@@ -181,7 +180,7 @@ impl WaypointsView {
         c.icon(waypoints::ICONS[p.icon.min(waypoints::ICONS.len() - 1)], 14.0, x + 28.0, cy, p.color);
         let tx = x + 54.0;
         let name = c.ellipsize(font::SEMIBOLD, 13.0, &p.name, w - 260.0);
-        c.text(font::SEMIBOLD, 13.0, &name, tx, y + 10.0, theme::TEXT_STRONG);
+        c.text(font::SEMIBOLD, 13.0, &name, tx, y + 10.0, theme::text_strong());
         let mut sub = format!("{} {} {}  \u{B7}  {}", p.x, p.y, p.z, waypoints::dimension_name(&p.dim));
         if let Some(me) = me
             && let Some(at) = waypoints::place_in(p, dim, true)
@@ -193,7 +192,7 @@ impl WaypointsView {
             }
         }
         let sub = c.ellipsize(font::MEDIUM, 11.0, &sub, w - 220.0);
-        c.text(font::MEDIUM, 11.0, &sub, tx, y + 30.0, theme::TEXT_MUTED);
+        c.text(font::MEDIUM, 11.0, &sub, tx, y + 30.0, theme::text_muted());
         c.pop_alpha();
 
         // actions, right to left
@@ -248,8 +247,8 @@ impl WaypointsView {
     /// Name, colour and icon of the waypoint being edited.
     #[allow(clippy::too_many_arguments)]
     fn editor(&mut self, ui: &mut Ui, c: &mut Canvas, world: &str, p: &Point, x: f32, y: f32, w: f32) {
-        c.fill(x, y - 4.0, w, 1.0, theme::HAIRLINE);
-        c.text(font::MEDIUM, 11.0, "Name", x, y + 8.0, theme::TEXT_MUTED);
+        c.fill(x, y - 4.0, w, 1.0, theme::hairline());
+        c.text(font::MEDIUM, 11.0, "Name", x, y + 8.0, theme::text_muted());
         if self.name.draw(ui, c, x + 60.0, y, 320.0f32.min(w - 60.0), 32.0, "Waypoint name", 12.0) {
             self.editing = None;
             ui.focus = None;
@@ -260,7 +259,7 @@ impl WaypointsView {
             waypoints::store().edit(world, p.id, |q| q.name = typed);
         }
         let sy = y + 46.0;
-        c.text(font::MEDIUM, 11.0, "Colour", x, sy + 6.0, theme::TEXT_MUTED);
+        c.text(font::MEDIUM, 11.0, "Colour", x, sy + 6.0, theme::text_muted());
         let sx = x + 60.0;
         for (i, col) in waypoints::COLORS.iter().copied().enumerate() {
             let (cx, cy) = (sx + i as f32 * 30.0 + 12.0, sy + 12.0);
@@ -274,16 +273,16 @@ impl WaypointsView {
             }
         }
         let iy = sy + 40.0;
-        c.text(font::MEDIUM, 11.0, "Icon", x, iy + 6.0, theme::TEXT_MUTED);
+        c.text(font::MEDIUM, 11.0, "Icon", x, iy + 6.0, theme::text_muted());
         for (i, icon) in waypoints::ICONS.iter().copied().enumerate() {
             let (ix, s) = (sx + i as f32 * 32.0, 28.0);
             let sel = p.icon == i;
             let over = ui.hover(c, ix, iy - 2.0, s, s);
-            c.round(ix, iy - 2.0, s, s, 8.0, if sel { theme::alpha(p.color, 0.25) } else if over { theme::SUBTLE_HOVER } else { 0 });
+            c.round(ix, iy - 2.0, s, s, 8.0, if sel { theme::alpha(p.color, 0.25) } else if over { theme::subtle_hover() } else { 0 });
             if sel {
                 c.outline(ix, iy - 2.0, s, s, 8.0, 1.0, theme::alpha(p.color, 0.8));
             }
-            c.icon(icon, 14.0, ix + s / 2.0, iy - 2.0 + s / 2.0, if sel { p.color } else { theme::TEXT_SECONDARY });
+            c.icon(icon, 14.0, ix + s / 2.0, iy - 2.0 + s / 2.0, if sel { p.color } else { theme::text_secondary() });
             if ui.clicked(c, &format!("waypoints:icon:{i}"), ix, iy - 2.0, s, s) {
                 waypoints::store().edit(world, p.id, |q| q.icon = i);
             }
@@ -342,8 +341,8 @@ impl WaypointsView {
         let (nx, ny) = (x + (w - tw) / 2.0, y + h - lh - 16.0);
         c.push_alpha(a);
         c.round(nx - 14.0, ny - 8.0, tw + 28.0, lh + 16.0, 10.0, 0xE6101114);
-        c.outline(nx - 14.0, ny - 8.0, tw + 28.0, lh + 16.0, 10.0, 1.0, theme::HAIRLINE_STRONG);
-        c.text(font::MEDIUM, 11.5, &text, nx, ny, theme::TEXT_STRONG);
+        c.outline(nx - 14.0, ny - 8.0, tw + 28.0, lh + 16.0, 10.0, 1.0, theme::hairline_strong());
+        c.text(font::MEDIUM, 11.5, &text, nx, ny, theme::text_strong());
         c.pop_alpha();
     }
 }
@@ -365,20 +364,20 @@ fn world_name(key: &str) -> String {
 #[allow(clippy::too_many_arguments)]
 fn chip(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, label: &str, on: bool) -> bool {
     let over = ui.hover(c, x, y, w, 28.0);
-    c.round(x, y, w, 28.0, 14.0, if on { 0x33FFFFFF } else if over { theme::SUBTLE_HOVER } else { 0x14FFFFFF });
+    c.round(x, y, w, 28.0, 14.0, if on { 0x33FFFFFF } else if over { theme::subtle_hover() } else { 0x14FFFFFF });
     if on {
-        c.outline(x, y, w, 28.0, 14.0, 1.0, theme::HAIRLINE_STRONG);
+        c.outline(x, y, w, 28.0, 14.0, 1.0, theme::hairline_strong());
     }
     let tw = c.text_width(font::MEDIUM, 11.5, label);
     let lh = c.line_height(font::MEDIUM, 11.5);
-    c.text(font::MEDIUM, 11.5, label, x + (w - tw) / 2.0, y + (28.0 - lh) / 2.0, if on { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY });
+    c.text(font::MEDIUM, 11.5, label, x + (w - tw) / 2.0, y + (28.0 - lh) / 2.0, if on { theme::text_strong() } else { theme::text_secondary() });
     ui.clicked(c, id, x, y, w, 28.0)
 }
 
 fn empty(c: &mut Canvas, x: f32, y: f32, w: f32, title: &str, sub: &str) {
-    c.icon(theme::I_MAP_PIN, 30.0, x + w / 2.0, y + 30.0, theme::TEXT_MUTED);
+    c.icon(theme::I_MAP_PIN, 30.0, x + w / 2.0, y + 30.0, theme::text_muted());
     let tw = c.text_width(font::SEMIBOLD, 14.0, title);
-    c.text(font::SEMIBOLD, 14.0, title, x + (w - tw) / 2.0, y + 60.0, theme::TEXT_STRONG);
+    c.text(font::SEMIBOLD, 14.0, title, x + (w - tw) / 2.0, y + 60.0, theme::text_strong());
     let sw = c.text_width(font::MEDIUM, 11.5, sub);
-    c.text(font::MEDIUM, 11.5, sub, x + (w - sw) / 2.0, y + 84.0, theme::TEXT_MUTED);
+    c.text(font::MEDIUM, 11.5, sub, x + (w - sw) / 2.0, y + 84.0, theme::text_muted());
 }

@@ -69,7 +69,7 @@ impl Behaviour for NowPlaying {
         let title = c.ellipsize(font::SEMIBOLD, 12.0 * s, &title, tw);
         hud.text_face(c, font::SEMIBOLD, 12.0 * s, &title, tx, y + pad + 3.0 * s, hud.color());
         let sub = c.ellipsize(font::REGULAR, 10.5 * s, &sub, tw);
-        c.text(font::REGULAR, 10.5 * s, &sub, tx, y + pad + 21.0 * s, theme::TEXT_MUTED);
+        c.text(font::REGULAR, 10.5 * s, &sub, tx, y + pad + 21.0 * s, theme::text_muted());
         // A small equaliser while it plays, the pause sign while it doesn't.
         let now = crate::native_ui::canvas::clock_ms();
         let (ex, ey) = (x + w - pad - 7.0 * s, y + pad + 10.0 * s);
@@ -79,7 +79,7 @@ impl Behaviour for NowPlaying {
                 c.round(ex - 5.0 * s + b as f32 * 4.0 * s, ey + 5.0 * s - bh, 2.4 * s, bh, s, hud.color());
             }
         } else {
-            c.icon(theme::I_PAUSE, 11.0 * s, ex, ey, theme::TEXT_MUTED);
+            c.icon(theme::I_PAUSE, 11.0 * s, ex, ey, theme::text_muted());
         }
         let mut by = y + pad + cs + 7.0 * s;
         if m.bool("time") {
@@ -88,9 +88,9 @@ impl Behaviour for NowPlaying {
             let (l, r) = (music::time(pos), music::time(dur));
             let (lw, rw) = (c.text_width(font::MEDIUM, 9.0 * s, &l), c.text_width(font::MEDIUM, 9.0 * s, &r));
             let (bx, bw) = (x + pad + lw + 7.0 * s, w - pad * 2.0 - lw - rw - 14.0 * s);
-            c.text(font::MEDIUM, 9.0 * s, &l, x + pad, by - s, theme::TEXT_MUTED);
-            c.text(font::MEDIUM, 9.0 * s, &r, x + w - pad - rw, by - s, theme::TEXT_MUTED);
-            c.round(bx, by + 4.0 * s, bw, 3.0 * s, 1.5 * s, theme::SUBTLE_HOVER);
+            c.text(font::MEDIUM, 9.0 * s, &l, x + pad, by - s, theme::text_muted());
+            c.text(font::MEDIUM, 9.0 * s, &r, x + w - pad - rw, by - s, theme::text_muted());
+            c.round(bx, by + 4.0 * s, bw, 3.0 * s, 1.5 * s, theme::subtle_hover());
             c.round(bx, by + 4.0 * s, (bw * frac).max(3.0 * s), 3.0 * s, 1.5 * s, hud.color());
             by += 13.0 * s;
         }

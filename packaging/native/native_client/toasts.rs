@@ -68,19 +68,19 @@ impl Toasts {
             let cx = x + slide;
             c.shadow(cx, y + 3.0, w, h, 14.0, 14.0, 0x66000000);
             c.round(cx, y, w, h, 14.0, 0xF00A0B0E);
-            c.outline(cx, y, w, h, 14.0, 1.0, theme::HAIRLINE_STRONG);
+            c.outline(cx, y, w, h, 14.0, 1.0, theme::hairline_strong());
             avatars::draw(c, n.skin.as_deref(), cx + 12.0, y + 12.0, 38.0, 10.0);
             let (tx, tw) = (cx + 60.0, w - 72.0);
             let title = c.ellipsize(font::SEMIBOLD, 13.0, &n.title, tw);
-            c.text(font::SEMIBOLD, 13.0, &title, tx, y + 10.0, theme::TEXT_STRONG);
+            c.text(font::SEMIBOLD, 13.0, &title, tx, y + 10.0, theme::text_strong());
             let body = c.ellipsize(font::REGULAR, 12.0, &n.body.replace('\n', " "), tw);
-            c.text(font::REGULAR, 12.0, &body, tx, y + 27.0, theme::TEXT);
+            c.text(font::REGULAR, 12.0, &body, tx, y + 27.0, theme::text());
             if i == 0 {
                 let h2 = if n.conv_key.as_deref() == Some(relay::REQUESTS_KEY) { hint.replace("open chat", "respond") } else { hint.clone() };
-                c.text(font::REGULAR, 10.0, &h2, tx, y + 47.0, theme::TEXT_MUTED);
+                c.text(font::REGULAR, 10.0, &h2, tx, y + 47.0, theme::text_muted());
             }
             let left = (1.0 - age / LIFE as f32).max(0.0);
-            c.fill(cx + 14.0, y + h - 2.0, (w - 28.0) * left, 1.0, theme::alpha(theme::ACCENT, 0.55));
+            c.fill(cx + 14.0, y + h - 2.0, (w - 28.0) * left, 1.0, theme::alpha(theme::accent(), 0.55));
             c.pop_alpha();
             y += (h + gap) * a;
         }

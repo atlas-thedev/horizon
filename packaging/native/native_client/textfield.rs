@@ -153,7 +153,7 @@ impl TextField {
 
         let fw = ui.anim_on(&format!("{}#f", self.id), focused, 14.0);
         if !self.bare {
-            c.round(x, y, w, h, 10.0, theme::mix(0xCC0B0C10, 0xF00E1014, fw));
+            c.round(x, y, w, h, 10.0, theme::mix(theme::surface(), theme::panel_hover(), fw));
             c.outline(
                 x,
                 y,
@@ -161,7 +161,7 @@ impl TextField {
                 h,
                 10.0,
                 1.0,
-                theme::mix(if over { theme::HAIRLINE_STRONG } else { theme::HAIRLINE }, 0x47FFFFFF, fw),
+                theme::mix(if over { theme::hairline_strong() } else { theme::hairline() }, 0x47FFFFFF, fw),
             );
         }
         let lh = c.line_height(font::REGULAR, size);
@@ -187,12 +187,12 @@ impl TextField {
         }
         if s.is_empty() && !placeholder.is_empty() {
             let p = c.ellipsize(font::REGULAR, size, placeholder, inner_w);
-            c.text(font::REGULAR, size, &p, x + pad, ty, theme::TEXT_MUTED);
+            c.text(font::REGULAR, size, &p, x + pad, ty, theme::text_muted());
         } else {
-            c.text(font::REGULAR, size, &s, x + pad - self.scroll_x, ty, theme::TEXT_STRONG);
+            c.text(font::REGULAR, size, &s, x + pad - self.scroll_x, ty, theme::text_strong());
         }
         if focused && (((ui.now - self.blink_start) / 530.0) as i64) % 2 == 0 {
-            c.fill(x + pad + caret_x - self.scroll_x, ty + 2.0, 1.2, lh - 4.0, theme::TEXT_STRONG);
+            c.fill(x + pad + caret_x - self.scroll_x, ty + 2.0, 1.2, lh - 4.0, theme::text_strong());
         }
         c.pop_clip();
         submit

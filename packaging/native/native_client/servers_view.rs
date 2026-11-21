@@ -377,7 +377,7 @@ impl ServersView {
 
         let title = tr("multiplayer.title", "Play Multiplayer");
         let tw = c.text_width(font::BOLD, 18.0, &title);
-        c.text(font::BOLD, 18.0, &title, (w - tw) / 2.0, 20.0 + (1.0 - fade) * 8.0, theme::TEXT_STRONG);
+        c.text(font::BOLD, 18.0, &title, (w - tw) / 2.0, 20.0 + (1.0 - fade) * 8.0, theme::text_strong());
 
         // top-left: the search, then the game's own screen
         let search_w = 160.0f32.max(240.0f32.min(w * 0.2));
@@ -390,8 +390,8 @@ impl ServersView {
         let list_bottom = f[1] - 30.0;
         let list_h = 80.0f32.max(list_bottom - LIST_TOP);
         c.fill(0.0, LIST_TOP, w, list_h, 0x8C000000);
-        c.fill(0.0, LIST_TOP, w, 1.0, theme::HAIRLINE_STRONG);
-        c.fill(0.0, LIST_TOP + list_h - 1.0, w, 1.0, theme::HAIRLINE_STRONG);
+        c.fill(0.0, LIST_TOP, w, 1.0, theme::hairline_strong());
+        c.fill(0.0, LIST_TOP + list_h - 1.0, w, 1.0, theme::hairline_strong());
 
         let needle = self.search.value().trim().to_lowercase();
         if needle != self.last_needle {
@@ -453,7 +453,7 @@ impl ServersView {
                 };
                 if !partners_shown || !needle.is_empty() || gi == 1 {
                     let tw = c.text_width(font::MEDIUM, 12.5, &text);
-                    c.text(font::MEDIUM, 12.5, &text, (w - tw) / 2.0, cy + 18.0, theme::TEXT_MUTED);
+                    c.text(font::MEDIUM, 12.5, &text, (w - tw) / 2.0, cy + 18.0, theme::text_muted());
                     cy += 52.0;
                 }
             }
@@ -546,8 +546,8 @@ impl ServersView {
         let fa = ui.anim_on("servers:search#f", focused, 14.0);
         let has_text = !self.search.is_empty();
         c.round(sx, sy, sw, sh, 10.0, theme::mix(0x59000000, 0x99000000, fa));
-        c.outline(sx, sy, sw, sh, 10.0, 1.0, theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, fa));
-        c.icon(theme::I_SEARCH, 13.0, sx + 17.0, sy + sh / 2.0, theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, fa));
+        c.outline(sx, sy, sw, sh, 10.0, 1.0, theme::mix(theme::hairline(), theme::border_hover(), fa));
+        c.icon(theme::I_SEARCH, 13.0, sx + 17.0, sy + sh / 2.0, theme::mix(theme::text_muted(), theme::text_strong(), fa));
         let enter = self.search.draw(ui, c, sx + 28.0, sy, sw - 28.0 - if has_text { 30.0 } else { 4.0 }, sh, "Search", 12.5);
         if has_text && ui.icon_button(c, "servers:search:clear", sx + sw - 30.0, sy + 4.0, 26.0, theme::I_X, Some("Clear")) {
             self.search.clear();
@@ -672,12 +672,12 @@ impl ServersView {
         match &icon {
             Some(img) => c.image(img, ix, iy, ICON, ICON, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF),
             None => {
-                c.round(ix, iy, ICON, ICON, ICON * 0.2, theme::SUBTLE_HOVER);
+                c.round(ix, iy, ICON, ICON, ICON * 0.2, theme::subtle_hover());
                 let letters: String = name.split_whitespace().filter_map(|w| w.chars().next()).take(2).collect::<String>().to_uppercase();
                 let size = ICON * 0.34;
                 let lw = c.text_width(font::BOLD, size, &letters);
                 let lh = c.line_height(font::BOLD, size);
-                c.text(font::BOLD, size, &letters, ix + (ICON - lw) / 2.0, iy + (ICON - lh) / 2.0, theme::TEXT_SECONDARY);
+                c.text(font::BOLD, size, &letters, ix + (ICON - lw) / 2.0, iy + (ICON - lh) / 2.0, theme::text_secondary());
             }
         }
 
@@ -686,7 +686,7 @@ impl ServersView {
         let tx = x + 76.0;
         let text_w = right - status_w - 12.0 - tx;
         let shown = c.ellipsize(font::BOLD, 14.0, name, text_w);
-        c.text(font::BOLD, 14.0, &shown, tx, y + 11.0, theme::TEXT_STRONG);
+        c.text(font::BOLD, 14.0, &shown, tx, y + 11.0, theme::text_strong());
         if badge != Badge::None {
             let bx = tx + c.text_width(font::BOLD, 14.0, &shown) + 8.0;
             let (label, col) = if badge == Badge::Featured { ("Featured", 0xFFFCD34D) } else { ("Horizon Partner", 0xFF93C5FD) };
@@ -712,7 +712,7 @@ impl ServersView {
                 }
             }
             Status::Pinging => {
-                c.text(font::MEDIUM, 12.0, &tr("multiplayer.status.pinging", "Pinging..."), tx, y + 35.0, theme::TEXT_MUTED);
+                c.text(font::MEDIUM, 12.0, &tr("multiplayer.status.pinging", "Pinging..."), tx, y + 35.0, theme::text_muted());
             }
             Status::Failed => {
                 c.text(font::MEDIUM, 12.0, &tr("multiplayer.status.cannot_connect", "Can't connect to server"), tx, y + 35.0, 0xFFF87171);
@@ -735,7 +735,7 @@ impl ServersView {
             let count = movable.zip(index);
             let play_w = if count.is_some() { ICON * 0.6 } else { ICON };
             let over_play = ui.hover(c, ix, iy, play_w, ICON);
-            c.icon(theme::I_PLAY, 20.0, ix + play_w / 2.0, iy + ICON / 2.0, if over_play { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY });
+            c.icon(theme::I_PLAY, 20.0, ix + play_w / 2.0, iy + ICON / 2.0, if over_play { theme::text_strong() } else { theme::text_secondary() });
             if ui.clicked(c, &format!("{id}:play"), ix, iy, play_w, ICON) {
                 act = Some(TitleAct::Join(address.to_owned()));
             }
@@ -743,7 +743,7 @@ impl ServersView {
                 let (ax, aw) = (ix + play_w, ICON - play_w);
                 if i > 0 {
                     let o = ui.hover(c, ax, iy, aw, ICON / 2.0);
-                    c.icon(theme::I_CHEVRON_UP, 16.0, ax + aw / 2.0, iy + ICON * 0.27, if o { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY });
+                    c.icon(theme::I_CHEVRON_UP, 16.0, ax + aw / 2.0, iy + ICON * 0.27, if o { theme::text_strong() } else { theme::text_secondary() });
                     if ui.clicked(c, &format!("{id}:up"), ax, iy, aw, ICON / 2.0) {
                         self.selected = Some(address.to_owned());
                         act = Some(TitleAct::ServerMove { index: i, up: true });
@@ -751,7 +751,7 @@ impl ServersView {
                 }
                 if i + 1 < count {
                     let o = ui.hover(c, ax, iy + ICON / 2.0, aw, ICON / 2.0);
-                    c.icon(theme::I_CHEVRON_DOWN, 16.0, ax + aw / 2.0, iy + ICON * 0.73, if o { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY });
+                    c.icon(theme::I_CHEVRON_DOWN, 16.0, ax + aw / 2.0, iy + ICON * 0.73, if o { theme::text_strong() } else { theme::text_secondary() });
                     if ui.clicked(c, &format!("{id}:down"), ax, iy + ICON / 2.0, aw, ICON / 2.0) {
                         self.selected = Some(address.to_owned());
                         act = Some(TitleAct::ServerMove { index: i, up: false });
@@ -795,7 +795,7 @@ impl ServersView {
                 bars(c, right - 18.0, y + 14.0, Some(*ms));
                 let text = players.map(|(on, max)| format!("{}/{}", group(on), group(max.max(0)))).unwrap_or_default();
                 let pw = c.text_width(font::MEDIUM, 12.0, &text);
-                c.text(font::MEDIUM, 12.0, &text, right - 26.0 - pw, y + 1.0, theme::TEXT_SECONDARY);
+                c.text(font::MEDIUM, 12.0, &text, right - 26.0 - pw, y + 1.0, theme::text_secondary());
                 if over_bars {
                     ui.tip(&format!("{}: {ms} ms", tr("multiplayer.status.ping", "Ping").replace("%s", "").trim()));
                 }
@@ -815,7 +815,7 @@ fn motd_line(c: &mut Canvas, now: f64, runs: &[Run], x: f32, y: f32, max_w: f32)
     let end = x + max_w;
     for run in runs {
         let face = if run.bold { font::BOLD } else { font::MEDIUM };
-        let color = run.color.map_or(theme::TEXT_SECONDARY, |rgb| 0xFF00_0000 | rgb);
+        let color = run.color.map_or(theme::text_secondary(), |rgb| 0xFF00_0000 | rgb);
         let mut shown = String::new();
         let mut width = 0.0;
         for (i, ch) in run.text.chars().enumerate() {
@@ -873,20 +873,20 @@ fn bars(c: &mut Canvas, x: f32, bottom: f32, latency: Option<u128>) {
         Some(l) if l < 1000 => 2,
         Some(_) => 1,
     };
-    let color = if lit >= 4 { theme::ONLINE } else if lit >= 3 { theme::IDLE } else { theme::DANGER };
+    let color = if lit >= 4 { theme::online() } else if lit >= 3 { theme::idle() } else { theme::danger() };
     for i in 0..5 {
         let bh = 3.0 + i as f32 * 2.0;
-        c.round(x + i as f32 * 4.0, bottom - bh, 2.5, bh, 1.0, if i < lit { color } else { theme::HAIRLINE_STRONG });
+        c.round(x + i as f32 * 4.0, bottom - bh, 2.5, bh, 1.0, if i < lit { color } else { theme::hairline_strong() });
     }
 }
 
 /// A quiet divider between the parts of the list, with an optional note after it.
 fn label(c: &mut Canvas, x: f32, y: f32, text: &str, note: Option<&str>) -> f32 {
     let t = text.to_uppercase();
-    c.text(font::SEMIBOLD, 10.0, &t, x + 6.0, y + 6.0, theme::TEXT_MUTED);
+    c.text(font::SEMIBOLD, 10.0, &t, x + 6.0, y + 6.0, theme::text_muted());
     if let Some(note) = note {
         let tw = c.text_width(font::SEMIBOLD, 10.0, &t);
-        c.text(font::MEDIUM, 10.0, note, x + 6.0 + tw + 8.0, y + 6.0, theme::alpha(theme::TEXT_MUTED, 0.8));
+        c.text(font::MEDIUM, 10.0, note, x + 6.0 + tw + 8.0, y + 6.0, theme::alpha(theme::text_muted(), 0.8));
     }
     y + 26.0
 }

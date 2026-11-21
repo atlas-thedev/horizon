@@ -412,10 +412,10 @@ impl HudEditor {
             }
         }
         if let Some(gx) = self.guide_x {
-            c.fill(gx, 0.0, 1.0, h_all, theme::alpha(theme::ACCENT, 0.8));
+            c.fill(gx, 0.0, 1.0, h_all, theme::alpha(theme::accent(), 0.8));
         }
         if let Some(gy) = self.guide_y {
-            c.fill(0.0, gy, w_all, 1.0, theme::alpha(theme::ACCENT, 0.8));
+            c.fill(0.0, gy, w_all, 1.0, theme::alpha(theme::accent(), 0.8));
         }
         for i in 0..self.shown.len() {
             let mi = self.shown[i];
@@ -448,7 +448,7 @@ impl HudEditor {
                         hy - hs / 2.0 + 1.5,
                         hs - 3.0,
                         hs - 3.0,
-                        theme::alpha(if on { theme::ACCENT } else { 0xFF09090B }, a),
+                        theme::alpha(if on { theme::accent() } else { 0xFF09090B }, a),
                     );
                 }
                 if hover == Some(i) || self.drag == Some(mi) || self.sizing == Some(mi) {
@@ -465,7 +465,7 @@ impl HudEditor {
                     }
                     c.round(sx, sy, sw, 16.0, 8.0, 0xE60E0F13);
                     let sh = c.line_height(font::MEDIUM, 10.0);
-                    c.text(font::MEDIUM, 10.0, &size, sx + 6.0, sy + (16.0 - sh) / 2.0, theme::TEXT_SECONDARY);
+                    c.text(font::MEDIUM, 10.0, &size, sx + 6.0, sy + (16.0 - sh) / 2.0, theme::text_secondary());
                 }
             }
         }
@@ -525,9 +525,9 @@ impl HudEditor {
         let fs = 12.5;
         let tw = c.text_width(font::SEMIBOLD, fs, label);
         let tx = bx + (bw - tw - 24.0) / 2.0;
-        c.icon(theme::I_NAV_MODS, 15.0, tx + 7.0, by + bh / 2.0, theme::alpha(theme::SOLID_FG, a));
+        c.icon(theme::I_NAV_MODS, 15.0, tx + 7.0, by + bh / 2.0, theme::alpha(theme::solid_fg(), a));
         let lh = c.line_height(font::SEMIBOLD, fs);
-        c.text(font::SEMIBOLD, fs, label, tx + 24.0, by + (bh - lh) / 2.0, theme::alpha(theme::SOLID_FG, a));
+        c.text(font::SEMIBOLD, fs, label, tx + 24.0, by + (bh - lh) / 2.0, theme::alpha(theme::solid_fg(), a));
         if over {
             ui.cursor_hand = true;
         }
@@ -563,9 +563,9 @@ impl HudEditor {
             let b = "Press + to add some.";
             let ty = ry + d + 22.0;
             let tw = c.text_width(font::SEMIBOLD, 13.0, t);
-            c.text(font::SEMIBOLD, 13.0, t, w_all / 2.0 - tw / 2.0, ty, theme::alpha(theme::TEXT_STRONG, a));
+            c.text(font::SEMIBOLD, 13.0, t, w_all / 2.0 - tw / 2.0, ty, theme::alpha(theme::text_strong(), a));
             let bw = c.text_width(font::REGULAR, 11.5, b);
-            c.text(font::REGULAR, 11.5, b, w_all / 2.0 - bw / 2.0, ty + 20.0, theme::alpha(theme::TEXT_SECONDARY, a));
+            c.text(font::REGULAR, 11.5, b, w_all / 2.0 - bw / 2.0, ty + 20.0, theme::alpha(theme::text_secondary(), a));
         }
         Action::None
     }
@@ -593,9 +593,9 @@ impl HudEditor {
             d,
             r,
             1.0,
-            theme::alpha(theme::mix(theme::mix(theme::HAIRLINE_STRONG, theme::BORDER_HOVER, hv), 0x00FFFFFF, act), alpha),
+            theme::alpha(theme::mix(theme::mix(theme::hairline_strong(), theme::border_hover(), hv), 0x00FFFFFF, act), alpha),
         );
-        let fg = theme::mix(theme::mix(0xFFD4D4D8, theme::TEXT_STRONG, hv), theme::SOLID_FG, act);
+        let fg = theme::mix(theme::mix(0xFFD4D4D8, theme::text_strong(), hv), theme::solid_fg(), act);
         c.icon(icon, 16.0, x + d / 2.0, ty + d / 2.0, theme::alpha(fg, alpha));
         if over {
             ui.cursor_hand = true;
@@ -630,11 +630,11 @@ impl HudEditor {
         }
         c.push_alpha(t);
         c.round(x, y, w, h, 14.0, 0xFA0B0C10);
-        c.outline(x, y, w, h, 14.0, 1.0, theme::HAIRLINE_STRONG);
+        c.outline(x, y, w, h, 14.0, 1.0, theme::hairline_strong());
         let huds: Vec<usize> = (0..mods.all.len()).filter(|i| mods.all[*i].state.hud.is_some()).collect();
         let on = huds.iter().filter(|i| mods.all[**i].state.enabled).count();
-        c.text(font::SEMIBOLD, 14.5, "HUD modules", x + 18.0, y + 16.0, theme::TEXT_STRONG);
-        c.text(font::REGULAR, 11.0, &format!("{on} of {} on screen", huds.len()), x + 18.0, y + 36.0, theme::TEXT_MUTED);
+        c.text(font::SEMIBOLD, 14.5, "HUD modules", x + 18.0, y + 16.0, theme::text_strong());
+        c.text(font::REGULAR, 11.0, &format!("{on} of {} on screen", huds.len()), x + 18.0, y + 36.0, theme::text_muted());
         for gx in 0..2 {
             // A grip: the header drags the drawer.
             for gy in 0..3 {
@@ -654,8 +654,8 @@ impl HudEditor {
         // Search and state filters stay fixed while the result list scrolls.
         c.round(x + 14.0, y + 64.0, w - 28.0, 34.0, 8.0, 0xFF101217);
         let focused = self.drawer_search.focused(ui);
-        c.outline(x + 14.0, y + 64.0, w - 28.0, 34.0, 8.0, 1.0, if focused { theme::BORDER_HOVER } else { 0x00FFFFFF });
-        c.icon(theme::I_SEARCH, 14.0, x + 30.0, y + 81.0, theme::TEXT_MUTED);
+        c.outline(x + 14.0, y + 64.0, w - 28.0, 34.0, 8.0, 1.0, if focused { theme::border_hover() } else { 0x00FFFFFF });
+        c.icon(theme::I_SEARCH, 14.0, x + 30.0, y + 81.0, theme::text_muted());
         if ui.pressed && ui.hover(c, x + 14.0, y + 64.0, w - 60.0, 34.0) {
             self.drawer_search.focus(ui);
             ui.focus_claimed = true;
@@ -685,7 +685,7 @@ impl HudEditor {
                 label,
                 fx + (fw - tw) / 2.0,
                 y + 108.0 + (28.0 - lh) / 2.0,
-                if selected { theme::SOLID_FG } else { theme::TEXT_SECONDARY },
+                if selected { theme::solid_fg() } else { theme::text_secondary() },
             );
         }
         let q = self.drawer_search.value();
@@ -730,10 +730,10 @@ impl HudEditor {
                 }
                 let m = &mods.all[mi];
                 let enabled = m.state.enabled;
-                c.icon(m.state.icon, 18.0, x + 39.0, ry + 27.0, if enabled { theme::TEXT_STRONG } else { theme::TEXT_MUTED });
+                c.icon(m.state.icon, 18.0, x + 39.0, ry + 27.0, if enabled { theme::text_strong() } else { theme::text_muted() });
                 let name = c.ellipsize(font::SEMIBOLD, 12.0, m.state.name, w - 132.0);
-                c.text(font::SEMIBOLD, 12.0, &name, x + 66.0, ry + 8.0, theme::TEXT_STRONG);
-                c.text(font::REGULAR, 10.0, if enabled { "On screen" } else { "Hidden" }, x + 66.0, ry + 29.0, theme::TEXT_MUTED);
+                c.text(font::SEMIBOLD, 12.0, &name, x + 66.0, ry + 8.0, theme::text_strong());
+                c.text(font::REGULAR, 10.0, if enabled { "On screen" } else { "Hidden" }, x + 66.0, ry + 29.0, theme::text_muted());
                 let toggle = ui.toggle(c, &format!("hud:drawer:tg:{}", mods.all[mi].state.id), x + w - 58.0, ry + 17.0, enabled);
                 if click || toggle {
                     mods.all[mi].set_enabled(!enabled);
@@ -750,22 +750,22 @@ impl HudEditor {
             ry += row_h;
         }
         if results.is_empty() {
-            c.text(font::SEMIBOLD, 12.0, "No matching modules", x + 24.0, ly + 24.0, theme::TEXT_SECONDARY);
-            c.text(font::REGULAR, 11.0, "Try another search or filter.", x + 24.0, ly + 46.0, theme::TEXT_MUTED);
+            c.text(font::SEMIBOLD, 12.0, "No matching modules", x + 24.0, ly + 24.0, theme::text_secondary());
+            c.text(font::REGULAR, 11.0, "Try another search or filter.", x + 24.0, ly + 46.0, theme::text_muted());
         }
         c.pop_clip();
         if max_scroll > 0.0 && lh > 0.0 {
             let thumb = (lh * lh / total).max(24.0);
-            c.round(x + w - 8.0, ly + (lh - thumb) * self.drawer_scroll / max_scroll, 3.0, thumb, 1.5, theme::BORDER_HOVER);
+            c.round(x + w - 8.0, ly + (lh - thumb) * self.drawer_scroll / max_scroll, 3.0, thumb, 1.5, theme::border_hover());
         }
-        c.fill(x + 14.0, y + h - 32.0, w - 28.0, 1.0, theme::HAIRLINE);
+        c.fill(x + 14.0, y + h - 32.0, w - 28.0, 1.0, theme::hairline());
         c.text(
             font::REGULAR,
             10.0,
             &format!("{} modules  \u{b7}  Drag the header to move", results.len()),
             x + 18.0,
             y + h - 24.0,
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         );
         c.pop_alpha();
     }
@@ -796,11 +796,11 @@ impl HudEditor {
         self.notice_rect = [x, y, w, h];
         c.push_alpha(t);
         c.round(x, y, w, h, 12.0, 0xFA0B0C10);
-        c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE_STRONG);
+        c.outline(x, y, w, h, 12.0, 1.0, theme::hairline_strong());
         let text_w = w - if undo { 130.0 } else { 60.0 };
         let shown = c.ellipsize(font::MEDIUM, 12.0, &text, text_w);
         let lh = c.line_height(font::MEDIUM, 12.0);
-        c.text(font::MEDIUM, 12.0, &shown, x + 16.0, y + (h - lh) / 2.0, theme::TEXT_STRONG);
+        c.text(font::MEDIUM, 12.0, &shown, x + 16.0, y + (h - lh) / 2.0, theme::text_strong());
         if let Some(mi) = self.removed {
             let (ux, uy) = (x + w - 92.0, y + 9.0);
             let over = ui.hover(c, ux, uy, 56.0, 30.0);
@@ -813,7 +813,7 @@ impl HudEditor {
                 "Undo",
                 ux + (56.0 - tw) / 2.0,
                 uy + (30.0 - th) / 2.0,
-                if over { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY },
+                if over { theme::text_strong() } else { theme::text_secondary() },
             );
             if over {
                 ui.cursor_hand = true;
@@ -854,13 +854,13 @@ impl HudEditor {
         self.pop = [x, y, w, h];
         c.shadow(x, y + 3.0, w, h, 12.0, 18.0, 0x88000000);
         c.round(x, y, w, h, 12.0, 0xF808090C);
-        c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE_STRONG);
+        c.outline(x, y, w, h, 12.0, 1.0, theme::hairline_strong());
         let (id, name, icon, enabled) = {
             let s = &mods.all[mi].state;
             (s.id, s.name, s.icon, s.enabled)
         };
-        c.icon(icon, 14.0, x + pad + 8.0, y + pad + 10.0, theme::TEXT_STRONG);
-        c.text(font::SEMIBOLD, 13.5, name, x + pad + 24.0, y + pad + 1.0, theme::TEXT_STRONG);
+        c.icon(icon, 14.0, x + pad + 8.0, y + pad + 10.0, theme::text_strong());
+        c.text(font::SEMIBOLD, 13.5, name, x + pad + 24.0, y + pad + 1.0, theme::text_strong());
         if ui.icon_button(c, "hud:pop:close", x + w - pad - 24.0, y + pad - 2.0, 24.0, theme::I_X, None) {
             self.popover = None;
             return;
@@ -869,7 +869,7 @@ impl HudEditor {
         c.push_clip(x, ry, w, y + h - pad - ry + 4.0);
         let rw = w - pad * 2.0;
         let lh = c.line_height(font::MEDIUM, 12.5);
-        c.text(font::MEDIUM, 12.5, "Enabled", x + pad, ry + (ROW - lh) / 2.0, theme::TEXT);
+        c.text(font::MEDIUM, 12.5, "Enabled", x + pad, ry + (ROW - lh) / 2.0, theme::text());
         if ui.toggle(c, "hud:pop:on", x + pad + rw - 34.0, ry + 10.0, enabled) {
             mods.all[mi].set_enabled(false);
             mods.changed();
@@ -879,7 +879,7 @@ impl HudEditor {
         }
         ry += ROW;
         for (part, i) in rows {
-            c.fill(x + pad, ry, rw, 1.0, theme::HAIRLINE);
+            c.fill(x + pad, ry, rw, 1.0, theme::hairline());
             let warning = if part == Part::Keybind { menu::conflict(mods, mi) } else { None };
             let m = &mut mods.all[mi];
             let s: &mut Setting = match part {

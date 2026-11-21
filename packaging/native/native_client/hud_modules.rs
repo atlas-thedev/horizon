@@ -345,7 +345,7 @@ impl Keystrokes {
     fn on_pressed(m: &ModuleState) -> u32 {
         let p = m.color("pressed");
         let lum = (0.2126 * ((p >> 16) & 255) as f32 + 0.7152 * ((p >> 8) & 255) as f32 + 0.0722 * (p & 255) as f32) / 255.0;
-        if lum > 0.55 { theme::SOLID_FG } else { 0xFFFFFFFF }
+        if lum > 0.55 { theme::solid_fg() } else { 0xFFFFFFFF }
     }
 
     fn label(g: &GameView, i: usize, def: &str) -> String {
@@ -364,7 +364,7 @@ impl Keystrokes {
         let bg = theme::mix(theme::alpha(0xFF08090C, a), theme::alpha(m.color("pressed"), 0.92), t);
         c.round(x, y, w, h, 5.0 * s, bg);
         if style == STYLE_CARD {
-            c.outline(x, y, w, h, 5.0 * s, 1.0, theme::alpha(theme::HAIRLINE_STRONG, a.max(0.3)));
+            c.outline(x, y, w, h, 5.0 * s, 1.0, theme::alpha(theme::hairline_strong(), a.max(0.3)));
         } else if style == STYLE_BRACKETS {
             c.outline(x, y, w, h, 5.0 * s, 1.0, theme::alpha(hud.color(), (0.7 * (1.0 - t)).max(0.35)));
         }
@@ -499,7 +499,7 @@ impl Behaviour for Direction {
             if a % 45 == 0 {
                 let n = NAMES[a / 45];
                 let fs = if n.len() == 1 { 12.0 } else { 10.0 } * s;
-                let col = if a == 0 { theme::ACCENT } else { hud.color() };
+                let col = if a == 0 { theme::accent() } else { hud.color() };
                 let tw = c.text_width(font::SEMIBOLD, fs, n);
                 let lh = c.line_height(font::SEMIBOLD, fs);
                 hud.text_face(c, font::SEMIBOLD, fs, n, px - tw / 2.0, y + (h - lh) / 2.0, theme::alpha(col, fade));
