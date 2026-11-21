@@ -9,6 +9,7 @@
 //!
 //! One thread, "Native voice audio", owns the devices and the codecs; the cpal callbacks only move samples.
 
+use super::svc;
 use super::voice;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -460,12 +461,20 @@ impl Resample {
     }
 }
 
-/// A stream's samples in any of cpal's formats as f32.
-fn to_f32<T: Copy>(data: &[T]) -> Vec<f32>
+/// Downmixes interleaved samples into a reusable `mono` scratch buffer with zero heap allocations per callback.
+fn downmix_to_mono<T: Copy>(data: &[T], channels: usize, mono: &mut Vec<f32>)
 where
     f32: cpal::FromSample<T>,
 {
-    data.iter().map(|s| <f32 as cpal::FromSample<T>>::from_sample_(*s)).collect()
+    mono.clear();
+    let inv = 1.0 / (channels.max(1) as f32);
+    for frame in data.chunks(channels) {
+        let mut sum = 0.0f32;
+        for &s in frame {
+            sum += <f32 as cpal::FromSample<T>>::from_sample_(s);
+        }
+        mono.push(sum * inv);
+    }
 }
 
 /// -1..1 as a stream sample.
@@ -476,7 +485,7 @@ where
     <T as cpal::FromSample<f32>>::from_sample_(v.clamp(-1.0, 1.0))
 }
 
-/// The microphone: cpal pushes 48 kHz mono samples into `ring`.
+/// The microphone: cpal pushes 48 kHz mono samples into `ring` using a preallocated scratch buffer.
 fn open_input(name: &str, ring: Arc<Mutex<VecDeque<f32>>>) -> Result<cpal::Stream, String> {
     use cpal::SampleFormat;
     use cpal::traits::{DeviceTrait, StreamTrait};
@@ -486,24 +495,91 @@ fn open_input(name: &str, ring: Arc<Mutex<VecDeque<f32>>>) -> Result<cpal::Strea
     let config: cpal::StreamConfig = supported.into();
     let (rate, channels) = (config.sample_rate.0, usize::from(config.channels.max(1)));
     let mut resample = Resample::new(rate, RATE);
-    let mut push = move |samples: Vec<f32>| {
-        let mono: Vec<f32> = samples.chunks(channels).map(|f| f.iter().sum::<f32>() / f.len() as f32).collect();
-        let mut r = lock(&ring);
-        resample.run(&mono, &mut r);
-        let excess = r.len().saturating_sub(RATE as usize / 5); // never more than 200 ms behind
-        r.drain(..excess);
-    };
+    let mut mono: Vec<f32> = Vec::with_capacity(2048);
     let err = |e: cpal::StreamError| log::debug!("Native voice: microphone: {e}");
     let stream = match format {
-        SampleFormat::F32 => device.build_input_stream(&config, move |d: &[f32], _| push(d.to_vec()), err, None),
-        SampleFormat::I16 => device.build_input_stream(&config, move |d: &[i16], _| push(to_f32(d)), err, None),
-        SampleFormat::U16 => device.build_input_stream(&config, move |d: &[u16], _| push(to_f32(d)), err, None),
-        SampleFormat::I32 => device.build_input_stream(&config, move |d: &[i32], _| push(to_f32(d)), err, None),
+        SampleFormat::F32 => device.build_input_stream(
+            &config,
+            move |d: &[f32], _| {
+                downmix_to_mono(d, channels, &mut mono);
+                let mut r = lock(&ring);
+                resample.run(&mono, &mut r);
+                let excess = r.len().saturating_sub(RATE as usize / 5);
+                r.drain(..excess);
+            },
+            err,
+            None,
+        ),
+        SampleFormat::I16 => device.build_input_stream(
+            &config,
+            move |d: &[i16], _| {
+                downmix_to_mono(d, channels, &mut mono);
+                let mut r = lock(&ring);
+                resample.run(&mono, &mut r);
+                let excess = r.len().saturating_sub(RATE as usize / 5);
+                r.drain(..excess);
+            },
+            err,
+            None,
+        ),
+        SampleFormat::U16 => device.build_input_stream(
+            &config,
+            move |d: &[u16], _| {
+                downmix_to_mono(d, channels, &mut mono);
+                let mut r = lock(&ring);
+                resample.run(&mono, &mut r);
+                let excess = r.len().saturating_sub(RATE as usize / 5);
+                r.drain(..excess);
+            },
+            err,
+            None,
+        ),
+        SampleFormat::I32 => device.build_input_stream(
+            &config,
+            move |d: &[i32], _| {
+                downmix_to_mono(d, channels, &mut mono);
+                let mut r = lock(&ring);
+                resample.run(&mono, &mut r);
+                let excess = r.len().saturating_sub(RATE as usize / 5);
+                r.drain(..excess);
+            },
+            err,
+            None,
+        ),
         other => return Err(format!("The microphone's format ({other:?}) isn't supported.")),
     }
     .map_err(|e| format!("The microphone can't be opened: {e}"))?;
     stream.play().map_err(|e| format!("The microphone can't be opened: {e}"))?;
     Ok(stream)
+}
+
+/// Fills an output buffer directly from `ring` via reusable `pending` and `take` buffers (zero allocations per callback).
+fn fill_output<T>(
+    d: &mut [T],
+    channels: usize,
+    ring: &Mutex<VecDeque<f32>>,
+    resample: &mut Resample,
+    pending: &mut VecDeque<f32>,
+    take: &mut Vec<f32>,
+) where
+    T: cpal::FromSample<f32>,
+{
+    let frames = d.len() / channels;
+    {
+        let mut r = lock(ring);
+        while pending.len() < frames && !r.is_empty() {
+            let n = r.len().min(480);
+            take.clear();
+            take.extend(r.drain(..n));
+            resample.run(take, pending);
+        }
+    }
+    for frame in d.chunks_exact_mut(channels) {
+        let v = pending.pop_front().unwrap_or(0.0);
+        for sample in frame {
+            *sample = from_f32::<T>(v);
+        }
+    }
 }
 
 /// The speakers: cpal pulls 48 kHz mono samples from `ring`, resampled and copied to every channel.
@@ -516,53 +592,25 @@ fn open_output(name: &str, ring: Arc<Mutex<VecDeque<f32>>>) -> Result<cpal::Stre
     let config: cpal::StreamConfig = supported.into();
     let (rate, channels) = (config.sample_rate.0, usize::from(config.channels.max(1)));
     let mut resample = Resample::new(RATE, rate);
-    let mut pending: VecDeque<f32> = VecDeque::new();
-    let mut fill = move |frames: usize| -> Vec<f32> {
-        {
-            let mut r = lock(&ring);
-            while pending.len() < frames && !r.is_empty() {
-                let n = r.len().min(480);
-                let take: Vec<f32> = r.drain(..n).collect();
-                resample.run(&take, &mut pending);
-            }
-        }
-        let mut out = Vec::with_capacity(frames * channels);
-        for _ in 0..frames {
-            let v = pending.pop_front().unwrap_or(0.0);
-            out.extend(std::iter::repeat_n(v, channels));
-        }
-        out
-    };
+    let mut pending: VecDeque<f32> = VecDeque::with_capacity(2048);
+    let mut take: Vec<f32> = Vec::with_capacity(480);
     let err = |e: cpal::StreamError| log::debug!("Native voice: speakers: {e}");
     let stream = match format {
         SampleFormat::F32 => device.build_output_stream(
             &config,
-            move |d: &mut [f32], _| {
-                let samples = fill(d.len() / channels);
-                d.copy_from_slice(&samples);
-            },
+            move |d: &mut [f32], _| fill_output(d, channels, &ring, &mut resample, &mut pending, &mut take),
             err,
             None,
         ),
         SampleFormat::I16 => device.build_output_stream(
             &config,
-            move |d: &mut [i16], _| {
-                let samples = fill(d.len() / channels);
-                for (o, v) in d.iter_mut().zip(samples) {
-                    *o = from_f32::<i16>(v);
-                }
-            },
+            move |d: &mut [i16], _| fill_output(d, channels, &ring, &mut resample, &mut pending, &mut take),
             err,
             None,
         ),
         SampleFormat::U16 => device.build_output_stream(
             &config,
-            move |d: &mut [u16], _| {
-                let samples = fill(d.len() / channels);
-                for (o, v) in d.iter_mut().zip(samples) {
-                    *o = from_f32::<u16>(v);
-                }
-            },
+            move |d: &mut [u16], _| fill_output(d, channels, &ring, &mut resample, &mut pending, &mut take),
             err,
             None,
         ),
@@ -612,6 +660,8 @@ pub struct Wants {
     pub noise: bool,
     pub echo: bool,
     pub in_call: bool,
+    pub svc_active: bool,
+    pub svc_send: bool,
 }
 
 fn run() {
@@ -634,6 +684,8 @@ fn run() {
     let mut ring_pos = 0usize;
     let mut ring_mode = 0u8; // 0 = off, 1 = incoming, 2 = outgoing
     let mut idle_since: Option<Instant> = None;
+    let mut cached_volumes: HashMap<u32, f32> = HashMap::new();
+    let mut cached_vol_gen: u64 = 0;
     while engine().running.load(Ordering::SeqCst) {
         let w = voice::wants();
         let chiming = !lock(&engine().chime).is_empty();
@@ -698,8 +750,12 @@ fn run() {
             next_mix += Duration::from_millis(20);
             let mut mix = [0f32; FRAME];
             if w.in_call {
-                // read before taking the audio locks: voice never waits on them while holding its own
-                let volumes = voice::volumes_by_sid();
+                // refresh cached sid -> volume only when volumes or roster changed (not every 20 ms)
+                let gen = voice::volumes_gen();
+                if gen != cached_vol_gen {
+                    cached_volumes = voice::volumes_by_sid();
+                    cached_vol_gen = gen;
+                }
                 let mut streams = lock(&engine().streams);
                 let mut meter = lock(&engine().meter);
                 for (sid, s) in streams.iter_mut() {
@@ -709,11 +765,14 @@ fn run() {
                     if w.deafened {
                         continue;
                     }
-                    let g = w.out_volume * volumes.get(sid).copied().unwrap_or(1.0) / 32768.0;
+                    let g = w.out_volume * cached_volumes.get(sid).copied().unwrap_or(1.0) / 32768.0;
                     for (m, v) in mix.iter_mut().zip(pcm.iter()) {
                         *m += f32::from(*v) * g;
                     }
                 }
+            }
+            if w.svc_active {
+                svc::mix_into(&mut mix, w.out_volume, w.deafened);
             }
             let mode = if w.ring { 1 } else if w.ring_outgoing { 2 } else { 0 };
             if mode != ring_mode {
@@ -766,16 +825,18 @@ fn run() {
             }
         }
 
-        // microphone: every 10 ms that came in
+        // microphone: every 10 ms that came in (zero heap allocations)
+        let mut gained = [0f32; APM_FRAME];
         loop {
-            let chunk: Vec<f32> = {
+            {
                 let mut c = lock(&cap);
                 if c.len() < APM_FRAME {
                     break;
                 }
-                c.drain(..APM_FRAME).collect()
-            };
-            let gained: Vec<f32> = chunk.iter().map(|v| (v * w.mic_gain).clamp(-1.0, 1.0)).collect();
+                for slot in &mut gained {
+                    *slot = (c.pop_front().unwrap_or(0.0) * w.mic_gain).clamp(-1.0, 1.0);
+                }
+            }
             let mut clean = [0f32; APM_FRAME];
             if apm.process_capture_f32(&[&gained[..]], &mut [&mut clean[..]]).is_err() {
                 clean.copy_from_slice(&gained);
@@ -804,11 +865,20 @@ fn run() {
                 m.self_level = level;
                 m.self_speaking = want;
             }
-            if w.in_call && (want || open)
+            if (w.in_call || w.svc_send) && (want || open)
                 && let Some(n) = encoder.encode(&frame, &mut packet[1..])
             {
                 packet[0] = if want { 0 } else { END };
-                voice::send_audio(&packet[..n + 1]);
+                if w.in_call {
+                    voice::send_audio(&packet[..n + 1]);
+                }
+                if w.svc_send {
+                    if want {
+                        svc::send_mic(&packet[1..n + 1], false);
+                    } else {
+                        svc::send_mic(&[], false);
+                    }
+                }
             }
             open = want;
             frame.clear();

@@ -63,13 +63,17 @@ pub struct RelayView {
     pub(super) toolbar_rect: Option<[f32; 4]>,
     pub(super) pick_row: Option<[f32; 3]>,
     pub(super) jump_rect: Option<[f32; 4]>,
-    // Right-click menu on a chat row, nickname dialog.
+    // Right-click menu on a chat row, nickname dialog, create-group dialog.
     pub(super) menu_key: Option<String>,
     pub(super) nick_for: Option<String>,
     pub(super) menu_x: f32,
     pub(super) menu_y: f32,
     pub(super) menu_fresh: bool,
     pub(super) nick: TextField,
+    pub(super) create_group_open: bool,
+    pub(super) group_name: TextField,
+    pub(super) group_picked: HashSet<String>,
+    pub(super) group_scroll: Scroll,
     pub(super) row_typing: bool,
     pub(super) row_pinned: bool,
     /// The call strip under a chat's header (whose volume is open).
@@ -172,6 +176,10 @@ impl RelayView {
             menu_y: 0.0,
             menu_fresh: false,
             nick: TextField::new("relay:nick"),
+            create_group_open: false,
+            group_name: TextField::new("relay:group-name"),
+            group_picked: HashSet::new(),
+            group_scroll: Scroll::new("relay-new-group"),
             row_typing: false,
             row_pinned: false,
             call_strip: super::voice_modules::CallStrip::default(),
@@ -230,6 +238,11 @@ impl RelayView {
             return true;
         }
         if self.nick_for.take().is_some() {
+            return true;
+        }
+        if self.create_group_open {
+            self.create_group_open = false;
+            relay::clear_group_create_error();
             return true;
         }
         if self.menu_key.take().is_some() {
@@ -314,7 +327,13 @@ impl RelayView {
                 ui.keys.clear();
             }
         }
-        ui.interactive = !self.settings_open && self.menu_key.is_none() && self.nick_for.is_none();
+        if let Some(key) = relay::take_created_group() {
+            self.create_group_open = false;
+            self.select(&key);
+            self.input.focus(ui);
+            ui.focus_claimed = true;
+        }
+        ui.interactive = !self.settings_open && self.menu_key.is_none() && self.nick_for.is_none() && !self.create_group_open;
         let mut action = RelayAction::None;
         if !super::net::signed_in() {
             // Not signed in / sign-in expired: lock the whole page instead of showing stale chats.
@@ -345,6 +364,9 @@ impl RelayView {
         }
         if self.nick_for.is_some() {
             self.nickname_dialog(ui, c, &snap, w_all, h_all);
+        }
+        if self.create_group_open {
+            self.create_group_dialog(ui, c, &snap, w_all, h_all);
         }
         if self.viewer.is_some() {
             self.lightbox(ui, c, w_all, h_all);
@@ -508,6 +530,15 @@ impl RelayView {
                 }
                 if g.pinned { pinned.push(g) } else { rest.push(g) }
             }
+            if ui.button(c, "relay:new-group", x + 12.0, ry + 2.0, w - 24.0, 30.0, "New group", theme::I_PLUS, ui::BTN_GLASS) {
+                self.create_group_open = true;
+                self.group_name.set("");
+                self.group_picked.clear();
+                relay::clear_group_create_error();
+                self.group_name.focus(ui);
+                ui.focus_claimed = true;
+            }
+            ry += 38.0;
             if !snap.groups_loaded {
                 ry = self.section(ui, c, "groups", "Groups", 0, x + 8.0, ry, w - 16.0);
                 skeleton_rows(c, x + 8.0, ry, w - 16.0, 3);
@@ -524,7 +555,7 @@ impl RelayView {
                 ry = self.section(ui, c, "groups", "Groups", rest.len(), x + 8.0, ry, w - 16.0);
                 if !self.collapsed.contains("groups") {
                     if rest.is_empty() {
-                        let t = if q.is_empty() { "No groups yet. Create one in the launcher." } else { "No matching groups" };
+                        let t = if q.is_empty() { "No groups yet. Click New group to start." } else { "No matching groups" };
                         c.text(font::REGULAR, 11.5, t, x + 18.0, ry + 6.0, theme::TEXT_MUTED);
                         ry += 30.0;
                     }
@@ -657,15 +688,24 @@ impl RelayView {
         }
         let tx = ax + av + 10.0;
         let right = x + w - 10.0;
+        let live_call = !super::voice::call_members(key).is_empty();
+        let call_badge_w = if live_call { 22.0 } else { 0.0 };
         let time_w = if self.row_time.is_empty() { 0.0 } else { c.text_width(font::REGULAR, 10.0, &self.row_time) };
         let top_y = y + 9.0;
-        let title_w = right - tx - time_w - 8.0 - if self.row_pinned { 16.0 } else { 0.0 };
+        let title_w = right - tx - time_w - call_badge_w - 8.0 - if self.row_pinned { 16.0 } else { 0.0 };
         let shown = c.ellipsize(font::SEMIBOLD, 13.0, title, title_w);
         c.text(font::SEMIBOLD, 13.0, &shown, tx, top_y, if sel { theme::TEXT_STRONG } else { theme::mix(theme::TEXT, theme::TEXT_STRONG, hv) });
         if self.row_pinned {
             let lh = c.line_height(font::SEMIBOLD, 13.0);
             let sw = c.text_width(font::SEMIBOLD, 13.0, &shown);
             c.icon(theme::I_MAP_PIN, 10.0, tx + sw + 10.0, top_y + lh / 2.0, theme::TEXT_MUTED);
+        }
+        if live_call {
+            let lh = c.line_height(font::SEMIBOLD, 13.0);
+            let cx = right - time_w - if time_w > 0.0 { 14.0 } else { 9.0 };
+            let cy = top_y + lh / 2.0;
+            c.circle(cx, cy, 8.0, theme::alpha(theme::ONLINE, 0.2));
+            c.icon(theme::I_PHONE, 10.0, cx, cy, theme::ONLINE);
         }
         if time_w > 0.0 {
             c.text(font::REGULAR, 10.0, &self.row_time, right - time_w, top_y + 2.0, if unread > 0 { theme::TEXT_STRONG } else { theme::TEXT_MUTED });
@@ -1211,6 +1251,78 @@ impl RelayView {
             relay::set_nickname(&id, &self.nick.value());
             self.nick_for = None;
             self.input.focus(ui);
+        }
+    }
+
+    fn create_group_dialog(&mut self, ui: &mut Ui, c: &mut Canvas, snap: &Snapshot, w_all: f32, h_all: f32) {
+        c.fill(0.0, 0.0, w_all, h_all, 0x99000000);
+        let dw = 380.0;
+        let dh = 460.0f32.min(h_all - 48.0);
+        let (dx, dy) = ((w_all - dw) / 2.0, (h_all - dh) / 2.0);
+        c.shadow(dx, dy + 8.0, dw, dh, 10.0, 32.0, 0xAA000000);
+        c.round(dx, dy, dw, dh, 10.0, 0xFF121318);
+        c.outline(dx, dy, dw, dh, 10.0, 1.0, theme::HAIRLINE_STRONG);
+        c.text(font::BOLD, 15.0, "New group", dx + 20.0, dy + 18.0, theme::TEXT_STRONG);
+        c.text(font::REGULAR, 12.0, "Name your group and pick friends to invite.", dx + 20.0, dy + 40.0, theme::TEXT_MUTED);
+        let enter = self.group_name.draw(ui, c, dx + 20.0, dy + 64.0, dw - 40.0, 36.0, "Group name", 13.0);
+        if ui.focus.is_none() {
+            self.group_name.focus(ui);
+        }
+        ui.focus_claimed = true;
+        let mut list_y = dy + 112.0;
+        let footer_h = 68.0;
+        let mut list_h = (dh - 112.0 - footer_h).max(80.0);
+        let lbl = format!("FRIENDS ({} selected)", self.group_picked.len());
+        c.text(font::SEMIBOLD, 11.0, &lbl, dx + 20.0, list_y, theme::TEXT_MUTED);
+        list_y += 18.0;
+        list_h -= 18.0;
+        c.round(dx + 20.0, list_y, dw - 40.0, list_h, 7.0, 0xFF0A0B0F);
+        c.outline(dx + 20.0, list_y, dw - 40.0, list_h, 7.0, 1.0, theme::HAIRLINE);
+        let off = self.group_scroll.begin(ui, c, dx + 20.0, list_y, dw - 40.0, list_h);
+        let mut fy = list_y + 6.0 - off;
+        if snap.friends.is_empty() {
+            c.text(font::REGULAR, 11.5, "Add friends first, or create a solo group for now.", dx + 32.0, fy + 10.0, theme::TEXT_MUTED);
+            fy += 32.0;
+        } else {
+            for f in &snap.friends {
+                let rh = 38.0;
+                if fy + rh >= list_y && fy <= list_y + list_h {
+                    let picked = self.group_picked.contains(&f.id);
+                    let over = ui.hover(c, dx + 26.0, fy, dw - 52.0, rh);
+                    c.round(dx + 26.0, fy, dw - 52.0, rh, 6.0, if picked { 0x1A22C55E } else if over { 0x0DFFFFFF } else { 0 });
+                    if ui.clicked(c, &format!("relay:grp:f:{}", f.id), dx + 26.0, fy, dw - 52.0, rh) && !self.group_picked.remove(&f.id) {
+                        self.group_picked.insert(f.id.clone());
+                    }
+                    avatars::draw(c, f.skin.as_deref(), dx + 34.0, fy + 6.0, 26.0, 6.0);
+                    let nm = c.ellipsize(font::SEMIBOLD, 12.5, f.display(), dw - 140.0);
+                    c.text(font::SEMIBOLD, 12.5, &nm, dx + 68.0, fy + 11.0, theme::TEXT_STRONG);
+                    let (bx, by) = (dx + dw - 54.0, fy + 10.0);
+                    c.round(bx, by, 18.0, 18.0, 4.0, if picked { theme::ONLINE } else { 0x1AFFFFFF });
+                    if picked {
+                        c.icon(theme::I_CHECK, 11.0, bx + 9.0, by + 9.0, theme::SOLID_FG);
+                    }
+                }
+                fy += rh + 2.0;
+            }
+        }
+        self.group_scroll.end(ui, c, fy + off - list_y + 6.0);
+        if let Some(err) = relay::group_create_error() {
+            let txt = c.ellipsize(font::REGULAR, 11.0, &err, dw - 40.0);
+            c.text(font::REGULAR, 11.0, &txt, dx + 20.0, dy + dh - 64.0, theme::DANGER);
+        }
+        let creating = relay::group_creating();
+        let mut submit = enter && !creating;
+        if ui.button(c, "relay:grp:create", dx + dw - 20.0 - 108.0, dy + dh - 20.0 - 34.0, 108.0, 34.0, if creating { "Creating..." } else { "Create" }, theme::I_CHECK, ui::BTN_PRIMARY) && !creating {
+            submit = true;
+        }
+        if ui.button(c, "relay:grp:cancel", dx + dw - 20.0 - 108.0 - 8.0 - 90.0, dy + dh - 20.0 - 34.0, 90.0, 34.0, "Cancel", theme::I_X, ui::BTN_GLASS) {
+            self.create_group_open = false;
+            relay::clear_group_create_error();
+            return;
+        }
+        if submit {
+            let members: Vec<String> = self.group_picked.iter().cloned().collect();
+            relay::create_group(&self.group_name.value(), members);
         }
     }
 

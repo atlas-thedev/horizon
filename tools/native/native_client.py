@@ -268,6 +268,35 @@ if 'include!("native_exe.rs");' not in build_rs.read_text(encoding='utf-8'):
     with open(build_rs, 'a', encoding='utf-8') as build:
         build.write('\ninclude!("native_exe.rs");\n')
 
+# Simple Voice Chat (de.maxhenkel.voicechat) plugin channel hooks: forward voicechat:* payloads, login and disconnect.
+REMOTE = CLIENT / 'game/remote.rs'
+patch(REMOTE,
+      '            C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {\n'
+      '                self.remote_native_net(&p.data);\n'
+      '            }\n',
+      '            C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {\n'
+      '                self.remote_native_net(&p.data);\n'
+      '            }\n'
+      '            C::CustomPayload(p) if p.channel.starts_with("voicechat:") => {\n'
+      '                self.native_svc_packet(&p.channel, &p.data);\n'
+      '            }\n')
+patch(REMOTE,
+      '        if self.remote.is_some() {\n'
+      '            self.native_client_disconnecting();\n'
+      '        }\n',
+      '        if self.remote.is_some() {\n'
+      '            self.native_client_disconnecting();\n'
+      '            self.native_svc_disconnect();\n'
+      '        }\n')
+patch(REMOTE,
+      '                    r.logged_in = true;\n'
+      '                    r.view_distance = p.chunk_radius;\n',
+      '                    r.logged_in = true;\n'
+      '                    r.view_distance = p.chunk_radius;\n'
+      '                }\n'
+      '                self.native_svc_login();\n'
+      '                if let Some(r) = self.remote.as_mut() {\n')
+
 print('native_client: Native modules applied')
 
 # New Native-only labels remain translation keys.

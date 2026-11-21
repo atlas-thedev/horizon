@@ -49,6 +49,7 @@ mod servers_view;
 mod setting;
 mod status;
 mod status_modules;
+mod svc;
 mod textfield;
 mod title_view;
 mod toasts;
@@ -370,6 +371,20 @@ impl Game<'_> {
             || self.remote.as_ref().is_some_and(|r| !r.joined || r.level_load.is_active() || r.reconfiguring.is_some())
     }
 
+    /// The Native Client window title: the game's version when known.
+    pub(super) fn native_svc_packet(&mut self, channel: &str, data: &[u8]) {
+        svc::on_custom_payload(channel, data);
+    }
+
+    pub(super) fn native_svc_login(&mut self) {
+        let addr = self.server_address().map(str::to_owned);
+        svc::on_login(addr.as_deref());
+    }
+
+    pub(super) fn native_svc_disconnect(&mut self) {
+        svc::on_disconnect();
+    }
+
     /// Once a frame, over the game's HUD and screens: the Native UI.
     pub(super) fn native_ui_frame(&mut self, batch: &mut HudBatch) {
         use horizon_client::clipboard::Clipboard;
@@ -388,6 +403,22 @@ impl Game<'_> {
         let (action, copied, pause_action) = with_state(|state| {
             let g = self.native_view(state);
             let local = self.options.player_name();
+            if g.in_world {
+                let mut svc_pos: Vec<(u128, [f64; 3])> = Vec::new();
+                for (id, _) in self.remote_player_names() {
+                    if let Some(uuid) = self.remote_player_uuid(id)
+                        && let Some(m) = self.mobs.iter().find(|m| m.id == id)
+                    {
+                        svc_pos.push((uuid, [m.position.x, m.position.y, m.position.z]));
+                    }
+                }
+                svc::update_positions([g.x, g.y, g.z], &svc_pos);
+            }
+            for (channel, data) in svc::take_outgoing() {
+                self.send(horizon_protocol::packets::play::Serverbound::CustomPayload(
+                    horizon_protocol::packets::configuration::CustomPayload { channel, data },
+                ));
+            }
             let mut players: Vec<_> = self.remote_player_names().into_iter().map(|(id,n)| (id,n,self.remote_player_uuid(id).map(|u|format!("{u:032x}")))).collect();
             players.push((0,local.clone(),self.remote.as_ref().map(|r|format!("{:032x}",r.profile()))));
             let scope = if !g.in_world { String::new() } else if let Some(server)=self.server_address() { horizon_client::native_emotes::scope(server) } else { horizon_client::native_emotes::scope(&format!("local:{local}")) };

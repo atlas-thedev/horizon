@@ -306,6 +306,9 @@ struct Shared {
     cleared: Option<HashMap<String, i64>>,
     last_typing_sent: Option<Instant>,
     started: bool,
+    group_creating: bool,
+    group_create_error: Option<String>,
+    created_group_key: Option<String>,
 }
 
 fn shared() -> &'static Mutex<Shared> {
@@ -339,6 +342,9 @@ fn shared() -> &'static Mutex<Shared> {
             cleared: None,
             last_typing_sent: None,
             started: false,
+            group_creating: false,
+            group_create_error: None,
+            created_group_key: None,
         })
     })
 }
@@ -1135,6 +1141,71 @@ pub fn set_nickname(friend_id: &str, nickname: &str) {
         sort_friends(&mut s.friends);
     }
     send_prefs(&format!("dm:{friend_id}"), json!({ "nickname": nick }));
+}
+
+pub fn group_creating() -> bool {
+    lock().group_creating
+}
+
+pub fn group_create_error() -> Option<String> {
+    lock().group_create_error.clone()
+}
+
+pub fn clear_group_create_error() {
+    lock().group_create_error = None;
+}
+
+pub fn take_created_group() -> Option<String> {
+    lock().created_group_key.take()
+}
+
+/// Creates a new Relay group from in-game (POST /v1/social/relay/groups).
+pub fn create_group(name: &str, member_ids: Vec<String>) {
+    let trimmed = name.trim().to_owned();
+    if trimmed.is_empty() {
+        lock().group_create_error = Some("Enter a group name.".to_owned());
+        return;
+    }
+    if net::ticket().is_none() {
+        lock().group_create_error = Some("Sign in to Native to create a group.".to_owned());
+        return;
+    }
+    {
+        let mut s = lock();
+        if s.group_creating {
+            return;
+        }
+        s.group_creating = true;
+        s.group_create_error = None;
+    }
+    spawn(move || {
+        let body = json!({ "name": trimmed, "memberIds": member_ids });
+        match post("/v1/social/relay/groups", &body) {
+            Ok(o) => {
+                let mut s = lock();
+                s.group_creating = false;
+                if let Some(go) = o.get("group") {
+                    let g = parse_group(go);
+                    let key = format!("g:{}", g.id);
+                    s.groups.retain(|cur| cur.id != g.id);
+                    s.groups.push(g);
+                    sort_groups(&mut s.groups);
+                    s.groups_loaded = true;
+                    s.created_group_key = Some(key);
+                } else {
+                    s.group_create_error = Some("Could not create group.".to_owned());
+                }
+            }
+            Err(e) => {
+                let mut s = lock();
+                s.group_creating = false;
+                s.group_create_error = Some(match e {
+                    HttpError::Status(_, Some(m)) if !m.is_empty() => m,
+                    _ => "Could not create group.".to_owned(),
+                });
+            }
+        }
+    });
 }
 
 fn cleared_file() -> Option<std::path::PathBuf> {

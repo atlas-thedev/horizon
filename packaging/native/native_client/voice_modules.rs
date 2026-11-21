@@ -45,6 +45,8 @@ fn voice_chat() -> Module {
             Setting::num("threshold", "Activation level", -42.0, -70.0, -10.0, 1.0, " dB"),
             Setting::key("mute", "Mute key", -1),
             Setting::key("deafen", "Deafen key", -1),
+            Setting::bool("svc", "Simple Voice Chat (servers)", true),
+            Setting::bool("mute-svc", "Auto-mute Simple Voice Chat in calls", true),
         ],
         None,
         Box::new(VoiceChat),
@@ -81,15 +83,20 @@ impl module::Behaviour for VoiceChat {
             echo: m.bool("echo"),
         });
         voice::tick();
+        super::svc::configure(m.bool("svc"), m.bool("mute-svc"));
+        super::svc::tick();
     }
 
     fn hidden(&self, m: &ModuleState, id: &str) -> bool {
-        id == "ptt" && m.choice("mode") != PTT || id == "threshold" && m.choice("mode") != ACTIVATION
+        id == "ptt" && m.choice("mode") != PTT
+            || id == "threshold" && m.choice("mode") != ACTIVATION
+            || id == "mute-svc" && !m.bool("svc")
     }
 
     fn toggled(&mut self, on: bool) {
         if !on {
             voice::shutdown();
+            super::svc::on_disconnect();
         }
     }
 
@@ -120,6 +127,11 @@ impl module::Behaviour for VoiceChat {
         }
         let level = if db <= -99.0 { "-∞ dB".to_owned() } else { format!("{db:.0} dB") };
         c.text(font::MEDIUM, 11.0, &level, bx, by + bh + 8.0, theme::TEXT_SECONDARY);
+        if let Some(svc_status) = super::svc::status() {
+            let col = if super::svc::active() { theme::ONLINE } else { theme::TEXT_MUTED };
+            let txt = c.ellipsize(font::MEDIUM, 11.0, &svc_status, bw);
+            c.text(font::MEDIUM, 11.0, &txt, bx, by + bh + 26.0, col);
+        }
         true
     }
 }

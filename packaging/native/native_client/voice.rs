@@ -9,12 +9,24 @@
 //! Main-thread API for the UI; HTTP runs on one worker thread (in order), audio and the socket on their own.
 
 use super::relay::{self, Notice};
+use super::svc;
 use super::voice_audio as audio;
 use super::voice_net::{self as vnet, Net};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+
+static VOLUMES_GEN: AtomicU64 = AtomicU64::new(1);
+
+pub fn volumes_gen() -> u64 {
+    VOLUMES_GEN.load(Ordering::Relaxed)
+}
+
+fn bump_volumes() {
+    VOLUMES_GEN.fetch_add(1, Ordering::Relaxed);
+}
 
 /// Silent this long after the link worked: take the call's seat again (the voice server restarted, or the network
 /// changed). Tried every 5 s, given up after [`GIVE_UP_MS`].
@@ -292,6 +304,7 @@ fn load_volumes(s: &mut Shared) {
                 s.volumes.insert(id.clone(), (f as f32).clamp(0.0, 2.0));
             }
         }
+        bump_volumes();
     }
 }
 
@@ -311,9 +324,11 @@ pub fn set_volume(user_id: &str, v: f32) {
     } else {
         s.volumes.insert(user_id.to_owned(), v);
     }
+    bump_volumes();
     if !s.volumes_dirty {
         s.volumes_dirty = true;
-        later(|| {
+        // Debounce disk writes on a lightweight thread instead of blocking the single-threaded Native voice HTTP queue
+        let _ = std::thread::Builder::new().name("Native voice vol".into()).spawn(|| {
             std::thread::sleep(std::time::Duration::from_millis(800));
             let map = {
                 let mut s = lock();
@@ -489,12 +504,14 @@ pub fn wants() -> audio::Wants {
     let t = now();
     s.incoming.retain(|_, r| t <= r.until);
     let in_call = s.call.is_some();
+    let svc_active = svc::active();
+    let svc_send = svc_active && !(in_call && svc::auto_mute_in_call());
     let ring = !s.incoming.is_empty();
     let ring_outgoing = s.call.as_ref().is_some_and(|r| is_ring_outgoing(&r.key, r.carry_on, &r.members, me_id.as_deref(), ring));
     let st = &s.settings;
     audio::Wants {
-        mic: in_call && !s.muted && !s.deafened || t < s.mic_test_until,
-        speakers: in_call,
+        mic: (in_call || svc_send) && !s.muted && !s.deafened || t < s.mic_test_until,
+        speakers: in_call || svc_active,
         ring,
         ring_outgoing,
         mic_device: st.mic_device.clone(),
@@ -509,6 +526,8 @@ pub fn wants() -> audio::Wants {
         noise: st.noise,
         echo: st.echo,
         in_call,
+        svc_active,
+        svc_send,
     }
 }
 
@@ -649,6 +668,7 @@ pub fn join_call(key: &str) {
                     s.live.remove(&key);
                     let new_sid = r.sid;
                     let old = s.call.replace(r).filter(|o| o.sid != new_sid);
+                    bump_volumes();
                     ping(&mut s);
                     old
                 }
@@ -758,6 +778,7 @@ fn rejoin(old: Room) {
                     r.lost_since = if old.lost_since != 0 { old.lost_since } else { old.last_pong };
                     if s.call.as_ref().is_some_and(|c| c.sid == old.sid) {
                         s.call = Some(r);
+                        bump_volumes();
                         ping(&mut s);
                         None
                     } else {
@@ -915,6 +936,7 @@ fn on_state(p: &Value) {
             let me_left = left.is_some_and(|l| str_of(l, "userId") == me) && reason != "left" && reason != "switched";
             if let Some(c) = s.call.as_mut() {
                 c.members = list.clone();
+                bump_volumes();
                 if me_left || call_over(Some(c.key.as_str()), &list, me.as_deref(), c.saw_others) {
                     ended = true;
                 } else if has_others(&list, me.as_deref()) {
