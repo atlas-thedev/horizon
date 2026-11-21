@@ -356,8 +356,8 @@ patch(CLIENT / 'game.rs',
       '            Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),\n')
 
 # Discord: Native's own application (as the Java mod's presence uses), its logo and its words, not Horizon's.
-# The logo is the Native Discord icon (the Native Cape's look), hosted on the Native API: Discord loads image URLs directly.
-ICON = "https://api.playnative.net/v1/site/media/e3c3ffebf47300fe60c82456.png"
+# Use the same public artwork as the launcher and Java mod.
+ICON = "https://playnative.net/brand/discord-icon.png"
 patch(DISCORD, 'pub const DISCORD_APP_ID: &str = "1563857609738690560";\n',
       'pub const DISCORD_APP_ID: &str = "1465139441457827972";\n')
 # rebrand.py (run first by the release build, not by the checks) has made "Horizon" "Native" here.
