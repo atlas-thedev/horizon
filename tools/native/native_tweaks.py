@@ -385,6 +385,15 @@ patch(CLIENT / 'game.rs',
       '            Screen::Paused if self.pause_menu && horizon_client::native_ui::tweaks::get().custom_pause => {}\n'
       '            Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),\n')
 
+# Potion Effects: hide the vanilla top-right status effect icons while Native's module is on.
+HIDE_EFFECTS = ('    pub(super) fn draw_effect_icons(&self, batch: &mut HudBatch) {\n',
+                '    pub(super) fn draw_effect_icons(&self, batch: &mut HudBatch) {\n'
+                '        if horizon_client::native_ui::tweaks::hide_effects() {\n'
+                '            return;\n'
+                '        }\n')
+patch_any((CLIENT / 'game/items/potions.rs', *HIDE_EFFECTS),
+          (CLIENT / 'game/potions.rs', *HIDE_EFFECTS))
+
 # Discord: Native's own application (as the Java mod's presence uses), its logo and its words, not Horizon's.
 # Use the same public artwork as the launcher and Java mod.
 ICON = "https://playnative.net/brand/discord-icon.png"

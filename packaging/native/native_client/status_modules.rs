@@ -7,7 +7,7 @@ use super::module::*;
 use super::setting::Setting;
 use super::status;
 use horizon_client::native_ui::canvas::clock_ms;
-use horizon_client::native_ui::{Canvas, font, theme};
+use horizon_client::native_ui::{Canvas, font, theme, tweaks};
 use std::collections::HashMap;
 
 const GOOD: u32 = 0xFF4ADE80;
@@ -30,6 +30,7 @@ trait Boxed: Send {
         true
     }
     fn frame(&mut self, _m: &ModuleState, _g: &GameView) {}
+    fn toggled(&mut self, _on: bool) {}
     /// Space between the frame and the content.
     fn pad(&self, m: &ModuleState) -> f32 {
         let s = scale_of(m);
@@ -67,6 +68,9 @@ impl<T: Boxed> Behaviour for Framed<T> {
     }
     fn frame(&mut self, m: &ModuleState, g: &GameView) {
         self.0.frame(m, g);
+    }
+    fn toggled(&mut self, on: bool) {
+        self.0.toggled(on);
     }
     fn needs_vitals(&self) -> bool {
         true
@@ -190,7 +194,8 @@ impl Boxed for Effects {
         g.sample || !Self::collect(m, g).is_empty()
     }
 
-    fn frame(&mut self, _m: &ModuleState, g: &GameView) {
+    fn frame(&mut self, m: &ModuleState, g: &GameView) {
+        tweaks::set(|t| t.hide_effects = m.bool("hide"));
         self.generation += 1;
         for e in &g.vitals.effects {
             let entry = self.peak.entry(e.id.clone()).or_insert((e.ticks, self.generation));
@@ -199,6 +204,12 @@ impl Boxed for Effects {
         }
         let generation = self.generation;
         self.peak.retain(|_, p| p.1 == generation);
+    }
+
+    fn toggled(&mut self, on: bool) {
+        if !on {
+            tweaks::set(|t| t.hide_effects = false);
+        }
     }
 
     fn render(&mut self, m: &ModuleState, c: &mut Canvas, g: &GameView, x: f32, y: f32, draw: bool) -> [f32; 2] {

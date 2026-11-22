@@ -52,6 +52,8 @@ pub struct Tweaks {
     /// Scoreboard and Boss Bar in the Native look: the game's own are left out.
     pub hide_sidebar: bool,
     pub hide_bossbars: bool,
+    /// Potion Effects: Native draws its own; the vanilla top-right effect icons are left out.
+    pub hide_effects: bool,
     /// Discord RPC is switched off: the game shows no Rich Presence.
     pub discord_off: bool,
     /// Native draws the pause menu: the game's own is left out.
@@ -92,6 +94,7 @@ static TWEAKS: Mutex<Tweaks> = Mutex::new(Tweaks {
     background_fps: None,
     hide_sidebar: false,
     hide_bossbars: false,
+    hide_effects: false,
     discord_off: false,
     custom_pause: false,
     freelook_third: false,
@@ -129,6 +132,10 @@ pub fn no_hurt_cam() -> bool {
 
 pub fn crosshair() -> bool {
     get().crosshair
+}
+
+pub fn hide_effects() -> bool {
+    get().hide_effects
 }
 
 pub fn zoom() -> Option<Zoom> {
