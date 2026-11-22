@@ -12,6 +12,16 @@ pub const END: &str = "the_end";
 /// Marker colours offered on the page, in the order new waypoints take them.
 pub const COLORS: [u32; 9] =
     [0xFF60A5FA, 0xFFF87171, 0xFF4ADE80, 0xFFFBBF24, 0xFFC084FC, 0xFF22D3EE, 0xFFFB923C, 0xFFF472B6, 0xFFFFFFFF];
+/// 12 preset swatches (2 columns x 6 rows) shown in the Create/Edit Waypoint colour picker.
+pub const PRESET_COLORS: [u32; 12] = [
+    0xFFC81E1E, 0xFFF87171,
+    0xFFF59E0B, 0xFFFDE047,
+    0xFF16A34A, 0xFF4ADE80,
+    0xFF22D3EE, 0xFF14B8A6,
+    0xFF1D4ED8, 0xFF6366F1,
+    0xFFE879F9, 0xFF9333EA,
+];
+pub const CHROMA_TYPES: [&str; 3] = ["Wave", "Static", "Pulse"];
 /// Marker icons offered on the page; the last is the death point's.
 pub const ICONS: [u32; 11] = [
     theme::I_MAP_PIN,
@@ -41,6 +51,9 @@ pub struct Point {
     pub dim: String,
     pub color: u32,
     pub icon: usize,
+    pub chroma: bool,
+    pub chroma_speed: i32,
+    pub chroma_type: usize, // 0 Wave, 1 Static, 2 Pulse
     pub visible: bool,
     pub death: bool,
     pub created: i64,
@@ -57,6 +70,9 @@ impl Point {
             dim: if dim.is_empty() { OVERWORLD.to_owned() } else { dim.to_owned() },
             color,
             icon: icon.min(ICONS.len() - 1),
+            chroma: false,
+            chroma_speed: 40,
+            chroma_type: 0,
             visible: true,
             death: false,
             created: std::time::SystemTime::now()
@@ -64,6 +80,77 @@ impl Point {
                 .map_or(0, |d| d.as_millis() as i64),
         }
     }
+}
+
+/// Live colour of a waypoint (handles animated Chroma modes while preserving alpha).
+pub fn live_color(p: &Point, now_ms: f64) -> u32 {
+    let base = p.color;
+    let mut alpha = ((base >> 24) & 0xFF) as u8;
+    if alpha == 0 {
+        alpha = 0xFF;
+    }
+    if !p.chroma {
+        return (u32::from(alpha) << 24) | (base & 0x00FF_FFFF);
+    }
+    let speed = p.chroma_speed.clamp(1, 100) as f64;
+    let period_ms = 12000.0 / (0.25 + speed / 20.0);
+    if p.chroma_type == 2 {
+        // Pulse
+        let [h, s, v] = argb_to_hsv(base);
+        let wave = 0.55 + 0.45 * (0.5 + 0.5 * ((now_ms / period_ms) * std::f64::consts::TAU).sin() as f32);
+        return hsv_to_argb(h, s, (v * wave).clamp(0.25, 1.0), alpha);
+    }
+    let phase = if p.chroma_type == 0 {
+        (((p.x.wrapping_mul(13).wrapping_add(p.z.wrapping_mul(7))) & 0xFF) as f64) / 256.0
+    } else {
+        0.0
+    };
+    let hue = ((now_ms.rem_euclid(1_000_000.0) / period_ms + phase).rem_euclid(1.0)) as f32;
+    hsv_to_argb(hue, 0.82, 0.96, alpha)
+}
+
+pub fn hsv_to_argb(h: f32, s: f32, v: f32, alpha: u8) -> u32 {
+    let h = h.rem_euclid(1.0);
+    let s = s.clamp(0.0, 1.0);
+    let v = v.clamp(0.0, 1.0);
+    let c = v * s;
+    let x = c * (1.0 - ((h * 6.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+    let (r, g, b) = match (h * 6.0).floor() as i32 % 6 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let ri = ((r + m) * 255.0).round().clamp(0.0, 255.0) as u32;
+    let gi = ((g + m) * 255.0).round().clamp(0.0, 255.0) as u32;
+    let bi = ((b + m) * 255.0).round().clamp(0.0, 255.0) as u32;
+    (u32::from(alpha) << 24) | (ri << 16) | (gi << 8) | bi
+}
+
+pub fn argb_to_hsv(argb: u32) -> [f32; 3] {
+    let r = ((argb >> 16) & 0xFF) as f32 / 255.0;
+    let g = ((argb >> 8) & 0xFF) as f32 / 255.0;
+    let b = (argb & 0xFF) as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    let h = if d > 1e-6 {
+        let raw = if (max - r).abs() < 1e-6 {
+            ((g - b) / d) % 6.0
+        } else if (max - g).abs() < 1e-6 {
+            (b - r) / d + 2.0
+        } else {
+            (r - g) / d + 4.0
+        };
+        (raw / 6.0).rem_euclid(1.0)
+    } else {
+        0.0
+    };
+    let s = if max > 1e-6 { d / max } else { 0.0 };
+    [h, s, max]
 }
 
 fn next_id() -> u64 {
@@ -231,11 +318,22 @@ impl Store {
             let arr: Vec<Value> = list
                 .iter()
                 .map(|p| {
+                    let a = (p.color >> 24) & 0xFF;
+                    let color_hex = if a == 0 || a == 0xFF {
+                        format!("#{:06X}", p.color & 0xFFFFFF)
+                    } else {
+                        format!("#{:08X}", p.color)
+                    };
                     let mut o = json!({
                         "name": p.name, "x": p.x, "y": p.y, "z": p.z, "dim": p.dim,
-                        "color": format!("#{:06X}", p.color & 0xFFFFFF), "icon": p.icon,
+                        "color": color_hex, "icon": p.icon,
                         "visible": p.visible, "created": p.created,
                     });
+                    if p.chroma {
+                        o["chroma"] = json!(true);
+                        o["chromaSpeed"] = json!(p.chroma_speed);
+                        o["chromaType"] = json!(p.chroma_type);
+                    }
                     if p.death {
                         o["death"] = json!(true);
                     }
@@ -260,19 +358,30 @@ impl Store {
                     let int = |k: &str| o[k].as_i64().map(|v| v as i32);
                     let color = o["color"]
                         .as_str()
-                        .and_then(|c| u32::from_str_radix(c.trim_start_matches('#'), 16).ok())
-                        .unwrap_or(0x60A5FA);
+                        .and_then(|c| {
+                            let hex = c.trim().trim_start_matches('#');
+                            let v = u32::from_str_radix(hex, 16).ok()?;
+                            Some(if hex.len() == 8 { v } else { 0xFF000000 | (v & 0xFFFFFF) })
+                        })
+                        .unwrap_or(0xFF60A5FA);
                     let mut p = Point::new(
                         o["name"].as_str().unwrap_or("Waypoint"),
                         int("x")?,
                         int("y")?,
                         int("z")?,
                         o["dim"].as_str().unwrap_or(OVERWORLD),
-                        0xFF000000 | color,
+                        color,
                         o["icon"].as_u64().unwrap_or(0) as usize,
                     );
                     p.visible = o["visible"].as_bool().unwrap_or(true);
                     p.death = o["death"].as_bool().unwrap_or(false);
+                    p.chroma = o["chroma"].as_bool().unwrap_or(false);
+                    if let Some(sp) = o["chromaSpeed"].as_i64() {
+                        p.chroma_speed = (sp as i32).clamp(1, 100);
+                    }
+                    if let Some(ty) = o["chromaType"].as_u64() {
+                        p.chroma_type = (ty as usize).min(CHROMA_TYPES.len() - 1);
+                    }
                     if let Some(t) = o["created"].as_i64() {
                         p.created = t;
                     }
@@ -451,6 +560,17 @@ pub fn distance(blocks: f64) -> String {
     }
 }
 
+/// Compact distance for in-world tags: "10m", "1.2km".
+pub fn compact_distance(blocks: f64) -> String {
+    if blocks >= 10000.0 {
+        format!("{:.0}km", blocks / 1000.0)
+    } else if blocks >= 1000.0 {
+        format!("{:.1}km", blocks / 1000.0)
+    } else {
+        format!("{}m", blocks.round() as i64)
+    }
+}
+
 /// "Overworld", "Nether", "End" or the id's own path.
 pub fn dimension_name(dim: &str) -> String {
     match dim {
@@ -565,5 +685,31 @@ mod tests {
         assert_eq!(distance(243.4), "243 m");
         assert_eq!(distance(1234.0), "1.2 km");
         assert_eq!(distance(12345.0), "12 km");
+        assert_eq!(compact_distance(10.2), "10m");
+        assert_eq!(compact_distance(1234.0), "1.2km");
+    }
+
+    #[test]
+    fn hsv_chroma_and_alpha_round_trip() {
+        let col = 0xAA1D5D14;
+        let [h, s, v] = argb_to_hsv(col);
+        let back = hsv_to_argb(h, s, v, 0xAA);
+        assert_eq!(back, col);
+
+        let mut st = Store::default();
+        st.init(None);
+        let mut p = Point::new("Castle", 18, 105, 154, OVERWORLD, col, 0);
+        p.chroma = true;
+        p.chroma_speed = 65;
+        p.chroma_type = 2;
+        st.add("world:test", p);
+        let json = st.to_json();
+        let mut loaded = Store::default();
+        loaded.init(None);
+        loaded.from_json(&json);
+        let q = &loaded.of("world:test")[0];
+        assert_eq!(q.color, col);
+        assert!(q.chroma && q.chroma_speed == 65 && q.chroma_type == 2);
+        assert_eq!(live_color(q, 500.0) >> 24, 0xAA);
     }
 }

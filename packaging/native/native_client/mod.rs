@@ -627,6 +627,23 @@ impl Game<'_> {
         }
         if action == menu::Action::Close {
             self.native_mod_screen_close(MOD_ID);
+        } else if self.native_mod_screen().is_none()
+            && self.screen == Screen::Playing
+            && self.title.is_none()
+            && let Some((pos, dim)) = waypoints_module::take_open_create()
+            && self.native_mod_screen_open(MOD_ID)
+        {
+            let who = self.options.player_name();
+            let now = native_ui::canvas::clock_ms();
+            with_state(|s| {
+                s.events.clear();
+                s.was_open = false;
+                s.editing = false;
+                s.relay_open = false;
+                s.emote_wheel.open = false;
+                s.who = who;
+                s.menu.open_waypoint_create(pos, &dim, now);
+            });
         }
     }
 

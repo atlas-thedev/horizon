@@ -427,7 +427,7 @@ impl Menu {
             return true;
         }
         if self.tab == TAB_WAYPOINTS && self.waypoints.escape(ui) {
-            return true;
+            return !self.waypoints.consume_close_host();
         }
         if self.selected.is_some() {
             self.selected = None;
@@ -443,11 +443,24 @@ impl Menu {
     }
 
     pub fn open_tab(&mut self, t: usize, now: f64) {
+        self.waypoints.cancel_quick_create();
         self.set_tab(t, now);
+    }
+
+    /// Opens the floating "Create A Waypoint" modal directly over the live world.
+    pub fn open_waypoint_create(&mut self, pos: [f64; 3], dim: &str, now: f64) {
+        self.tab = TAB_WAYPOINTS;
+        self.selected = None;
+        self.widgets.listening = None;
+        self.confirm_reset = false;
+        self.profiles.renaming = None;
+        self.shown_at = now;
+        self.waypoints.open_quick_create(pos, dim);
     }
 
     /// Jumps to a module's own page (settings + live preview) in the mods tab.
     pub fn open_mod(&mut self, id: &str, now: f64) {
+        self.waypoints.cancel_quick_create();
         self.set_tab(TAB_MODS, now);
         self.selected = Some(id.to_owned());
         self.detail.reset();
@@ -486,6 +499,12 @@ impl Menu {
         self.in_world = in_world;
         self.profiles.ensure_loaded(self.game_dir.as_deref(), mods);
         let (w_all, h_all) = (c.width(), c.height());
+        if self.tab == TAB_WAYPOINTS && self.waypoints.is_quick_modal() {
+            if self.waypoints.draw_quick_modal(ui, c, w_all, h_all) {
+                return Action::Close;
+            }
+            return Action::None;
+        }
         let e = ease(clamp01(((ui.now - self.shown_at) / 260.0) as f32));
         if in_world {
             c.fill(0.0, 0.0, w_all, h_all, theme::alpha(0xA0000000, e));
