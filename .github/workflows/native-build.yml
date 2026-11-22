@@ -141,7 +141,10 @@ jobs:
           if [ "${{ inputs.force }}" = "true" ]; then
             gh release delete "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2> /dev/null || true
           fi
+          # Launchers follow the latest *release*: a scheduled build of a new upstream Nightly is a pre-release
+          # (for testing) and reaches no player; a build started by hand (release.bat) is the release players get.
+          if [ "${{ github.event_name }}" = "schedule" ]; then CHANNEL=--prerelease; else CHANNEL=--latest; fi
           gh release create "${{ steps.up.outputs.tag }}" horizon-client-windows-x64.exe SHA256SUMS compat.json \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $CHANNEL \
             --title "Native engine for ${{ steps.up.outputs.name }}" \
             --notes "Rebranded Horizon client built from upstream's ${{ steps.up.outputs.name }} (MIT, see NATIVE.md)."
