@@ -55,11 +55,41 @@ if not (RENDER / 'native_ui/tweaks.rs').is_file():
 patch(RENDER / 'gfx.rs',
       '            (self.gamma - frame.darkness.0).max(0.0),\n',
       '            (crate::native_ui::tweaks::gamma(self.gamma) - frame.darkness.0).max(0.0),\n')
-patch(RENDER / 'gfx.rs',
-      '        if self.fullbright {\n'
-      '            pixels.fill(255);\n',
-      '        if self.fullbright || crate::native_ui::tweaks::fullbright() {\n'
-      '            pixels.fill(255);\n')
+patch_any((RENDER / 'gfx.rs',
+           '        let key = LightmapKey::new(\n'
+           '            sky,\n'
+           '            darkness,\n'
+           '            gamma,\n'
+           '            night_vision,\n'
+           '            flicker,\n'
+           '            boss_darken,\n'
+           '            self.fullbright,\n'
+           '        );\n'
+           '        if self.lightmap_uploaded && self.lightmap_key == Some(key) {\n'
+           '            return;\n'
+           '        }\n'
+           '        let mut pixels = [255u8; 16 * 16 * 4];\n'
+           '        if !self.fullbright {\n',
+           '        let fullbright = self.fullbright || crate::native_ui::tweaks::fullbright();\n'
+           '        let key = LightmapKey::new(\n'
+           '            sky,\n'
+           '            darkness,\n'
+           '            gamma,\n'
+           '            night_vision,\n'
+           '            flicker,\n'
+           '            boss_darken,\n'
+           '            fullbright,\n'
+           '        );\n'
+           '        if self.lightmap_uploaded && self.lightmap_key == Some(key) {\n'
+           '            return;\n'
+           '        }\n'
+           '        let mut pixels = [255u8; 16 * 16 * 4];\n'
+           '        if !fullbright {\n'),
+          (RENDER / 'gfx.rs',
+           '        if self.fullbright {\n'
+           '            pixels.fill(255);\n',
+           '        if self.fullbright || crate::native_ui::tweaks::fullbright() {\n'
+           '            pixels.fill(255);\n'))
 
 # Entity models posed on the CPU where Intel's Gen9 graphics draw GPU-posed ones with holes (tweaks.rs).
 patch(RENDER / 'gfx.rs',
