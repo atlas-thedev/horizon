@@ -37,7 +37,7 @@ const PILL_R: f32 = 13.0;
 const CHIPS: [&str; 7] = ["All", "New", "Favorites", "HUD", "Mechanic", "Visual", "Settings"];
 const CHIP_ICONS: [u32; 7] = [theme::I_GRID, theme::I_SPARKLES, theme::I_HEART, theme::I_LAYOUT, theme::I_MOUSE, theme::I_EYE, theme::I_SLIDERS];
 /// Mods new in this version: a NEW badge on their card and the New category.
-const NEW_MODS: [&str; 7] = ["markers", "waypoints", "damage-tint", "hitbox-colours", "no-hurt-cam", "voice", "emotes"];
+const NEW_MODS: [&str; 6] = ["waypoints", "damage-tint", "hitbox-colours", "no-hurt-cam", "voice", "emotes"];
 const NEW_RED: u32 = 0xFFEF4444;
 pub const PANEL_BG: u32 = 0xF205060A;
 pub const CARD: u32 = 0xB808090C;
@@ -714,13 +714,18 @@ impl Menu {
         q.split(' ').all(|word| hay.contains(word))
     }
 
+    /// Mods hidden from the mod menu for now (stay registered so config & icon font indices remain stable).
+    fn hidden(m: &Module) -> bool {
+        m.state.id == "markers"
+    }
+
     fn filtered(&self, mods: &Modules) -> Vec<usize> {
         let q = self.search.value();
         let mut out: Vec<usize> = mods
             .all
             .iter()
             .enumerate()
-            .filter(|(_, m)| Self::in_chip(m, self.chip) && Self::query_matches(m, &q))
+            .filter(|(_, m)| !Self::hidden(m) && Self::in_chip(m, self.chip) && Self::query_matches(m, &q))
             .map(|(i, _)| i)
             .collect();
         if self.sort_enabled {
@@ -891,7 +896,7 @@ impl Menu {
         let mut ry = y + 24.0;
         let rh = 34.0;
         for (i, name) in CHIPS.iter().enumerate() {
-            let n = mods.all.iter().filter(|m| Self::in_chip(m, i)).count();
+            let n = mods.all.iter().filter(|m| !Self::hidden(m) && Self::in_chip(m, i)).count();
             let id = format!("menu:cat:{i}");
             let over = ui.hover(c, x, ry, w, rh);
             if ui.clicked(c, &id, x, ry, w, rh) && self.chip != i {
@@ -924,8 +929,9 @@ impl Menu {
         if p_h > 70.0 {
             self.profiles_list(ui, c, mods, x, p_top, w, p_h);
         }
-        let active = mods.all.iter().filter(|m| m.state.enabled).count();
-        let a = format!("{active} of {} enabled", mods.all.len());
+        let visible = mods.all.iter().filter(|m| !Self::hidden(m)).count();
+        let active = mods.all.iter().filter(|m| !Self::hidden(m) && m.state.enabled).count();
+        let a = format!("{active} of {visible} enabled");
         c.circle(x + 10.0, y + h - 12.0, 3.5, ON);
         let ah = c.line_height(font::MEDIUM, 11.0);
         c.text(font::MEDIUM, 11.0, &a, x + 20.0, y + h - 12.0 - ah / 2.0, theme::TEXT_MUTED);
@@ -1042,8 +1048,15 @@ impl Menu {
         };
         let ic = 36.0;
         let (ix, iy) = (div_x + 16.0, y + (hh - ic) / 2.0);
-        c.round(ix, iy, ic, ic, 10.0, if enabled { 0xFFF4F4F5 } else { theme::SUBTLE_HOVER });
-        c.icon(icon, 18.0, ix + ic / 2.0, iy + ic / 2.0, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });
+        if let Some(art) = self.art_for(id) {
+            c.round(ix, iy, ic, ic, 10.0, CARD);
+            c.outline(ix, iy, ic, ic, 10.0, 1.0, theme::HAIRLINE_STRONG);
+            let s = 24.0;
+            c.image(&art, ix + (ic - s) / 2.0, iy + (ic - s) / 2.0, s, s, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
+        } else {
+            c.round(ix, iy, ic, ic, 10.0, if enabled { 0xFFF4F4F5 } else { theme::SUBTLE_HOVER });
+            c.icon(icon, 18.0, ix + ic / 2.0, iy + ic / 2.0, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });
+        }
         let tx = ix + ic + 12.0;
         c.text(font::SEMIBOLD, 15.0, &name, tx, y + 15.0, theme::TEXT_STRONG);
         c.text(font::MEDIUM, 10.0, &category.to_uppercase(), tx, y + 34.0, theme::TEXT_MUTED);

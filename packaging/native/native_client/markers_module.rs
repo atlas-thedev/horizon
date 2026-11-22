@@ -8,6 +8,8 @@
 //! customizable owner/description/distance/coordinate visibility, Compact Mode, custom colours, independent
 //! self/other ding volumes (synthesized via `cpal`), and chat / Native client notifications.
 
+#![allow(dead_code)]
+
 use super::avatars;
 use super::keys;
 use super::mc_font;
@@ -176,7 +178,7 @@ pub fn all() -> Vec<Module> {
         "Allows you and your team to mark things in the world, like in various FPS games.",
         VISUAL,
         theme::I_MAP_PIN,
-        true,
+        false,
         vec![
             // Keybinds & controls
             Setting::key("key", "Marker keybind", -1),

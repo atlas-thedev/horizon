@@ -206,11 +206,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut m = Modules::new(Some(dir.clone()));
         // The Java mod's defaults: FPS, Keystrokes, Scoreboard, Boss Bar, Lag Free, the watermark, Voice Chat, the Voice
-        // Overlay, Now Playing, Discord RPC, Emotes, Waypoints and Markers on.
+        // Overlay, Now Playing, Discord RPC, Emotes and Waypoints on (Markers hidden from the mod menu for now).
         let on: Vec<_> = m.all.iter().filter(|m| m.state.enabled).map(|m| m.state.id).collect();
         assert_eq!(
             on,
-            vec!["fps", "keystrokes", "scoreboard", "bossbar", "bgfps", "watermark", "voice", "voice-overlay", "now-playing", "discord-rpc", "emotes", "waypoints", "markers"]
+            vec!["fps", "keystrokes", "scoreboard", "bossbar", "bgfps", "watermark", "voice", "voice-overlay", "now-playing", "discord-rpc", "emotes", "waypoints"]
         );
         let fps = m.get_mut("fps").unwrap();
         fps.state.enabled = false;
