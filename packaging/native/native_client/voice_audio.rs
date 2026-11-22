@@ -751,10 +751,10 @@ fn run() {
             let mut mix = [0f32; FRAME];
             if w.in_call {
                 // refresh cached sid -> volume only when volumes or roster changed (not every 20 ms)
-                let gen = voice::volumes_gen();
-                if gen != cached_vol_gen {
+                let vol_gen = voice::volumes_gen();
+                if vol_gen != cached_vol_gen {
                     cached_volumes = voice::volumes_by_sid();
-                    cached_vol_gen = gen;
+                    cached_vol_gen = vol_gen;
                 }
                 let mut streams = lock(&engine().streams);
                 let mut meter = lock(&engine().meter);

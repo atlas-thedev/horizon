@@ -449,7 +449,7 @@ impl Behaviour for Keystrokes {
 // ── direction ────────────────────────────────────────────────────────────
 
 fn direction() -> Module {
-    with_hud(
+    let mut m = with_hud(
         Module::hud(
             "direction",
             "Direction",
@@ -458,11 +458,19 @@ fn direction() -> Module {
             false,
             0.5,
             0.0,
-            vec![Setting::bool("degrees", "Show degrees", true).fixed(), Setting::bool("waypoints", "Show waypoints", true)],
+            vec![
+                Setting::bool("degrees", "Show degrees", true).fixed(),
+                Setting::bool("waypoints", "Show waypoints", true),
+                Setting::bool("markers", "Show markers", true),
+            ],
             Box::new(Direction),
         ),
         |h| h.drop_setting(LABELS),
-    )
+    );
+    if let Some(s) = m.state.hud.as_mut().and_then(|h| h.get_mut(STYLE)) {
+        *s = s.clone().initial(STYLE_TEXT);
+    }
+    m
 }
 
 struct Direction;
@@ -471,61 +479,121 @@ const NAMES: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 impl Behaviour for Direction {
     fn measure(&mut self, m: &ModuleState, _c: &mut Canvas, _g: &GameView) -> Option<[f32; 2]> {
         let s = m.hud.as_ref()?.scale();
-        Some([200.0 * s, if m.bool("degrees") { 32.0 } else { 22.0 } * s])
+        let top = if m.bool("degrees") { 19.0 } else { 8.0 };
+        let bot = if m.bool("waypoints") || m.bool("markers") { 13.0 } else { 2.0 };
+        Some([256.0 * s, (top + 24.0 + bot) * s])
     }
     fn paint(&mut self, m: &ModuleState, c: &mut Canvas, x: f32, y: f32, g: &GameView) -> bool {
         let Some(hud) = m.hud.as_ref() else { return true };
         let s = hud.scale();
-        let (w, h) = (200.0 * s, 22.0 * s);
+        let show_deg = m.bool("degrees");
+        let show_icons = m.bool("waypoints") || m.bool("markers");
+        let w = 256.0 * s;
+        let top_h = if show_deg { 19.0 * s } else { 8.0 * s };
+        let strip_h = 24.0 * s;
+        let total_h = top_h + strip_h + if show_icons { 13.0 * s } else { 2.0 * s };
         match hud.style() {
-            STYLE_CARD => hud.background(c, x, y, w, h, s),
-            STYLE_BRACKETS => hud.brackets(c, x, y, w, h, s),
+            STYLE_CARD => hud.background(c, x, y, w, total_h, s),
+            STYLE_BRACKETS => hud.brackets(c, x, y, w, total_h, s),
             _ => {}
         }
+        // In-game heading: 0 = N, 90 = E, 180 = S, 270 = W (matching vanilla & Waypoints::heading).
         let heading = (((g.yaw + 180.0) % 360.0) + 360.0) % 360.0;
-        // Degrees visible.
-        let span = 110.0;
+        let span = 132.0; // shows ~9 15-degree intervals (e.g. 30, SW, 60, 75, W, 105, 120, NW, 150)
         let ppd = w / span;
         let cx = x + w / 2.0;
-        c.push_clip(x + 4.0 * s, y, w - 8.0 * s, h + 12.0 * s);
+        let px = super::mc_font::snap_px(c, 9.0 * s);
+        let lh = super::mc_font::height(px);
+        let sh = hud.shadow();
+
+        // Top center: current heading number + crisp white downward triangle ▼
+        let tri_y = if show_deg {
+            let deg_num = (heading.round() as i32).rem_euclid(360);
+            let deg_str = deg_num.to_string();
+            let dw = super::mc_font::width(c, &deg_str, px, false);
+            super::mc_font::draw(c, &deg_str, cx - dw / 2.0, y + 1.0 * s, px, hud.color(), sh, false);
+            y + lh + 3.0 * s
+        } else {
+            y + 2.0 * s
+        };
+        let tri_w = 4.2 * s;
+        let tri_h = 4.2 * s;
+        super::markers_module::draw_triangle(
+            c,
+            cx - tri_w,
+            tri_y + 0.8 * s,
+            cx + tri_w,
+            tri_y + 0.8 * s,
+            cx,
+            tri_y + tri_h + 0.8 * s,
+            0x70000000,
+        );
+        super::markers_module::draw_triangle(c, cx - tri_w, tri_y, cx + tri_w, tri_y, cx, tri_y + tri_h, hud.color());
+
+        // Compass tick lines & mc_font heading labels
+        let tick_y = y + top_h + 1.0 * s;
+        let tick_h = 8.0 * s;
+        let label_y = tick_y + tick_h + 3.0 * s;
+        c.push_clip(x + 2.0 * s, tick_y - 2.0 * s, w - 4.0 * s, total_h - top_h + 4.0 * s);
         for a in (0..360).step_by(15) {
             let mut off = a as f32 - heading;
             off = ((off + 540.0) % 360.0) - 180.0;
             if off.abs() > span / 2.0 + 10.0 {
                 continue;
             }
-            let px = cx + off * ppd;
-            let fade = 1.0 - (off.abs() / (span / 2.0)).min(1.0) * 0.85;
-            if a % 45 == 0 {
-                let n = NAMES[a / 45];
-                let fs = if n.len() == 1 { 12.0 } else { 10.0 } * s;
-                let col = if a == 0 { theme::ACCENT } else { hud.color() };
-                let tw = c.text_width(font::SEMIBOLD, fs, n);
-                let lh = c.line_height(font::SEMIBOLD, fs);
-                hud.text_face(c, font::SEMIBOLD, fs, n, px - tw / 2.0, y + (h - lh) / 2.0, theme::alpha(col, fade));
+            let tx = cx + off * ppd;
+            let edge = (1.0 - (off.abs() / (span / 2.0)).clamp(0.0, 1.0)).powf(0.55);
+            let fade = (edge * 1.15).clamp(0.08, 1.0);
+            let tick_w = (1.3 * s).max(1.0);
+            let is_card = a % 45 == 0;
+            // Vertical tick mark with subtle drop shadow
+            c.fill(tx - tick_w / 2.0 + s * 0.6, tick_y + s * 0.6, tick_w, tick_h, theme::alpha(0xFF000000, 0.45 * fade));
+            c.fill(tx - tick_w / 2.0, tick_y, tick_w, tick_h, theme::alpha(hud.color(), (if is_card { 0.95 } else { 0.82 }) * fade));
+
+            let label_owned;
+            let label = if is_card {
+                NAMES[a / 45]
             } else {
-                c.fill(px - 0.5 * s, y + h / 2.0 - 3.0 * s, s.max(1.0), 6.0 * s, theme::alpha(hud.color(), 0.45 * fade));
-            }
+                label_owned = a.to_string();
+                &label_owned
+            };
+            let col = if a == 0 {
+                theme::alpha(0xFFFFFFFF, fade)
+            } else {
+                theme::alpha(hud.color(), (if is_card { 0.98 } else { 0.86 }) * fade)
+            };
+            let lw = super::mc_font::width(c, label, px, false);
+            super::mc_font::draw(c, label, tx - lw / 2.0, label_y, px, col, sh, false);
         }
-        // waypoints: a coloured dot on the strip's lower edge (at the edge, half shown, when it is out of view)
-        if m.bool("waypoints") && !g.sample {
-            for (mark, color) in super::waypoints_module::compass() {
-                let off = ((mark - heading + 540.0) % 360.0) - 180.0;
-                let lim = span / 2.0 - 4.0;
-                let out = off.abs() > lim;
-                let mx = cx + off.clamp(-lim, lim) * ppd;
-                c.circle(mx, y + h - 3.5 * s, if out { 2.0 } else { 3.0 } * s, theme::alpha(color, if out { 0.55 } else { 1.0 }));
+
+        // Waypoint diamonds & Marker glyphs neatly beneath the heading strip (clamped to edge when off-strip).
+        if show_icons {
+            let icon_y = label_y + lh + 6.5 * s;
+            let lim = span / 2.0 - 5.0;
+            if m.bool("waypoints") && !g.sample {
+                for (mark, color) in super::waypoints_module::compass() {
+                    let off = ((mark - heading + 540.0) % 360.0) - 180.0;
+                    let out = off.abs() > lim;
+                    let mx = cx + off.clamp(-lim, lim) * ppd;
+                    let r = if out { 3.4 } else { 4.6 } * s;
+                    let a = if out { 0.6 } else { 1.0 };
+                    super::markers_module::draw_diamond(c, mx, icon_y + 0.8 * s, r + 0.6 * s, theme::alpha(0x88000000, a));
+                    super::markers_module::draw_diamond(c, mx, icon_y, r, theme::alpha(color, a));
+                }
+            }
+            if m.bool("markers") {
+                for (mark, kind, color) in super::markers_module::compass(g) {
+                    let off = ((mark - heading + 540.0) % 360.0) - 180.0;
+                    let out = off.abs() > lim;
+                    let mx = cx + off.clamp(-lim, lim) * ppd;
+                    let r = if out { 4.2 } else { 5.4 } * s;
+                    c.push_alpha(if out { 0.62 } else { 1.0 });
+                    super::markers_module::draw_marker_glyph(c, kind, mx, icon_y, r, color);
+                    c.pop_alpha();
+                }
             }
         }
         c.pop_clip();
-        // Centre marker.
-        c.round(cx - s, y + 2.0 * s, 2.0 * s, 4.0 * s, s, theme::alpha(hud.color(), 0.9));
-        if m.bool("degrees") {
-            let d = format!("{}\u{00B0}", heading.round() as i32 % 360);
-            let fs = 9.5 * s;
-            let tw = c.text_width(font::MEDIUM, fs, &d);
-            hud.text_face(c, font::MEDIUM, fs, &d, cx - tw / 2.0, y + h + s, theme::alpha(hud.color(), 0.75));
-        }
         true
     }
 }

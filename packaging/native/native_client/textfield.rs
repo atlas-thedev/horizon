@@ -97,6 +97,9 @@ impl TextField {
 
     pub fn focus(&mut self, ui: &mut Ui) {
         ui.focus = Some(self.id.clone());
+        // Focusing on purpose claims it for this frame too: a click on a button that opens a field (a rename pencil,
+        // a dialog) would otherwise lose the focus at the frame's end when its press and release land in one frame.
+        ui.focus_claimed = true;
         self.blink_start = ui.now;
     }
 

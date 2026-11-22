@@ -28,6 +28,8 @@ mod hud_editor;
 mod hud_modules;
 mod keys;
 mod locker;
+mod markers_module;
+mod mc_font;
 mod menu;
 mod music;
 mod music_modules;
@@ -110,6 +112,9 @@ struct State {
     effect_names: HashMap<u64, String>,
     /// GLFW codes of the keys and mouse buttons held, as the window events told.
     held: std::collections::HashSet<i32>,
+    /// Keys and mouse buttons pressed since the last frame. A press and release that both land between two
+    /// frames would never show in `held`, so each press also counts as down for the next frame read.
+    tapped: std::collections::HashSet<i32>,
     /// The game's own toggle-sprint and toggle-sneak options before Toggle Sprint took them over.
     /// The game's own toggle-sprint and toggle-sneak options before Toggle Sprint took them over.
     toggles_before: Option<(bool, bool)>,
@@ -171,6 +176,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             sample_max: sample_max_damage(),
             effect_names: sample_effect_names(),
             held: std::collections::HashSet::new(),
+            tapped: std::collections::HashSet::new(),
             toggles_before: None,
             freelook_switched: false,
             relay: relay_view::RelayView::new(),
@@ -306,11 +312,14 @@ impl Game<'_> {
             module::Vitals::default()
         };
         let clock = self.native_clock();
+        // Held now, plus anything pressed since the last frame (a quick tap released before this frame).
+        let keys_now: std::collections::HashSet<i32> = state.held.union(&state.tapped).copied().collect();
+        state.tapped.clear();
         GameView {
             vitals,
             focused: self.focused,
             idle_ms: self.last_input.elapsed().as_secs_f64() * 1000.0,
-            keys_down: state.held.iter().copied().collect(),
+            keys_down: keys_now.iter().copied().collect(),
             sprint_toggled: self.toggles.is_down(1),
             sneak_toggled: self.toggles.is_down(0),
             target_living: in_world && self.crosshair_living() == Some(true),
@@ -326,8 +335,20 @@ impl Game<'_> {
             },
             world: if in_world { self.native_world().map(|w| w.0) } else { None },
             world_label: if in_world { self.native_world().map(|w| w.1) } else { None },
-            look_block: if in_world && waypoints_module::wants_look(&state.modules, &state.held) {
+            look_block: if in_world && waypoints_module::wants_look(&state.modules, &keys_now) {
                 self.aim().and_then(|(origin, dir)| self.clip_ray(origin, dir, waypoints_module::LOOK_RANGE)).map(|hit| hit.pos)
+            } else {
+                None
+            },
+            marker_target: if in_world && markers_module::wants_target(&state.modules, &keys_now) {
+                self.native_marker_target()
+            } else {
+                None
+            },
+            player_name: self.options.player_name(),
+            scoreboard_team: if in_world {
+                let pname = self.options.player_name();
+                self.score.board.players_team(&pname).map(|t| t.name.clone())
             } else {
                 None
             },
@@ -513,6 +534,7 @@ impl Game<'_> {
             }
             // `HudOverlay.draw`.
             if g.hud_allowed {
+                let mut rects: Vec<[f32; 4]> = Vec::new();
                 for m in &mut state.modules.all {
                     if !m.state.enabled || m.state.hud.is_none() || !m.behaviour.visible(&m.state, &g) {
                         continue;
@@ -521,7 +543,11 @@ impl Game<'_> {
                     let Some(hud) = m.state.hud.as_ref() else { continue };
                     let (x, y) = (Hud::pos(hud.fx, w, size[0]), Hud::pos(hud.fy, h, size[1]));
                     m.paint(c, x, y, &g);
+                    rects.push([x, y, size[0], size[1]]);
                 }
+                waypoints_module::set_hud_rects(rects);
+            } else {
+                waypoints_module::set_hud_rects(Vec::new());
             }
             // Message pop-ups (they never take input).
             {
@@ -584,6 +610,18 @@ impl Game<'_> {
             (action, copied, pause_action)
         });
         self.native_pause_do(pause_action);
+        for line in markers_module::take_chat_notices() {
+            if self.ui.chat.shows(horizon_client::chat::ChatSource::Client) {
+                self.ui.chat.add(
+                    &self.gui.atlas,
+                    horizon_client::text::Text::literal(line),
+                    Some(horizon_client::chat::SYSTEM_INDICATOR),
+                    horizon_client::chat::ChatSource::Client,
+                    self.ticks,
+                    self.screen == Screen::Chat,
+                );
+            }
+        }
         if let Some(text) = copied {
             self.clipboard.set(&text);
         }
@@ -707,6 +745,19 @@ impl Game<'_> {
             });
             return true;
         }
+        // Marker & clear-markers keyboard keys (state.held already tracks press/release).
+        if let WindowEvent::KeyboardInput { event: key, .. } = event
+            && let PhysicalKey::Code(code) = key.physical_key
+            && self.screen == Screen::Playing
+            && self.title.is_none()
+            && let Some(glfw) = keys::glfw(code)
+            && with_state(|s| {
+                let (mk, ck) = markers_module::keybinds(&s.modules);
+                (mk >= 0 && glfw == mk) || (ck >= 0 && glfw == ck)
+            })
+        {
+            return true;
+        }
         // The wheel turns a module (Zoom) before it turns the hotbar.
         if let WindowEvent::MouseWheel { delta, .. } = event
             && self.screen == Screen::Playing
@@ -810,6 +861,61 @@ impl Game<'_> {
             key = bare.to_owned();
         }
         Some((format!("server:{}", key.trim_end_matches('.')), address.to_owned()))
+    }
+
+    /// Entity-first, then block raycast up to `markers_module::RANGE` blocks for the Markers mod.
+    fn native_marker_target(&self) -> Option<module::MarkerTarget> {
+        let (eye, dir) = self.aim()?;
+        let block_hit = self.clip_ray(eye, dir, markers_module::RANGE);
+        let max_dist = block_hit.as_ref().map_or(markers_module::RANGE, |hit| {
+            let cx = f64::from(hit.pos[0]) + 0.5 - eye[0];
+            let cy = f64::from(hit.pos[1]) + 0.5 - eye[1];
+            let cz = f64::from(hit.pos[2]) + 0.5 - eye[2];
+            (cx * cx + cy * cy + cz * cz).sqrt().min(markers_module::RANGE)
+        });
+        // Check targeted mobs & remote players first (closer than any hit block).
+        let mut best_mob: Option<(usize, f64)> = None;
+        for (i, m) in self.mobs.iter().enumerate() {
+            if m.removed || Some(m.id) == self.riding || Some(m.id) == self.remote_camera_id() {
+                continue;
+            }
+            let bb = m.bounds();
+            let lo = bb.min_position();
+            let hi = bb.max_position();
+            if let Some(t) = ray_aabb(eye, dir, max_dist, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z])
+                && best_mob.is_none_or(|b| t < b.1)
+            {
+                best_mob = Some((i, t));
+            }
+        }
+        if let Some((idx, _)) = best_mob {
+            let m = &self.mobs[idx];
+            let bb = m.bounds();
+            let h = (bb.max_position().y - bb.min_position().y).max(0.6);
+            let (name, icon) = if let Some((_, pname)) = self.remote_player_names().into_iter().find(|(rid, _)| *rid == m.id) {
+                (pname, "player_head".to_owned())
+            } else {
+                let bare = m.kind.id.trim_start_matches("minecraft:");
+                (title_case_id(bare), String::new())
+            };
+            return Some(module::MarkerTarget {
+                pos: [m.position.x, m.position.y + h, m.position.z],
+                kind: "entity".to_owned(),
+                name,
+                icon,
+            });
+        }
+        if let Some(hit) = block_hit {
+            let raw = self.res.facts().get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2])).name.clone();
+            let bare = raw.trim_start_matches("minecraft:");
+            return Some(module::MarkerTarget {
+                pos: [f64::from(hit.pos[0]) + 0.5, f64::from(hit.pos[1]) + 1.0, f64::from(hit.pos[2]) + 0.5],
+                kind: "block".to_owned(),
+                name: title_case_id(bare),
+                icon: bare.to_owned(),
+            });
+        }
+        None
     }
 
     fn native_reach(&self) -> Option<f64> {
@@ -965,6 +1071,7 @@ impl Game<'_> {
                     with_state(|s| {
                         if down {
                             s.held.insert(g);
+                            s.tapped.insert(g);
                         } else {
                             s.held.remove(&g);
                         }
@@ -984,12 +1091,16 @@ impl Game<'_> {
                 with_state(|s| {
                     if down {
                         s.held.insert(code);
+                        s.tapped.insert(code);
                     } else {
                         s.held.remove(&code);
                     }
                 });
             }
-            WindowEvent::Focused(false) => with_state(|s| s.held.clear()),
+            WindowEvent::Focused(false) => with_state(|s| {
+                s.held.clear();
+                s.tapped.clear();
+            }),
             _ => {}
         }
     }
@@ -1517,6 +1628,8 @@ pub(super) fn native_title_apply(title: &mut horizon_client::title::Title, act: 
             None
         }
         TitleAct::Options => Some(Action::Options),
+        TitleAct::Language => Some(Action::Language),
+        TitleAct::Accessibility => Some(Action::Accessibility),
         TitleAct::Quit => Some(Action::Quit),
         TitleAct::Join(address) => Some(Action::Connect { address, lan: false }),
         TitleAct::ServerButton { id, index } => {
@@ -1652,6 +1765,46 @@ mod tests {
         g.yaw = -90.0;
         assert_eq!(g.facing(), "E");
     }
+}
+
+/// Ray-AABB slab intersection up to `max_t`; returns hit distance `t` along `dir`.
+fn ray_aabb(origin: [f64; 3], dir: [f64; 3], max_t: f64, lo: [f64; 3], hi: [f64; 3]) -> Option<f64> {
+    let (mut tmin, mut tmax) = (0.0f64, max_t);
+    for i in 0..3 {
+        if dir[i].abs() < 1e-12 {
+            if origin[i] < lo[i] || origin[i] > hi[i] {
+                return None;
+            }
+        } else {
+            let inv = 1.0 / dir[i];
+            let mut t0 = (lo[i] - origin[i]) * inv;
+            let mut t1 = (hi[i] - origin[i]) * inv;
+            if t0 > t1 {
+                std::mem::swap(&mut t0, &mut t1);
+            }
+            tmin = tmin.max(t0);
+            tmax = tmax.min(t1);
+            if tmax < tmin {
+                return None;
+            }
+        }
+    }
+    (tmin <= max_t && tmax >= 0.0).then_some(tmin)
+}
+
+/// `"grass_block"` -> `"Grass Block"`.
+fn title_case_id(id: &str) -> String {
+    id.split('_')
+        .filter(|s| !s.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(f) => format!("{}{}", f.to_uppercase(), c.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// An item id as the game's registry has it: the modules keep ids without `minecraft:` (as the Java mod does),

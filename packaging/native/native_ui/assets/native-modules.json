@@ -303,6 +303,34 @@
       "codepoint": "F42A",
       "glyph": "native_motion_blur",
       "sha256": "4a78cebcc937fa801fa6c22373ebdae394d63523f329e6d40b707e69fdf901df"
+    },
+    {
+      "id": "waypoints",
+      "label": "Waypoints",
+      "codepoint": "F42B",
+      "glyph": "native_waypoints",
+      "sha256": "98f4fbf083ac56574f9f44b653ef4e11a48ea76397f23a5afc265a894b3daec0"
+    },
+    {
+      "id": "markers",
+      "label": "Markers",
+      "codepoint": "F42C",
+      "glyph": "native_markers",
+      "sha256": "ac062cdd6896f7b52756bcf4d0652031a1702b7d3e075e7a2578696ddb47c965"
+    },
+    {
+      "id": "emotes",
+      "label": "Emotes",
+      "codepoint": "F42D",
+      "glyph": "native_emotes",
+      "sha256": "5e085efbc06502ae8642fe83c7ab6721a1304683be183761155aad9b3f5feb01"
+    },
+    {
+      "id": "discord-rpc",
+      "label": "Discord RPC",
+      "codepoint": "F42E",
+      "glyph": "native_discord_rpc",
+      "sha256": "bd07e810a01a144e19ead8a1db295ca0a2e3b965d41477daed2076fb6d137c93"
     }
   ]
 }

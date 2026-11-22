@@ -1744,6 +1744,8 @@ fn handle(kind: &str, p: &Value) {
         "voice:state" | "voice:ring" | "voice:ring-end" | "voice:declined" | "voice:ended" => super::voice::on_event(kind, p),
         "emote:play" => horizon_client::native_emotes::pushed_play(p),
         "emote:stop" => horizon_client::native_emotes::pushed_stop(p),
+        "marker:place" => super::markers_module::on_remote_place(p),
+        "marker:remove" => super::markers_module::on_remote_remove(p),
         "presence" => {
             let id = str_of(p, "userId").unwrap_or_default();
             let mut s = lock();

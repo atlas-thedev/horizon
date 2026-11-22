@@ -310,7 +310,10 @@ impl PlayerPreview {
     #[allow(clippy::too_many_arguments)]
     fn part(&mut self, s: &Arc<Image>, tw: u32, th: u32, o: [f32; 3], size: [f32; 3], uv: [f32; 2], mirror: bool, tint: u32, fallback: u32) {
         if Arc::ptr_eq(s, &self.white) {
-            self.b.cube(s, 2, 2, o, size, [0.0, 0.0], 0.0, false, fallback);
+            // The plain body: declare a texture exactly as big as this cube's unwrapped faces, so every face samples
+            // inside the 2 x 2 white image (with a 2 x 2 size the faces' regions fell outside it and drew nothing).
+            let (fw, fh) = ((2.0 * (size[0] + size[2])).ceil() as u32, (size[1] + size[2]).ceil() as u32);
+            self.b.cube(s, fw.max(1), fh.max(1), o, size, [0.0, 0.0], 0.0, false, fallback);
         } else {
             self.b.cube(s, tw, th, o, size, uv, 0.0, mirror, tint);
         }
@@ -330,9 +333,31 @@ mod tests {
         let l = wardrobe::snapshot();
         let mut p = PlayerPreview::new();
         p.draw(&mut ui, &mut c, "t", 0.0, 0.0, 300.0, 400.0, &l, "Nobody", None, None);
-        let mut batch = horizon_client::hud::HudBatch::new([600, 600]);
+        let mut batch = horizon_client::hud::HudBatch::new([600, 600], horizon_client::hud::GuiScale { requested: 0, unicode: false });
         c.finish(&mut batch);
         assert!(!batch.vertices.is_empty());
+    }
+
+    /// The Cosmetics tab inside the menu: a clip around the pane, the preview at the pane's size, a guest name.
+    #[test]
+    fn the_preview_draws_a_body_in_the_locker_pane_for_a_guest() {
+        let mut c = horizon_client::native_ui::canvas();
+        c.begin(1280, 720, 1.0);
+        let mut ui = Ui::default();
+        ui.begin(&[], 1.0);
+        let l = wardrobe::snapshot();
+        let mut p = PlayerPreview::new();
+        let (x, y, w, h) = (856.0, 130.0, 254.0, 512.0);
+        c.push_clip(x + 1.0, y + 52.0, w - 2.0, h - 52.0 - 92.0);
+        let before = { let mut b = horizon_client::hud::HudBatch::new([1280, 720], horizon_client::hud::GuiScale { requested: 0, unicode: false }); c.finish(&mut b); b.vertices.len() };
+        c.begin(1280, 720, 1.0);
+        c.push_clip(x + 1.0, y + 52.0, w - 2.0, h - 52.0 - 92.0);
+        p.draw(&mut ui, &mut c, "menu:preview", x, y + 56.0, w, h - 56.0 - 98.0, &l, "NativeDev", None, None);
+        c.pop_clip();
+        let mut batch = horizon_client::hud::HudBatch::new([1280, 720], horizon_client::hud::GuiScale { requested: 0, unicode: false });
+        c.finish(&mut batch);
+        eprintln!("preview vertices: {} (empty canvas: {before})", batch.vertices.len());
+        assert!(batch.vertices.len() > before + 100, "the body is drawn");
     }
 }
 

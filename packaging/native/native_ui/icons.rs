@@ -10,13 +10,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// The first module icon's codepoint.
 pub const MODULE_FIRST: u32 = 0xF400;
 /// Append only: the font's codepoints follow this order.
-const MODULE_IDS: [&str; 43] = [
+const MODULE_IDS: [&str; 47] = [
     "fps", "cps", "keystrokes", "coords", "direction", "clock", "memory", "ping", "server", "speed", "scoreboard",
     "bossbar", "togglesprint", "zoom", "fullbright", "bgfps", "effects", "armor", "inventory", "crosshair",
     "hitbox-colours", "critical-colours", "watermark", "voice", "voice-overlay", "nether-coords", "moon-phase",
     "day-night", "totem-counter", "item-counter", "playtime", "reach", "low-fire", "damage-tint", "combo",
     "cooldowns", "block-overlay", "freelook", "no-hurt-cam", "time-changer", "weather-changer", "now-playing",
-    "motion-blur",
+    "motion-blur", "waypoints", "markers", "emotes", "discord-rpc",
 ];
 
 /// A module's icon codepoint, or `fallback`.

@@ -32,14 +32,15 @@ impl Modules {
         all.extend(super::music_modules::all());
         all.extend(super::voice_modules::all());
         all.extend(super::waypoints_module::all());
+        all.extend(super::markers_module::all());
         all.extend(super::emotes_module::all(super::uiconfig::UiConfig::load(game_dir.as_deref()).emote_key));
         // The order the Java mod registers them in: it is the order of the menu's grid.
-        const ORDER: [&str; 45] = [
+        const ORDER: &[&str] = &[
             "fps", "cps", "keystrokes", "coords", "direction", "clock", "memory", "ping", "server", "speed", "scoreboard", "bossbar",
             "togglesprint", "zoom", "fullbright", "bgfps", "effects", "armor", "inventory", "crosshair", "hitbox-colours",
             "critical-colours", "watermark", "nether-coords", "moon-phase", "day-night", "totem-counter", "item-counter", "playtime",
             "reach", "combo", "cooldowns", "block-overlay", "low-fire", "damage-tint", "freelook", "no-hurt-cam", "motion-blur",
-            "time-changer", "weather-changer", "voice", "voice-overlay", "now-playing", "discord-rpc", "emotes",
+            "time-changer", "weather-changer", "voice", "voice-overlay", "now-playing", "discord-rpc", "emotes", "waypoints", "markers",
         ];
         let rank = |id: &str| ORDER.iter().position(|o| *o == id).unwrap_or(ORDER.len());
         all.sort_by_key(|m| rank(m.state.id));
@@ -205,11 +206,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut m = Modules::new(Some(dir.clone()));
         // The Java mod's defaults: FPS, Keystrokes, Scoreboard, Boss Bar, Lag Free, the watermark, Voice Chat, the Voice
-        // Overlay, Now Playing, Discord RPC, Emotes and Waypoints on.
+        // Overlay, Now Playing, Discord RPC, Emotes, Waypoints and Markers on.
         let on: Vec<_> = m.all.iter().filter(|m| m.state.enabled).map(|m| m.state.id).collect();
         assert_eq!(
             on,
-            vec!["fps", "keystrokes", "scoreboard", "bossbar", "bgfps", "watermark", "voice", "voice-overlay", "now-playing", "discord-rpc", "emotes", "waypoints"]
+            vec!["fps", "keystrokes", "scoreboard", "bossbar", "bgfps", "watermark", "voice", "voice-overlay", "now-playing", "discord-rpc", "emotes", "waypoints", "markers"]
         );
         let fps = m.get_mut("fps").unwrap();
         fps.state.enabled = false;

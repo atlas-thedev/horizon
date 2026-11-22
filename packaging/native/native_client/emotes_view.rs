@@ -1,11 +1,11 @@
-//! The Emotes tab of the Native menu: the in-game twin of the launcher's emote locker (the Java mod's EmotesView).
-//! The wheel's eight slots on top (more pages with Native Plus), your emotes under them and a few to try on. Pick a
-//! slot, then an emote to put it there; drag emotes onto slots, drag slots onto each other to swap, or drag a slot off
-//! the wheel to empty it. The stage on the left plays the emote on your own skin, and in a world it can play it for
-//! everyone.
+//! The Emotes section of the unified Locker: shares the left Locker sidebar (`locker::draw_sidebar`), center
+//! search + A-Z sort + 3-column square rounded emote cards with emerald `✓ Equipped` bottom strip and centered
+//! names below, and right-hand 2×4 vertical wheel slots panel (Slots 1..8 per page, numbered top-left, remove
+//! button on occupied slots, `◀ Page N ▶` footer, plus Play & Replay actions).
+
 use super::emote_wheel::poster_url;
-use super::locker::session_lock;
-use super::menu::{CARD, CARD_HOVER, clamp01, ease, empty, glow};
+use super::locker::{self, SIDEBAR_EMOTES, SIDEBAR_W, session_lock};
+use super::menu::{clamp01, ease, empty};
 use super::net::{self, Pic};
 use super::preview3d;
 use super::scroll::Scroll;
@@ -16,13 +16,22 @@ use horizon_client::native_ui::{Canvas, Image, font, theme};
 use serde_json::Value;
 use std::sync::Arc;
 
+/// Outcome of drawing the Emotes Locker view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmotesAct {
+    None,
+    /// Played an emote in the world: close the menu.
+    Close,
+    /// Clicked a cosmetic slot (0..7) in the shared Locker sidebar.
+    SwitchCosmetic(usize),
+}
+
 /// One emote of the account's catalogue (`me.catalog`).
 #[derive(Clone)]
 struct Emote {
     id: String,
     name: String,
     hash: String,
-    /// In the player's locker; free emotes not yet claimed and store emotes are not.
     owned: bool,
     free: bool,
     exclusive: bool,
@@ -46,7 +55,6 @@ fn catalog(me: &Value) -> Vec<Emote> {
                 id: o["id"].as_str()?.to_owned(),
                 name: o["name"].as_str().unwrap_or("Emote").to_owned(),
                 hash: o["hash"].as_str().unwrap_or("").to_owned(),
-                // an older reply (or cache) without the flag lists only what the player has
                 owned: o["owned"].as_bool().unwrap_or(true),
                 free: o["free"].as_bool().unwrap_or(false),
                 exclusive: o["exclusive"].as_bool().unwrap_or(false),
@@ -73,20 +81,16 @@ fn next_open(row: &WheelPage, after: usize) -> usize {
 pub struct EmotesView {
     page: usize,
     slot: usize,
-    /// The emote on the stage (its id), and since when it plays.
     pick: Option<String>,
     pick_at: f64,
-    equipped_only: bool,
+    sort_desc: bool,
     shown_at: f64,
-    /// Dragging an emote, from a wheel slot (`drag_from`) or a card (`None`); armed until the mouse moves.
     drag_id: Option<String>,
     drag_from: Option<usize>,
     drag_x: f32,
     drag_y: f32,
     dragging: bool,
-    /// The slot under the mouse this frame (set while the wheel draws), for drops.
     hovered_slot: Option<usize>,
-    /// The card under the mouse and since when: its emote plays from its still pose, not from a random moment.
     hover_card: Option<String>,
     hover_at: f64,
     scroll: Scroll,
@@ -109,7 +113,7 @@ impl EmotesView {
             slot: 0,
             pick: None,
             pick_at: 0.0,
-            equipped_only: false,
+            sort_desc: false,
             shown_at: 0.0,
             drag_id: None,
             drag_from: None,
@@ -152,22 +156,43 @@ impl EmotesView {
         self.pick_at = now;
     }
 
-    /// The page. True when an emote was played in the world (the menu then closes).
+    /// Draws the unified Emotes Locker view.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, who: &str, x: f32, y: f32, w: f32, h: f32, in_world: bool) -> bool {
+    pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, who: &str, x: f32, y: f32, w: f32, h: f32, in_world: bool) -> EmotesAct {
+        // 1. Shared Locker Left Sidebar (~194 px)
+        let sb_w = SIDEBAR_W.min(w * 0.24);
+        if let Some(nav) = locker::draw_sidebar(ui, c, SIDEBAR_EMOTES, x, y, sb_w, h)
+            && nav != SIDEBAR_EMOTES
+        {
+            return EmotesAct::SwitchCosmetic(nav);
+        }
+        c.fill(x + sb_w + 10.0, y, 1.0, h, theme::HAIRLINE);
+
+        let body_x = x + sb_w + 22.0;
+        let body_w = (w - sb_w - 22.0).max(200.0);
+
         if !net::signed_in() {
-            session_lock(ui, c, "emotes:lock", x, y, w, h);
-            return false;
+            session_lock(ui, c, "emotes:lock", body_x, y, body_w, h);
+            return EmotesAct::None;
         }
         let me = native_emotes::snapshot();
         if !me.is_object() {
-            ui.dots(c, x + w / 2.0, y + h / 2.0, theme::TEXT_SECONDARY);
-            return false;
+            ui.dots(c, body_x + body_w / 2.0, y + h / 2.0, theme::TEXT_SECONDARY);
+            return EmotesAct::None;
         }
         let items = catalog(&me);
         if items.is_empty() {
-            empty(c, x, y, w, h.min(280.0), theme::I_SMILE, "No emotes yet", "Get emotes in the Native Store in the launcher, then put them on your wheel here.");
-            return false;
+            empty(
+                c,
+                body_x,
+                y,
+                body_w,
+                h.min(280.0),
+                theme::I_SMILE,
+                "No emotes yet",
+                "Get emotes in the Native Store in the launcher, then put them on your wheel here.",
+            );
+            return EmotesAct::None;
         }
         let pages = native_emotes::pages_of(&me);
         let limit = me["pageLimit"].as_u64().unwrap_or(1).max(1) as usize;
@@ -182,22 +207,54 @@ impl EmotesView {
         }
         let name = native_emotes::local_name();
         let (skin, slim) = preview3d::wheel_skin(if name.is_empty() { who } else { &name });
-
-        let sw = (w * 0.34).min(300.0);
-        let close = self.stage(ui, c, &items, &row, &pages, usable, in_world, &skin, slim, x, y, sw, h);
-
-        let (lx, lw) = (x + sw + 20.0, w - sw - 20.0);
         let is_plus = me["isPlus"].as_bool().unwrap_or(false);
-        let wy = self.wheel(ui, c, &items, &row, &pages, page_count, limit, usable, is_plus, &skin, slim, lx, y, lw);
 
-        // the player's emotes, then a few to try on
-        let fy = wy + 18.0;
-        c.text(font::SEMIBOLD, 10.5, "YOUR EMOTES", lx, fy, theme::TEXT_MUTED);
-        let mut chip_x = lx + c.text_width(font::SEMIBOLD, 10.5, "YOUR EMOTES") + 14.0;
-        chip_x += self.chip(ui, c, "emotes:all", chip_x, fy - 7.0, "All", !self.equipped_only) + 6.0;
-        self.chip(ui, c, "emotes:equipped", chip_x, fy - 7.0, "On this page", self.equipped_only);
-        let search_w = (lw * 0.4).min(220.0);
-        self.search_box(ui, c, lx + lw - search_w, fy - 10.0, search_w, 30.0);
+        // 2. Right column (~244 px): 2x4 vertical wheel slots panel + Play/Replay + Page footer
+        let right_w = (w * 0.27).clamp(218.0, 256.0);
+        let rx = x + w - right_w;
+        c.fill(rx - 10.0, y, 1.0, h, theme::HAIRLINE);
+        let close = self.draw_wheel_panel(
+            ui,
+            c,
+            &items,
+            &row,
+            &pages,
+            page_count,
+            limit,
+            usable,
+            is_plus,
+            in_world,
+            &skin,
+            slim,
+            rx,
+            y,
+            right_w,
+            h,
+        );
+
+        // 3. Center column: Search + A-Z sort + 3-column square rounded emote cards
+        let cx = body_x;
+        let cw = (rx - 22.0 - cx).max(160.0);
+        let bar_h = 32.0;
+        let sort_w = 66.0;
+        let search_w = (cw - sort_w - 8.0).max(80.0);
+        self.search_box(ui, c, cx, y, search_w, bar_h);
+        let sort_x = cx + search_w + 8.0;
+        let sort_lbl = if self.sort_desc { "Z-A" } else { "A-Z" };
+        let over_sort = ui.hover(c, sort_x, y, sort_w, bar_h);
+        let shv = ui.anim_on("emotes:sort#h", over_sort, 14.0);
+        c.round(sort_x, y, sort_w, bar_h, 8.0, theme::mix(0xFF14161E, 0xFF1C202C, shv));
+        c.outline(sort_x, y, sort_w, bar_h, 8.0, 1.0, theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, shv));
+        c.icon(theme::I_ARROWS_UP, 11.5, sort_x + 16.0, y + bar_h / 2.0, theme::TEXT_SECONDARY);
+        let slh = c.line_height(font::SEMIBOLD, 11.0);
+        c.text(font::SEMIBOLD, 11.0, sort_lbl, sort_x + 28.0, y + (bar_h - slh) / 2.0, theme::TEXT_STRONG);
+        if over_sort {
+            ui.cursor_hand = true;
+            ui.tip("Toggle alphabetical sort");
+        }
+        if ui.clicked(c, "emotes:sort", sort_x, y, sort_w, bar_h) {
+            self.sort_desc = !self.sort_desc;
+        }
 
         let needle = self.search.value().trim().to_lowercase();
         let mut mine: Vec<&Emote> = Vec::new();
@@ -207,175 +264,80 @@ impl EmotesView {
                 continue;
             }
             if it.owned {
-                if !self.equipped_only || index_of(&row, &it.id).is_some() {
-                    mine.push(it);
-                }
-            } else if !self.equipped_only && others.len() < 8 {
+                mine.push(it);
+            } else if others.len() < 9 {
                 others.push(it);
             }
         }
+        let cmp = |a: &&Emote, b: &&Emote| {
+            let ord = a.label().to_lowercase().cmp(&b.label().to_lowercase());
+            if self.sort_desc { ord.reverse() } else { ord }
+        };
+        mine.sort_by(cmp);
+        others.sort_by(cmp);
+
         let save_error = native_emotes::save_error();
-        let gy = fy + 30.0;
+        let gy = y + bar_h + 12.0;
         let gh = y + h - gy - if save_error.is_some() { 22.0 } else { 0.0 };
-        let over_grid = ui.hover(c, lx, gy, lw, gh);
-        let gap = 10.0;
-        let cols = (((lw + gap) / (112.0 + gap)) as usize).max(3);
-        let tw = (lw - gap * (cols - 1) as f32) / cols as f32;
-        let th = tw * 0.9 + 30.0;
-        let off = self.scroll.begin(ui, c, lx, gy, lw + 6.0, gh);
+        let over_grid = ui.hover(c, cx, gy, cw, gh);
+        let gap = 12.0;
+        let cols = 3usize;
+        let card_w = (cw - gap * (cols - 1) as f32) / cols as f32;
+        let sq_h = card_w;
+        let label_h = 22.0;
+        let cell_h = sq_h + label_h;
+        let off = self.scroll.begin(ui, c, cx, gy, cw + 6.0, gh);
         let cy = gy - off;
         let mut n = 0usize;
         for (i, it) in mine.iter().enumerate() {
-            let ix = lx + (i % cols) as f32 * (tw + gap);
-            let iy = cy + (i / cols) as f32 * (th + gap);
-            if iy + th >= gy - 4.0 && iy <= gy + gh + 4.0 {
-                let e = ease(clamp01(((ui.now - self.shown_at - 30.0 - n as f64 * 18.0) / 280.0) as f32));
+            let ix = cx + (i % cols) as f32 * (card_w + gap);
+            let iy = cy + (i / cols) as f32 * (cell_h + gap);
+            if iy + cell_h >= gy - 4.0 && iy <= gy + gh + 4.0 {
+                let e = ease(clamp01(((ui.now - self.shown_at - 20.0 - n as f64 * 16.0) / 260.0) as f32));
                 c.push_alpha(e);
-                self.card(ui, c, it, &row, &pages, &skin, slim, ix, iy + (1.0 - e) * 8.0, tw, th);
+                self.card(ui, c, it, &row, &pages, &skin, slim, ix, iy + (1.0 - e) * 8.0, card_w, sq_h, label_h);
                 c.pop_alpha();
             }
             n += 1;
         }
-        let mut used = if mine.is_empty() { 0.0 } else { mine.len().div_ceil(cols) as f32 * (th + gap) };
+        let mut used = if mine.is_empty() { 0.0 } else { mine.len().div_ceil(cols) as f32 * (cell_h + gap) };
         if mine.is_empty() {
-            let msg = if self.equipped_only {
-                "Nothing on this page yet: pick a slot, then an emote.".to_owned()
-            } else if needle.is_empty() {
+            let msg = if needle.is_empty() {
                 "No emotes in your locker yet.".to_owned()
             } else {
                 format!("No emote matches \u{201C}{}\u{201D}.", self.search.value().trim())
             };
-            let msg = c.ellipsize(font::REGULAR, 12.0, &msg, lw);
-            c.text(font::REGULAR, 12.0, &msg, lx, cy + 8.0, theme::TEXT_MUTED);
+            let msg = c.ellipsize(font::REGULAR, 12.0, &msg, cw);
+            c.text(font::REGULAR, 12.0, &msg, cx, cy + 8.0, theme::TEXT_MUTED);
             used = 36.0;
         }
         if !others.is_empty() {
-            let oy = cy + used + 10.0;
-            c.text(font::SEMIBOLD, 10.5, "TRY ONE ON", lx, oy, theme::TEXT_MUTED);
-            let store = "More in the Native Store";
-            let stw = c.text_width(font::MEDIUM, 11.0, store);
-            c.text(font::MEDIUM, 11.0, store, lx + lw - stw, oy, theme::TEXT_MUTED);
-            let oy = oy + 22.0;
+            let oy = cy + used + 8.0;
+            c.text(font::SEMIBOLD, 10.0, "TRY ONE ON", cx, oy, theme::TEXT_MUTED);
+            let oy = oy + 20.0;
             for (i, it) in others.iter().enumerate() {
-                let ix = lx + (i % cols) as f32 * (tw + gap);
-                let iy = oy + (i / cols) as f32 * (th + gap);
-                if iy + th >= gy - 4.0 && iy <= gy + gh + 4.0 {
-                    self.card(ui, c, it, &row, &pages, &skin, slim, ix, iy, tw, th);
+                let ix = cx + (i % cols) as f32 * (card_w + gap);
+                let iy = oy + (i / cols) as f32 * (cell_h + gap);
+                if iy + cell_h >= gy - 4.0 && iy <= gy + gh + 4.0 {
+                    self.card(ui, c, it, &row, &pages, &skin, slim, ix, iy, card_w, sq_h, label_h);
                 }
             }
-            used += 32.0 + others.len().div_ceil(cols) as f32 * (th + gap);
+            used += 28.0 + others.len().div_ceil(cols) as f32 * (cell_h + gap);
         }
         self.scroll.end(ui, c, used);
         if let Some(err) = &save_error {
-            let err = c.ellipsize(font::MEDIUM, 11.5, err, lw);
-            c.text(font::MEDIUM, 11.5, &err, lx, y + h - 14.0, 0xFFFCA5A5);
+            let err = c.ellipsize(font::MEDIUM, 11.0, err, cw);
+            c.text(font::MEDIUM, 11.0, &err, cx, y + h - 14.0, 0xFFFCA5A5);
         }
 
         self.drag(ui, c, &items, &pages, over_grid, &skin, slim);
-        close
+        if close { EmotesAct::Close } else { EmotesAct::None }
     }
 
-    /// Left: the emote playing on your own skin, and what you can do with it. True when it was played in the world.
+    /// Right column: Play / Replay header + 2×4 vertical wheel slots (Slots 1..8 per page, numbered top-left,
+    /// small remove button on occupied slots) + `◀ Page N ▶` footer.
     #[allow(clippy::too_many_arguments)]
-    fn stage(
-        &mut self,
-        ui: &mut Ui,
-        c: &mut Canvas,
-        items: &[Emote],
-        row: &WheelPage,
-        pages: &[WheelPage],
-        usable: usize,
-        in_world: bool,
-        skin: &Arc<Image>,
-        slim: bool,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-    ) -> bool {
-        let it = find(items, self.pick.as_deref()).cloned();
-        c.round(x, y, w, h, 14.0, 0x66000000);
-        glow(c, x, y, w, h * 0.6, 14.0, 0x10FFFFFF);
-        c.outline(x, y, w, h, 14.0, 1.0, theme::HAIRLINE);
-        c.text(font::SEMIBOLD, 10.5, "PREVIEW", x + 16.0, y + 16.0, theme::TEXT_MUTED);
-        let title = it.as_ref().map_or_else(|| "Pick an emote".to_owned(), Emote::label);
-        let title = c.ellipsize(font::SEMIBOLD, 15.0, &title, w - 32.0);
-        c.text(font::SEMIBOLD, 15.0, &title, x + 16.0, y + 32.0, theme::TEXT_STRONG);
-        let (px, py, pw, ph) = (x + 12.0, y + 64.0, w - 24.0, h - 64.0 - 132.0);
-        match &it {
-            None => c.icon(theme::I_SMILE, 34.0, x + w / 2.0, py + ph / 2.0, theme::TEXT_MUTED),
-            Some(e) => {
-                native_emotes::want_clip(&e.hash);
-                let elapsed = Some((ui.now - self.pick_at).max(0.0));
-                match native_emotes::preview_pose(&e.hash, elapsed) {
-                    Some(pose) => {
-                        c.push_clip(x + 1.0, py, w - 2.0, ph);
-                        // draw_wheel takes the emote's props too (tools/native/native_emotes.py adds them)
-                        let props = native_emotes::preview_props(&e.hash, elapsed);
-                        preview3d::fit_emote(&e.hash, slim);
-                        preview3d::draw_wheel(c, skin, slim, pose, [px + pw * 0.1, py + ph * 0.04, pw * 0.8, ph * 0.92], props);
-                        c.pop_clip();
-                    }
-                    None => ui.dots(c, x + w / 2.0, py + ph / 2.0, theme::TEXT_MUTED),
-                }
-            }
-        }
-        let at = it.as_ref().and_then(|e| index_of(row, &e.id));
-        let sub = match &it {
-            None => "Your emotes play here".to_owned(),
-            Some(e) if e.owned => at.map_or_else(|| "In your locker".to_owned(), |i| format!("On slot {}", i + 1)),
-            Some(e) if e.free => "Free emote".to_owned(),
-            Some(e) if e.exclusive => "Exclusive".to_owned(),
-            Some(_) => "In the Native Store".to_owned(),
-        };
-        let subw = c.text_width(font::REGULAR, 11.0, &sub);
-        c.text(font::REGULAR, 11.0, &sub, x + (w - subw) / 2.0, y + h - 122.0, theme::TEXT_MUTED);
-        c.fill(x + 16.0, y + h - 100.0, w - 32.0, 1.0, theme::HAIRLINE);
-        let (bx, bw, bh) = (x + 16.0, w - 32.0, 34.0);
-        // the big one: play it in the world for everyone, or say why not
-        let ry = y + h - 88.0;
-        let mut close = false;
-        let playable = in_world && at.is_some() && self.page < usable;
-        let hint = if !in_world { "Join a world to play emotes" } else if at.is_none() { "Put it on the wheel to play it" } else { "Play in game" };
-        if playable {
-            if ui.button(c, "emotes:play", bx, ry, bw, bh, hint, theme::I_PLAY, ui::BTN_PRIMARY)
-                && let Some(slot) = at
-            {
-                close = native_emotes::play(self.page, slot);
-            }
-        } else if it.is_some() {
-            c.round(bx, ry, bw, bh, 10.0, theme::SUBTLE);
-            c.outline(bx, ry, bw, bh, 10.0, 1.0, theme::HAIRLINE);
-            let tw = c.text_width(font::SEMIBOLD, 12.0, hint);
-            let lh = c.line_height(font::SEMIBOLD, 12.0);
-            c.text(font::SEMIBOLD, 12.0, hint, bx + (bw - tw) / 2.0, ry + (bh - lh) / 2.0, theme::TEXT_MUTED);
-        }
-        let Some(e) = it else { return close };
-        let (by, hw) = (ry + bh + 8.0, (bw - 8.0) / 2.0);
-        let hx = bx + hw + 8.0;
-        if ui.button(c, "emotes:replay", bx, by, hw, bh, "Replay", theme::I_REFRESH, ui::BTN_GLASS) {
-            self.pick_at = ui.now;
-        }
-        if native_emotes::saving() {
-            c.round(hx, by, hw, bh, 10.0, theme::SUBTLE_HOVER);
-            ui.dots(c, hx + hw / 2.0, by + bh / 2.0, theme::TEXT_STRONG);
-        } else if let Some(i) = at {
-            if ui.button(c, "emotes:remove", hx, by, hw, bh, "Unequip", theme::I_X, ui::BTN_GLASS) {
-                native_emotes::save_loadout(native_emotes::equip(pages, self.page, i, None));
-            }
-        } else if e.owned {
-            if ui.button(c, "emotes:equip", hx, by, hw, bh, &format!("To slot {}", self.slot + 1), theme::I_PLUS, ui::BTN_GLASS) {
-                self.equip_into(&e, pages, self.slot, ui.now);
-            }
-        } else if e.free && ui.button(c, "emotes:claim", hx, by, hw, bh, "Add", theme::I_PLUS, ui::BTN_GLASS) {
-            native_emotes::claim(&e.id, &e.label());
-        }
-        close
-    }
-
-    /// The eight slots of one wheel page, with the page switcher. Returns the bottom edge.
-    #[allow(clippy::too_many_arguments)]
-    fn wheel(
+    fn draw_wheel_panel(
         &mut self,
         ui: &mut Ui,
         c: &mut Canvas,
@@ -386,61 +348,122 @@ impl EmotesView {
         limit: usize,
         usable: usize,
         is_plus: bool,
+        in_world: bool,
         skin: &Arc<Image>,
         slim: bool,
         x: f32,
         y: f32,
         w: f32,
-    ) -> f32 {
-        c.text(font::SEMIBOLD, 10.5, "YOUR WHEEL", x, y, theme::TEXT_MUTED);
-        c.text(font::SEMIBOLD, 17.0, "Emote slots", x, y + 14.0, theme::TEXT_STRONG);
-        // page switcher, right
-        let mut px = x + w;
-        if is_plus && pages.len() < limit {
-            px -= 30.0;
-            if ui.icon_button(c, "emotes:addpage", px, y + 6.0, 28.0, theme::I_PLUS, Some("Add wheel page")) && !native_emotes::saving() {
-                native_emotes::save_loadout(native_emotes::with_new_page(pages, limit));
-                self.page = pages.len();
-                self.slot = 0;
-            }
-        }
-        if page_count > 1 || is_plus {
-            px -= 30.0;
-            if ui.icon_button(c, "emotes:next", px, y + 6.0, 28.0, theme::I_CHEVRON_RIGHT, Some("Next wheel page")) && self.page + 1 < page_count {
-                self.page += 1;
-                self.pick = None;
-            }
-            let label = format!("Page {} / {}", self.page + 1, page_count);
-            let lw = c.text_width(font::MEDIUM, 11.5, &label);
-            px -= lw + 10.0;
-            let lh = c.line_height(font::MEDIUM, 11.5);
-            c.text(font::MEDIUM, 11.5, &label, px + 4.0, y + 20.0 - lh / 2.0, theme::TEXT_SECONDARY);
-            px -= 30.0;
-            if ui.icon_button(c, "emotes:prev", px, y + 6.0, 28.0, theme::I_CHEVRON_LEFT, Some("Previous wheel page")) && self.page > 0 {
-                self.page -= 1;
-                self.pick = None;
+        h: f32,
+    ) -> bool {
+        let mut close = false;
+        let it = find(items, self.pick.as_deref()).cloned();
+        let at = it.as_ref().and_then(|e| index_of(row, &e.id));
+
+        // Top action bar: Play & Replay buttons (matching Native's button theme).
+        let top_h = 32.0;
+        let playable = in_world && at.is_some() && self.page < usable;
+        let play_w = (w - 8.0) * 0.56;
+        let replay_w = w - play_w - 8.0;
+        if playable {
+            if ui.button(c, "emotes:play", x, y, play_w, top_h, "Play", theme::I_PLAY, ui::BTN_PRIMARY)
+                && let Some(slot) = at
+            {
+                close = native_emotes::play(self.page, slot);
             }
         } else {
-            let tip = "Native Plus adds more wheel pages";
-            let tw = c.text_width(font::REGULAR, 11.0, tip);
-            let lh = c.line_height(font::REGULAR, 11.0);
-            c.text(font::REGULAR, 11.0, tip, x + w - tw, y + 20.0 - lh / 2.0, theme::TEXT_MUTED);
+            let lbl = if !in_world { "Join world" } else if at.is_none() { "Select slot" } else { "Play" };
+            c.round(x, y, play_w, top_h, 8.0, theme::SUBTLE);
+            c.outline(x, y, play_w, top_h, 8.0, 1.0, theme::HAIRLINE);
+            let tw = c.text_width(font::SEMIBOLD, 11.0, lbl);
+            let lh = c.line_height(font::SEMIBOLD, 11.0);
+            c.text(font::SEMIBOLD, 11.0, lbl, x + (play_w - tw) / 2.0, y + (top_h - lh) / 2.0, theme::TEXT_MUTED);
+        }
+        if ui.button(c, "emotes:replay", x + play_w + 8.0, y, replay_w, top_h, "Replay", theme::I_REFRESH, ui::BTN_GLASS) {
+            self.pick_at = ui.now;
         }
 
-        let (sy, gap) = (y + 44.0, 8.0);
-        let s = ((w - gap * 7.0) / 8.0).min(92.0);
-        let sx = x + (w - (s * 8.0 + gap * 7.0)) / 2.0;
+        // Main dark container for 2×4 wheel slots + bottom page footer
+        let box_y = y + top_h + 10.0;
+        let box_h = h - top_h - 10.0;
+        c.round(x, box_y, w, box_h, 10.0, 0xFF101218);
+        c.outline(x, box_y, w, box_h, 10.0, 1.0, theme::HAIRLINE);
+
+        let footer_h = 34.0;
+        let grid_area_h = box_h - footer_h - 16.0;
+        let gap = 10.0;
+        let slot_by_w = (w - 28.0 - gap) / 2.0;
+        let slot_by_h = (grid_area_h - gap * 3.0) / 4.0;
+        let s = slot_by_w.min(slot_by_h).clamp(48.0, 92.0);
+        let gx = x + (w - (s * 2.0 + gap)) / 2.0;
+        let gy = box_y + (grid_area_h + 12.0 - (s * 4.0 + gap * 3.0)) / 2.0;
+
         let locked = self.page >= usable;
         self.hovered_slot = None;
-        for i in 0..8 {
-            self.slot_tile(ui, c, items, row, pages, i, sx + i as f32 * (s + gap), sy, s, locked, skin, slim);
+        for i in 0..8usize {
+            let col = i % 2;
+            let r = i / 2;
+            self.slot_tile(
+                ui,
+                c,
+                items,
+                row,
+                pages,
+                i,
+                gx + col as f32 * (s + gap),
+                gy + r as f32 * (s + gap),
+                s,
+                locked,
+                skin,
+                slim,
+            );
         }
-        let bottom = sy + s + 20.0;
-        let help = if locked { "This page needs Native Plus to play." } else { "Pick a slot, then an emote. Drag to move, drag off to remove." };
-        let help = c.ellipsize(font::REGULAR, 11.0, help, w);
-        c.text(font::REGULAR, 11.0, &help, x, bottom - 8.0, theme::TEXT_MUTED);
-        c.fill(x, bottom + 10.0, w, 1.0, theme::HAIRLINE);
-        bottom + 14.0
+
+        // Bottom footer: ◀  Page N  ▶ (+ Add page if Plus)
+        let fy = box_y + box_h - footer_h;
+        c.fill(x + 1.0, fy, w - 2.0, 1.0, theme::HAIRLINE);
+        let page_lbl = format!("Page {}", self.page + 1);
+        let plw = c.text_width(font::SEMIBOLD, 11.5, &page_lbl);
+        let plh = c.line_height(font::SEMIBOLD, 11.5);
+        c.text(font::SEMIBOLD, 11.5, &page_lbl, x + (w - plw) / 2.0, fy + (footer_h - plh) / 2.0, theme::TEXT_STRONG);
+
+        let can_prev = self.page > 0;
+        let can_next = self.page + 1 < page_count;
+        let over_prev = can_prev && ui.hover(c, x + 8.0, fy + 3.0, 28.0, 28.0);
+        let over_next = can_next && ui.hover(c, x + w - 36.0, fy + 3.0, 28.0, 28.0);
+        c.icon(
+            theme::I_CHEVRON_LEFT,
+            13.0,
+            x + 22.0,
+            fy + footer_h / 2.0,
+            if over_prev { theme::TEXT_STRONG } else if can_prev { theme::TEXT_SECONDARY } else { theme::alpha(theme::TEXT_MUTED, 0.4) },
+        );
+        if can_prev && ui.clicked(c, "emotes:prev", x + 8.0, fy + 3.0, 28.0, 28.0) {
+            self.page -= 1;
+            self.pick = None;
+        }
+        let next_x = if is_plus && pages.len() < limit { x + w - 62.0 } else { x + w - 36.0 };
+        c.icon(
+            theme::I_CHEVRON_RIGHT,
+            13.0,
+            next_x + 14.0,
+            fy + footer_h / 2.0,
+            if over_next { theme::TEXT_STRONG } else if can_next { theme::TEXT_SECONDARY } else { theme::alpha(theme::TEXT_MUTED, 0.4) },
+        );
+        if can_next && ui.clicked(c, "emotes:next", next_x, fy + 3.0, 28.0, 28.0) {
+            self.page += 1;
+            self.pick = None;
+        }
+        if is_plus
+            && pages.len() < limit
+            && ui.icon_button(c, "emotes:addpage", x + w - 32.0, fy + 4.0, 26.0, theme::I_PLUS, Some("Add wheel page"))
+            && !native_emotes::saving()
+        {
+            native_emotes::save_loadout(native_emotes::with_new_page(pages, limit));
+            self.page = pages.len();
+            self.slot = 0;
+        }
+        close
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -480,58 +503,89 @@ impl EmotesView {
         }
         let hv = ui.anim_on(&format!("{id}#h"), over || target, 14.0);
         let on = ui.anim_on(&format!("{id}#on"), self.slot == i, 16.0);
-        c.round(x, y, s, s, 12.0, theme::mix(theme::mix(CARD, CARD_HOVER, hv), 0xFF16181D, on * 0.6));
+        c.round(x, y, s, s, 8.0, theme::mix(0xFF191C26, 0xFF232736, hv.max(on * 0.7)));
         c.outline(
             x,
             y,
             s,
             s,
-            12.0,
+            8.0,
             if on > 0.5 || target { 1.5 } else { 1.0 },
             theme::mix(theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv), 0xE6FFFFFF, on.max(if target { 1.0 } else { 0.0 })),
         );
         match &it {
             Some(e) if !(self.dragging && self.drag_from == Some(i)) => {
-                let pad = s * 0.12;
-                self.poster(ui, c, e, skin, slim, x + pad, y + pad * 0.6, s - pad * 2.0, s - pad * 2.0 - 8.0, false);
-                let n = c.ellipsize(font::MEDIUM, 9.5, &e.label(), s - 10.0);
-                let nw = c.text_width(font::MEDIUM, 9.5, &n);
-                c.text(font::MEDIUM, 9.5, &n, x + (s - nw) / 2.0, y + s - 15.0, theme::TEXT_SECONDARY);
+                let pad = s * 0.10;
+                let playing = self.pick.as_deref() == Some(e.id.as_str());
+                self.poster(ui, c, e, skin, slim, x + pad, y + pad, s - pad * 2.0, s - pad * 2.0, playing);
             }
             Some(_) => {}
-            None => c.icon(theme::I_PLUS, 16.0, x + s / 2.0, y + s / 2.0 - 4.0, theme::alpha(theme::TEXT_MUTED, 0.6 + 0.4 * hv)),
+            None => {}
         }
-        c.text(font::SEMIBOLD, 9.5, &(i + 1).to_string(), x + 7.0, y + 5.0, if locked { theme::TEXT_MUTED } else { theme::TEXT_SECONDARY });
-        let tip = format!("Remove from slot {}", i + 1);
-        if it.is_some()
-            && over
-            && !self.dragging
-            && ui.icon_button(c, &format!("{id}:clear"), x + s - 24.0, y + 3.0, 21.0, theme::I_X, Some(tip.as_str()))
-            && !native_emotes::saving()
-        {
-            self.drag_id = None;
-            native_emotes::save_loadout(native_emotes::equip(pages, self.page, i, None));
+        // Slot number 1..8 in top-left corner
+        c.text(
+            font::SEMIBOLD,
+            10.0,
+            &(i + 1).to_string(),
+            x + 6.0,
+            y + 5.0,
+            if locked { theme::TEXT_MUTED } else { theme::TEXT_SECONDARY },
+        );
+        // Small circular remove button in top-right corner on occupied slots
+        if it.is_some() && !self.dragging {
+            let (rx, ry, rs) = (x + s - 20.0, y + 4.0, 16.0);
+            let over_rm = ui.hover(c, rx - 2.0, ry - 2.0, rs + 4.0, rs + 4.0);
+            c.circle(rx + rs / 2.0, ry + rs / 2.0, rs / 2.0, if over_rm { 0xFFDC2626 } else { 0xCC222633 });
+            c.icon(theme::I_TRASH, 9.0, rx + rs / 2.0, ry + rs / 2.0, 0xFFFFFFFF);
+            if over_rm {
+                ui.cursor_hand = true;
+                ui.tip(&format!("Remove from slot {}", i + 1));
+            }
+            if ui.clicked(c, &format!("{id}:clear"), rx - 2.0, ry - 2.0, rs + 4.0, rs + 4.0) && !native_emotes::saving() {
+                self.drag_id = None;
+                native_emotes::save_loadout(native_emotes::equip(pages, self.page, i, None));
+            }
+        }
+        if over {
+            ui.cursor_hand = true;
         }
     }
 
-    /// An emote card: a click puts it on the chosen slot (or previews it when it is not yours).
+    /// Square rounded emote card (`radius = 10px`) with crisp green `✓ Equipped` bottom strip and centered name below.
     #[allow(clippy::too_many_arguments)]
-    fn card(&mut self, ui: &mut Ui, c: &mut Canvas, it: &Emote, row: &WheelPage, pages: &[WheelPage], skin: &Arc<Image>, slim: bool, x: f32, y: f32, w: f32, h: f32) {
+    fn card(
+        &mut self,
+        ui: &mut Ui,
+        c: &mut Canvas,
+        it: &Emote,
+        row: &WheelPage,
+        pages: &[WheelPage],
+        skin: &Arc<Image>,
+        slim: bool,
+        x: f32,
+        y: f32,
+        w: f32,
+        sq_h: f32,
+        label_h: f32,
+    ) {
         let id = format!("emotes:card:{}", it.id);
-        let over = ui.hover(c, x, y, w, h);
+        let over = ui.hover(c, x, y, w, sq_h + label_h);
         if ui.pressed && over && it.owned {
             self.drag_id = Some(it.id.clone());
             self.drag_from = None;
             self.drag_x = ui.mx;
             self.drag_y = ui.my;
         }
-        if ui.clicked(c, &id, x, y, w, h) && !self.dragging {
+        if ui.clicked(c, &id, x, y, w, sq_h + label_h) && !self.dragging {
             self.show(it, ui.now);
             if it.owned && index_of(row, &it.id) != Some(self.slot) && !native_emotes::saving() {
                 self.equip_into(it, pages, self.slot, ui.now);
+            } else if !it.owned && it.free {
+                native_emotes::claim(&it.id, &it.label());
             }
         }
         let at = index_of(row, &it.id);
+        let equipped = at.is_some();
         if over && self.hover_card.as_deref() != Some(it.id.as_str()) {
             self.hover_card = Some(it.id.clone());
             self.hover_at = ui.now;
@@ -541,30 +595,46 @@ impl EmotesView {
         let sel = self.pick.as_deref() == Some(it.id.as_str());
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let sl = ui.anim_on(&format!("{id}#s"), sel, 16.0);
-        c.round(x, y, w, h, 12.0, theme::mix(CARD, CARD_HOVER, hv.max(sl * 0.7)));
-        c.outline(x, y, w, h, 12.0, if sel { 1.5 } else { 1.0 }, theme::mix(theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv), 0xE6FFFFFF, sl));
-        let meta = 28.0;
-        c.round(x + 6.0, y + 6.0, w - 12.0, h - meta - 10.0, 8.0, 0x40000000);
-        self.poster(ui, c, it, skin, slim, x + 10.0, y + 8.0, w - 20.0, h - meta - 14.0, over);
+        let base_bg = if equipped { 0xFF142119 } else { 0xFF181A22 };
+        let hover_bg = if equipped { 0xFF1A2D21 } else { 0xFF212430 };
+        c.round(x, y, w, sq_h, 10.0, theme::mix(base_bg, hover_bg, hv.max(sl * 0.6)));
+        let border = if sel {
+            0xE6FFFFFF
+        } else if equipped {
+            0xAA22C55E
+        } else {
+            theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv)
+        };
+        c.outline(x, y, w, sq_h, 10.0, if sel || equipped { 1.4 } else { 1.0 }, border);
+
+        let strip_h = if equipped { 22.0 } else { 0.0 };
+        self.poster(ui, c, it, skin, slim, x + 8.0, y + 8.0, w - 16.0, sq_h - 14.0 - strip_h, over);
+
         if !it.owned {
-            c.icon(if it.free { theme::I_PLUS } else { theme::I_LOCK }, 11.0, x + w - 15.0, y + 15.0, theme::TEXT_SECONDARY);
-        } else if let Some(i) = at {
-            c.circle(x + w - 15.0, y + 15.0, 9.0, 0xFFF4F4F5);
-            let n = (i + 1).to_string();
-            let nw = c.text_width(font::SEMIBOLD, 9.5, &n);
-            let lh = c.line_height(font::SEMIBOLD, 9.5);
-            c.text(font::SEMIBOLD, 9.5, &n, x + w - 15.0 - nw / 2.0, y + 15.0 - lh / 2.0, theme::SOLID_FG);
+            c.icon(if it.free { theme::I_PLUS } else { theme::I_LOCK }, 11.0, x + w - 14.0, y + 14.0, theme::TEXT_SECONDARY);
         }
-        c.fill(x + 1.0, y + h - meta, w - 2.0, 1.0, theme::HAIRLINE);
-        let tag = if it.owned { None } else if it.free { Some("Free") } else { Some("Store") };
-        let tag_w = tag.map_or(0.0, |t| c.text_width(font::MEDIUM, 10.0, t) + 8.0);
-        let n = c.ellipsize(font::SEMIBOLD, 11.0, &it.label(), w - 18.0 - tag_w);
-        let my = y + h - meta / 2.0;
-        let lh = c.line_height(font::SEMIBOLD, 11.0);
-        c.text(font::SEMIBOLD, 11.0, &n, x + 9.0, my - lh / 2.0, if sel || at.is_some() { theme::TEXT_STRONG } else { theme::TEXT });
-        if let Some(tag) = tag {
-            let th = c.line_height(font::MEDIUM, 10.0);
-            c.text(font::MEDIUM, 10.0, tag, x + w - 9.0 - tag_w + 8.0, my - th / 2.0, if it.free { theme::ACCENT } else { theme::TEXT_MUTED });
+
+        // Crisp emerald green `✓ Equipped` bottom strip inside the square card.
+        if equipped {
+            let sy = y + sq_h - strip_h;
+            c.push_clip(x, sy, w, strip_h);
+            c.round(x, sy - 8.0, w, strip_h + 8.0, 10.0, 0xFF15803D);
+            c.pop_clip();
+            let txt = "Equipped";
+            let tw = c.text_width(font::SEMIBOLD, 10.0, txt);
+            let tlh = c.line_height(font::SEMIBOLD, 10.0);
+            let tx = x + (w - (tw + 15.0)) / 2.0;
+            c.circle(tx + 5.0, sy + strip_h / 2.0, 5.0, 0xFFFFFFFF);
+            c.icon(theme::I_CHECK, 7.5, tx + 5.0, sy + strip_h / 2.0, 0xFF15803D);
+            c.text(font::SEMIBOLD, 10.0, txt, tx + 14.0, sy + (strip_h - tlh) / 2.0, 0xFFFFFFFF);
+        }
+
+        // Centered emote name below card
+        let n = c.ellipsize(font::SEMIBOLD, 11.0, &it.label(), w - 4.0);
+        let nw = c.text_width(font::SEMIBOLD, 11.0, &n);
+        c.text(font::SEMIBOLD, 11.0, &n, x + (w - nw) / 2.0, y + sq_h + 4.0, if sel || equipped { theme::TEXT_STRONG } else { theme::TEXT });
+        if over {
+            ui.cursor_hand = true;
         }
     }
 
@@ -572,8 +642,13 @@ impl EmotesView {
     #[allow(clippy::too_many_arguments)]
     fn poster(&self, ui: &Ui, c: &mut Canvas, it: &Emote, skin: &Arc<Image>, slim: bool, x: f32, y: f32, w: f32, h: f32, play: bool) {
         native_emotes::want_clip(&it.hash);
-        // hovered: from the still pose on, so the model keeps its place and just starts moving
-        let elapsed = play.then(|| native_emotes::preview_start(&it.hash) + (ui.now - self.hover_at).max(0.0));
+        let elapsed = play.then(|| {
+            if self.hover_card.as_deref() == Some(it.id.as_str()) {
+                native_emotes::preview_start(&it.hash) + (ui.now - self.hover_at).max(0.0)
+            } else {
+                (ui.now - self.pick_at).max(0.0)
+            }
+        });
         if let Some(pose) = native_emotes::preview_pose(&it.hash, elapsed) {
             preview3d::fit_emote(&it.hash, slim);
             preview3d::draw_wheel(c, skin, slim, pose, [x, y, w, h], native_emotes::preview_props(&it.hash, elapsed));
@@ -600,14 +675,13 @@ impl EmotesView {
         let it = find(items, Some(&drag_id)).cloned();
         if self.dragging && let Some(e) = &it {
             let s = 64.0;
-            c.round(ui.mx - s / 2.0, ui.my - s / 2.0, s, s, 12.0, 0xE00E1014);
-            c.outline(ui.mx - s / 2.0, ui.my - s / 2.0, s, s, 12.0, 1.0, 0xE6FFFFFF);
+            c.round(ui.mx - s / 2.0, ui.my - s / 2.0, s, s, 10.0, 0xE00E1014);
+            c.outline(ui.mx - s / 2.0, ui.my - s / 2.0, s, s, 10.0, 1.0, 0xE6FFFFFF);
             self.poster(ui, c, e, skin, slim, ui.mx - s / 2.0 + 6.0, ui.my - s / 2.0 + 4.0, s - 12.0, s - 10.0, false);
         }
         if ui.down {
             return;
         }
-        // let go
         if self.dragging && let Some(e) = &it && !native_emotes::saving() {
             match (self.hovered_slot, self.drag_from) {
                 (Some(to), Some(from)) if to != from => {
@@ -635,36 +709,19 @@ impl EmotesView {
         self.slot = open;
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn chip(&mut self, ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, label: &str, on: bool) -> f32 {
-        let (w, h) = (c.text_width(font::SEMIBOLD, 11.0, label) + 22.0, 24.0);
-        let over = ui.hover(c, x, y, w, h);
-        if ui.clicked(c, id, x, y, w, h) {
-            self.equipped_only = id.ends_with("equipped");
-            self.scroll.reset();
-        }
-        let a = ui.anim_on(&format!("{id}#on"), on, 16.0);
-        let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-        c.round(x, y, w, h, h / 2.0, theme::mix(theme::mix(theme::SUBTLE, theme::SUBTLE_HOVER, hv), 0xFFF4F4F5, a));
-        let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::SOLID_FG, a);
-        let lh = c.line_height(font::SEMIBOLD, 11.0);
-        c.text(font::SEMIBOLD, 11.0, label, x + 11.0, y + (h - lh) / 2.0, fg);
-        w
-    }
-
     fn search_box(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
         let f = self.search.focused(ui);
         let fa = ui.anim_on("emotes:search#f", f, 14.0);
-        c.round(x, y, w, h, h / 2.0, theme::mix(0xB808090C, 0xE00E1014, fa));
-        c.outline(x, y, w, h, h / 2.0, 1.0, theme::mix(theme::HAIRLINE_STRONG, theme::BORDER_HOVER, fa));
-        c.icon(theme::I_SEARCH, 13.0, x + 16.0, y + h / 2.0, theme::TEXT_MUTED);
+        c.round(x, y, w, h, 8.0, theme::mix(0xFF14161E, 0xFF1A1E29, fa));
+        c.outline(x, y, w, h, 8.0, 1.0, theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, fa));
+        c.icon(theme::I_SEARCH, 13.0, x + 15.0, y + h / 2.0, theme::TEXT_MUTED);
         let clear = !self.search.is_empty();
-        if ui.pressed && ui.hover(c, x, y, w - if clear { 30.0 } else { 0.0 }, h) {
+        if ui.pressed && ui.hover(c, x, y, w - if clear { 28.0 } else { 0.0 }, h) {
             self.search.focus(ui);
             ui.focus_claimed = true;
         }
-        self.search.draw(ui, c, x + 18.0, y, w - if clear { 50.0 } else { 22.0 }, h, "Search emotes", 12.0);
-        if clear && ui.icon_button(c, "emotes:search:clear", x + w - 28.0, y + (h - 22.0) / 2.0, 22.0, theme::I_X, None) {
+        self.search.draw(ui, c, x + 18.0, y, w - if clear { 48.0 } else { 22.0 }, h, "Search emotes...", 12.0);
+        if clear && ui.icon_button(c, "emotes:search:clear", x + w - 26.0, y + (h - 22.0) / 2.0, 22.0, theme::I_X, None) {
             self.search.clear();
         }
     }

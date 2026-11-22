@@ -26,6 +26,10 @@ pub enum TitleAct {
     Quit,
     NativeMods,
     Relay,
+    /// The game's Language screen (vanilla's globe button).
+    Language,
+    /// The game's Accessibility Settings (vanilla's person button).
+    Accessibility,
     /// The vanilla title screen from now on.
     Classic,
     /// An ad's server.
@@ -159,6 +163,21 @@ impl TitleView {
         }
         if ui.hover(c, x - bh - 8.0, y, bh, bh) {
             ui.tip("Relay: friends and chat");
+        }
+        // Vanilla's language and accessibility squares, left of Relay (the Java mod shows vanilla's own two here).
+        let lang_x = x - 3.0 * (bh + 8.0);
+        let access_x = x - 2.0 * (bh + 8.0);
+        if button(ui, c, "menu:language", lang_x, y, bh, bh, "", theme::I_GLOBE) {
+            act = Some(TitleAct::Language);
+        }
+        if ui.hover(c, lang_x, y, bh, bh) {
+            ui.tip(&horizon_client::lang::get_or("options.language", "Language..."));
+        }
+        if button(ui, c, "menu:accessibility", access_x, y, bh, bh, "", theme::I_PERSON) {
+            act = Some(TitleAct::Accessibility);
+        }
+        if ui.hover(c, access_x, y, bh, bh) {
+            ui.tip(&horizon_client::lang::get_or("options.accessibility", "Accessibility Settings..."));
         }
         let unread = relay::unread_total();
         if unread > 0 {

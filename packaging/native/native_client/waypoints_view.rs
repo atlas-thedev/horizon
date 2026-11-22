@@ -1,7 +1,10 @@
 //! The Waypoints tab of the Native menu (the Java mod's `WaypointsView`): this world's waypoints, nearest first, with
-//! their coordinates and distance. Add one where you stand or from coordinates on the clipboard; rename, recolour,
-//! pick an icon, hide, copy or delete. Outside a world it browses the waypoints of the worlds you have been to.
+//! their coordinates and distance. Add one where you stand or from coordinates on the clipboard; rename, edit X/Y/Z
+//! coordinates inline, recolour, pick an icon, ping to teammates as a live Marker, hide, copy, clear death points,
+//! or delete. Outside a world it browses the waypoints of the worlds you have been to.
+
 use super::keys;
+use super::markers_module;
 use super::menu::{CARD, CARD_HOVER};
 use super::scroll::Scroll;
 use super::textfield::TextField;
@@ -12,11 +15,14 @@ use horizon_client::native_ui::canvas::clock_ms;
 use horizon_client::native_ui::{Canvas, font, theme};
 
 const ROW: f32 = 56.0;
-const EDIT: f32 = 128.0;
+const EDIT: f32 = 168.0;
 
 pub struct WaypointsView {
     scroll: Scroll,
     name: TextField,
+    coord_x: TextField,
+    coord_y: TextField,
+    coord_z: TextField,
     editing: Option<u64>,
     confirm_delete: Option<u64>,
     all_dims: bool,
@@ -29,9 +35,18 @@ impl WaypointsView {
     pub fn new() -> Self {
         let mut name = TextField::new("waypoints:name");
         name.max_length = 32;
+        let mut coord_x = TextField::new("waypoints:x");
+        coord_x.max_length = 10;
+        let mut coord_y = TextField::new("waypoints:y");
+        coord_y.max_length = 10;
+        let mut coord_z = TextField::new("waypoints:z");
+        coord_z.max_length = 10;
         WaypointsView {
             scroll: Scroll::new("waypoints:list"),
             name,
+            coord_x,
+            coord_y,
+            coord_z,
             editing: None,
             confirm_delete: None,
             all_dims: true,
@@ -63,7 +78,7 @@ impl WaypointsView {
         let key = keys::name(waypoints_module::add_key());
         let dim = if here.dim.is_empty() { waypoints::OVERWORLD.to_owned() } else { here.dim.clone() };
 
-        // top: where you are, and the add buttons
+        // Top: where you are, and the quick-action buttons
         let title = if in_world {
             format!("{}  \u{B7}  {}", here.label.clone().unwrap_or_else(|| "This world".into()), waypoints::dimension_name(&dim))
         } else {
@@ -78,26 +93,28 @@ impl WaypointsView {
         c.text(font::MEDIUM, 11.5, &hint, x, y + 24.0, theme::TEXT_MUTED);
         let mut bx = x + w;
         if let Some(wk) = here.world.as_deref() {
-            bx -= 118.0;
-            if ui.button(c, "waypoints:add", bx, y, 118.0, 34.0, "Add here", theme::I_PLUS, ui::BTN_PRIMARY) {
+            bx -= 114.0;
+            if ui.button(c, "waypoints:add", bx, y, 114.0, 34.0, "Add here", theme::I_PLUS, ui::BTN_PRIMARY) {
                 self.add_here(wk, &dim, here.pos);
             }
-            bx -= 158.0;
-            if ui.button(c, "waypoints:paste", bx, y, 150.0, 34.0, "Paste coordinates", theme::I_MAP_PIN, ui::BTN_GLASS) {
-                // the clipboard is read for every click on this page (Menu::wants_clipboard)
+            bx -= 154.0;
+            if ui.button(c, "waypoints:paste", bx, y, 146.0, 34.0, "Paste coords", theme::I_MAP_PIN, ui::BTN_GLASS) {
                 let clip = ui.clip_in.clone();
                 self.paste(wk, &dim, here.pos, &clip);
             }
         }
         let mut ty = y + 50.0;
 
-        // worlds to browse (outside a world) / dimension filter (inside one)
+        let world_points = world.as_deref().map(|wk| waypoints::store().of(wk)).unwrap_or_default();
+        let death_count = world_points.iter().filter(|p| p.death).count();
+
+        // Worlds to browse (outside a world) / dimension filter (inside one)
         if !in_world {
             let mut cx = x;
             for k in &worlds {
                 let label = world_name(k);
                 let cw = c.text_width(font::MEDIUM, 11.5, &label) + 26.0;
-                if cx + cw > x + w {
+                if cx + cw > x + w - if death_count > 0 { 132.0 } else { 0.0 } {
                     break;
                 }
                 if chip(ui, c, &format!("waypoints:world:{k}"), cx, ty, cw, &label, world.as_deref() == Some(k)) {
@@ -112,19 +129,34 @@ impl WaypointsView {
                 return;
             }
         } else {
-            if chip(ui, c, "waypoints:dims:all", x, ty, 84.0, "All", self.all_dims) {
+            if chip(ui, c, "waypoints:dims:all", x, ty, 78.0, "All", self.all_dims) {
                 self.all_dims = true;
             }
             let d = waypoints::dimension_name(&dim);
             let dw = c.text_width(font::MEDIUM, 11.5, &d) + 26.0;
-            if chip(ui, c, "waypoints:dims:here", x + 90.0, ty, dw, &d, !self.all_dims) {
+            if chip(ui, c, "waypoints:dims:here", x + 84.0, ty, dw, &d, !self.all_dims) {
                 self.all_dims = false;
+            }
+        }
+        if death_count > 0
+            && let Some(wk) = world.as_deref()
+        {
+            let label = if death_count == 1 { "Clear death".to_owned() } else { format!("Clear deaths ({death_count})") };
+            let bw = (c.text_width(font::SEMIBOLD, 11.0, &label) + 34.0).max(114.0);
+            if ui.button(c, "waypoints:clear-deaths", x + w - bw, ty, bw, 28.0, &label, theme::I_TRASH, ui::BTN_GLASS) {
+                let ids: Vec<u64> = world_points.iter().filter(|p| p.death).map(|p| p.id).collect();
+                let mut s = waypoints::store();
+                for id in ids {
+                    s.remove(wk, id);
+                }
+                drop(s);
+                self.say("Cleared death points".into());
             }
         }
         ty += 38.0;
         c.fill(x, ty - 8.0, w, 1.0, theme::HAIRLINE);
 
-        // the list
+        // The list
         let Some(world) = world else {
             self.notices(c, x, y, w, h);
             return;
@@ -172,17 +204,17 @@ impl WaypointsView {
         let open = self.editing == Some(p.id);
         let h = if open { ROW + EDIT } else { ROW };
         let over = ui.hover(c, x, y, w, ROW);
-        c.round(x, y, w, h, 12.0, if over || open { CARD_HOVER } else { CARD });
-        c.outline(x, y, w, h, 12.0, 1.0, if open { theme::HAIRLINE_STRONG } else { theme::HAIRLINE });
+        c.round(x, y, w, h, 10.0, if over || open { CARD_HOVER } else { CARD });
+        c.outline(x, y, w, h, 10.0, 1.0, if open { theme::HAIRLINE_STRONG } else { theme::HAIRLINE });
         let cy = y + ROW / 2.0;
         c.push_alpha(if p.visible { 1.0 } else { 0.45 });
-        c.circle(x + 28.0, cy, 15.0, theme::alpha(p.color, 0.95));
-        c.circle(x + 28.0, cy, 12.5, 0xFF101114);
-        c.icon(waypoints::ICONS[p.icon.min(waypoints::ICONS.len() - 1)], 14.0, x + 28.0, cy, p.color);
+        markers_module::draw_diamond(c, x + 28.0, cy, 15.0, theme::alpha(p.color, 0.95));
+        markers_module::draw_diamond(c, x + 28.0, cy, 12.2, 0xFF101114);
+        c.icon(waypoints::ICONS[p.icon.min(waypoints::ICONS.len() - 1)], 13.0, x + 28.0, cy, p.color);
         let tx = x + 54.0;
-        let name = c.ellipsize(font::SEMIBOLD, 13.0, &p.name, w - 260.0);
+        let name = c.ellipsize(font::SEMIBOLD, 13.0, &p.name, w - 300.0);
         c.text(font::SEMIBOLD, 13.0, &name, tx, y + 10.0, theme::TEXT_STRONG);
-        let mut sub = format!("{} {} {}  \u{B7}  {}", p.x, p.y, p.z, waypoints::dimension_name(&p.dim));
+        let mut sub = format!("({}, {}, {})  \u{B7}  {}", p.x, p.y, p.z, waypoints::dimension_name(&p.dim));
         if let Some(me) = me
             && let Some(at) = waypoints::place_in(p, dim, true)
         {
@@ -192,11 +224,11 @@ impl WaypointsView {
                 sub.push_str(&format!(" (as {} {} {})", waypoints::dimension_name(dim), at[0].floor() as i64, at[2].floor() as i64));
             }
         }
-        let sub = c.ellipsize(font::MEDIUM, 11.0, &sub, w - 220.0);
+        let sub = c.ellipsize(font::MEDIUM, 11.0, &sub, w - 260.0);
         c.text(font::MEDIUM, 11.0, &sub, tx, y + 30.0, theme::TEXT_MUTED);
         c.pop_alpha();
 
-        // actions, right to left
+        // Actions, right to left
         let bs = 32.0;
         let by = cy - bs / 2.0;
         let mut deleted = false;
@@ -222,9 +254,17 @@ impl WaypointsView {
                 } else {
                     self.editing = Some(p.id);
                     self.name.set(&p.name);
+                    self.coord_x.set(&p.x.to_string());
+                    self.coord_y.set(&p.y.to_string());
+                    self.coord_z.set(&p.z.to_string());
                     self.name.select_all();
                     self.name.focus(ui);
                 }
+            }
+            bx -= bs + 4.0;
+            if ui.icon_button(c, &format!("{id}:ping"), bx, by, bs, theme::I_SEND, Some("Ping to team")) {
+                markers_module::ping_waypoint(p);
+                self.say(format!("Pinged \"{}\" to team", p.name));
             }
             bx -= bs + 4.0;
             if ui.icon_button(c, &format!("{id}:copy"), bx, by, bs, theme::I_LIST, Some("Copy name and coordinates")) {
@@ -245,12 +285,15 @@ impl WaypointsView {
         deleted
     }
 
-    /// Name, colour and icon of the waypoint being edited.
+    /// Name, inline X/Y/Z coordinates, colour and icon of the waypoint being edited.
     #[allow(clippy::too_many_arguments)]
     fn editor(&mut self, ui: &mut Ui, c: &mut Canvas, world: &str, p: &Point, x: f32, y: f32, w: f32) {
         c.fill(x, y - 4.0, w, 1.0, theme::HAIRLINE);
+        let sx = x + 64.0;
+
+        // Row 1: Name
         c.text(font::MEDIUM, 11.0, "Name", x, y + 8.0, theme::TEXT_MUTED);
-        if self.name.draw(ui, c, x + 60.0, y, 320.0f32.min(w - 60.0), 32.0, "Waypoint name", 12.0) {
+        if self.name.draw(ui, c, sx, y, 320.0f32.min(w - 64.0), 30.0, "Waypoint name", 12.0) {
             self.editing = None;
             ui.focus = None;
             return;
@@ -259,21 +302,59 @@ impl WaypointsView {
         if !typed.is_empty() && typed != p.name {
             waypoints::store().edit(world, p.id, |q| q.name = typed);
         }
-        let sy = y + 46.0;
+
+        // Row 2: Inline X / Y / Z coordinates
+        let cy = y + 40.0;
+        c.text(font::MEDIUM, 11.0, "Coords", x, cy + 8.0, theme::TEXT_MUTED);
+        let fw = ((w - 64.0 - 66.0) / 3.0).clamp(64.0, 96.0);
+        let mut cx = sx;
+        c.text(font::SEMIBOLD, 11.0, "X", cx, cy + 8.0, theme::TEXT_MUTED);
+        let rx = self.coord_x.draw(ui, c, cx + 14.0, cy, fw, 30.0, "X", 12.0);
+        cx += 14.0 + fw + 10.0;
+        c.text(font::SEMIBOLD, 11.0, "Y", cx, cy + 8.0, theme::TEXT_MUTED);
+        let ry = self.coord_y.draw(ui, c, cx + 14.0, cy, fw, 30.0, "Y", 12.0);
+        cx += 14.0 + fw + 10.0;
+        c.text(font::SEMIBOLD, 11.0, "Z", cx, cy + 8.0, theme::TEXT_MUTED);
+        let rz = self.coord_z.draw(ui, c, cx + 14.0, cy, fw, 30.0, "Z", 12.0);
+
+        if let Ok(nx) = self.coord_x.value().trim().parse::<i32>()
+            && nx != p.x
+        {
+            waypoints::store().edit(world, p.id, |q| q.x = nx);
+        }
+        if let Ok(ny) = self.coord_y.value().trim().parse::<i32>()
+            && ny != p.y
+        {
+            waypoints::store().edit(world, p.id, |q| q.y = ny);
+        }
+        if let Ok(nz) = self.coord_z.value().trim().parse::<i32>()
+            && nz != p.z
+        {
+            waypoints::store().edit(world, p.id, |q| q.z = nz);
+        }
+        if rx || ry || rz {
+            self.editing = None;
+            ui.focus = None;
+            return;
+        }
+
+        // Row 3: Colour
+        let sy = cy + 42.0;
         c.text(font::MEDIUM, 11.0, "Colour", x, sy + 6.0, theme::TEXT_MUTED);
-        let sx = x + 60.0;
         for (i, col) in waypoints::COLORS.iter().copied().enumerate() {
-            let (cx, cy) = (sx + i as f32 * 30.0 + 12.0, sy + 12.0);
-            let over = ui.hover(c, cx - 12.0, cy - 12.0, 24.0, 24.0);
+            let (px, py) = (sx + i as f32 * 30.0 + 12.0, sy + 12.0);
+            let over = ui.hover(c, px - 12.0, py - 12.0, 24.0, 24.0);
             if p.color == col {
-                c.circle(cx, cy, 12.0, 0xFFFFFFFF);
+                c.circle(px, py, 12.0, 0xFFFFFFFF);
             }
-            c.circle(cx, cy, if p.color != col && over { 11.0 } else { 10.0 }, col);
-            if ui.clicked(c, &format!("waypoints:col:{i}"), cx - 12.0, cy - 12.0, 24.0, 24.0) {
+            c.circle(px, py, if p.color != col && over { 11.0 } else { 10.0 }, col);
+            if ui.clicked(c, &format!("waypoints:col:{i}"), px - 12.0, py - 12.0, 24.0, 24.0) {
                 waypoints::store().edit(world, p.id, |q| q.color = col);
             }
         }
-        let iy = sy + 40.0;
+
+        // Row 4: Icon
+        let iy = sy + 38.0;
         c.text(font::MEDIUM, 11.0, "Icon", x, iy + 6.0, theme::TEXT_MUTED);
         for (i, icon) in waypoints::ICONS.iter().copied().enumerate() {
             let (ix, s) = (sx + i as f32 * 32.0, 28.0);
@@ -307,7 +388,6 @@ impl WaypointsView {
         };
         let y = y.unwrap_or(me[1].floor() as i32);
         let mut s = waypoints::store();
-        // a leading word ("Base 120 64 -300", what Copy gives) names it
         let lead = text.trim().split(|ch: char| ch.is_whitespace() || ch == ':' || ch == ',').next().unwrap_or("");
         let name = if lead.len() <= 32
             && lead.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic())

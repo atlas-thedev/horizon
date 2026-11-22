@@ -707,8 +707,10 @@ impl ServersView {
             Status::Online { motd, .. } | Status::Incompatible { motd, .. } => {
                 let fallback_line = [vec![Run { text: fallback.to_owned(), ..Run::default() }]];
                 let lines: &[Vec<Run>] = if motd.is_empty() { &fallback_line } else { motd };
+                let px = super::mc_font::snap_px(c, 10.5);
+                let step = 15.0f32.max(super::mc_font::height(px) + 4.5);
                 for (i, line) in lines.iter().take(2).enumerate() {
-                    motd_line(c, ui.now, line, tx, y + 34.0 + i as f32 * 15.0, motd_w);
+                    motd_line(c, ui.now, line, tx, y + 34.0 + i as f32 * step, motd_w);
                 }
             }
             Status::Pinging => {
@@ -805,49 +807,90 @@ impl ServersView {
     }
 }
 
-/// One MOTD line: each run in the colour and style the server gave it, cut where the row ends. Unstyled text is the
-/// UI's grey; `§k` text scrambles; underline and strikethrough are drawn as lines. (There is no italic face: it
-/// shows upright.)
-fn motd_line(c: &mut Canvas, now: f64, runs: &[Run], x: f32, y: f32, max_w: f32) {
-    const SIZE: f32 = 12.0;
-    const SCRAMBLE: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789#%&$?!";
-    let mut pen = x;
-    let end = x + max_w;
-    for run in runs {
-        let face = if run.bold { font::BOLD } else { font::MEDIUM };
-        let color = run.color.map_or(theme::TEXT_SECONDARY, |rgb| 0xFF00_0000 | rgb);
-        let mut shown = String::new();
-        let mut width = 0.0;
-        for (i, ch) in run.text.chars().enumerate() {
-            let ch = if run.obfuscated && !ch.is_whitespace() {
-                // the game redraws obfuscated characters constantly; here they change a few times a second
-                let n = (now / 90.0) as usize + i * 7;
-                SCRAMBLE[(n.wrapping_mul(2654435761) >> 7) % SCRAMBLE.len()] as char
-            } else {
-                ch
-            };
-            let w = c.text_width(face, SIZE, ch.encode_utf8(&mut [0; 4]));
-            if pen + width + w > end {
-                break;
+/// Trims leading and trailing whitespace across a line's styled runs without losing internal spacing or styles.
+fn trim_runs(runs: &[Run]) -> Vec<Run> {
+    let mut out: Vec<Run> = runs.iter().filter(|r| !r.text.is_empty()).cloned().collect();
+    while let Some(first) = out.first_mut() {
+        let trimmed = first.text.trim_start();
+        if trimmed.is_empty() {
+            out.remove(0);
+        } else {
+            if trimmed.len() != first.text.len() {
+                first.text = trimmed.to_owned();
             }
-            shown.push(ch);
-            width += w;
-        }
-        if shown.is_empty() {
-            break;
-        }
-        c.text(face, SIZE, &shown, pen, y, color);
-        if run.underline {
-            c.fill(pen, y + SIZE + 1.0, width, 1.0, color);
-        }
-        if run.strike {
-            c.fill(pen, y + SIZE * 0.55, width, 1.0, color);
-        }
-        pen += width;
-        if pen >= end - 0.5 {
             break;
         }
     }
+    while let Some(last) = out.last_mut() {
+        let trimmed = last.text.trim_end();
+        if trimmed.is_empty() {
+            out.pop();
+        } else {
+            if trimmed.len() != last.text.len() {
+                last.text = trimmed.to_owned();
+            }
+            break;
+        }
+    }
+    out
+}
+
+/// One MOTD line rendered in crisp Minecraft pixel font (`mc_font`), horizontally centered in `max_w`.
+/// Leading and trailing server padding spaces are trimmed so every server's MOTD sits cleanly centered.
+fn motd_line(c: &mut Canvas, now: f64, runs: &[Run], x: f32, y: f32, max_w: f32) {
+    const SCRAMBLE: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789#%&$?!";
+    let trimmed = trim_runs(runs);
+    if trimmed.is_empty() {
+        return;
+    }
+    let px = super::mc_font::snap_px(c, 10.5);
+    let line_h = super::mc_font::height(px);
+    let mut resolved: Vec<(String, &Run)> = Vec::with_capacity(trimmed.len());
+    let mut total_w = 0.0f32;
+    for (ri, run) in trimmed.iter().enumerate() {
+        let text = if run.obfuscated {
+            run.text
+                .chars()
+                .enumerate()
+                .map(|(i, ch)| {
+                    if ch.is_whitespace() {
+                        ch
+                    } else {
+                        let n = (now / 90.0) as usize + ri * 31 + i * 7;
+                        SCRAMBLE[(n.wrapping_mul(2654435761) >> 7) % SCRAMBLE.len()] as char
+                    }
+                })
+                .collect()
+        } else {
+            run.text.clone()
+        };
+        total_w += super::mc_font::width(c, &text, px, run.bold);
+        resolved.push((text, run));
+    }
+    let mut cursor = x + ((max_w - total_w) / 2.0).max(0.0);
+    let limit = x + max_w;
+    c.push_clip(x, y - 2.0, max_w, line_h + 6.0);
+    for (text, run) in resolved {
+        if cursor >= limit {
+            break;
+        }
+        let color = run.color.map_or(theme::TEXT_SECONDARY, |rgb| 0xFF00_0000 | rgb);
+        let next = super::mc_font::draw(c, &text, cursor, y, px, color, true, run.bold);
+        let draw_w = next.min(limit) - cursor;
+        if draw_w > 0.0 {
+            let sh = super::mc_font::shadow_color(color);
+            if run.underline {
+                c.fill(cursor + px, y + 8.0 * px + px, draw_w, px, sh);
+                c.fill(cursor, y + 8.0 * px, draw_w, px, color);
+            }
+            if run.strike {
+                c.fill(cursor + px, y + 4.0 * px + px, draw_w, px, sh);
+                c.fill(cursor, y + 4.0 * px, draw_w, px, color);
+            }
+        }
+        cursor = next;
+    }
+    c.pop_clip();
 }
 
 /// 12345 → "12,345".

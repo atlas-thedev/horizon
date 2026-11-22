@@ -24,6 +24,17 @@ pub const STYLE_TEXT: usize = 1;
 pub const STYLE_BRACKETS: usize = 2;
 const FONT: f32 = 12.0;
 
+/// Targeted entity or block for the Markers mod (raycast up to 128 blocks when the Marker key is held).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MarkerTarget {
+    pub pos: [f64; 3],
+    /// `"block"` or `"entity"`.
+    pub kind: String,
+    pub name: String,
+    /// Bare item/block id (e.g. `"grass_block"`, `"red_bed"`), or empty.
+    pub icon: String,
+}
+
 /// What the modules read about the game this frame (the mod's `Game`).
 #[derive(Clone, Debug, Default)]
 pub struct GameView {
@@ -75,6 +86,12 @@ pub struct GameView {
     pub world_label: Option<String>,
     /// The block you look at, up to 128 blocks away; only read while the waypoint key is held.
     pub look_block: Option<[i32; 3]>,
+    /// The entity or block targeted by the Markers mod while its key is held.
+    pub marker_target: Option<MarkerTarget>,
+    /// The local player's username.
+    pub player_name: String,
+    /// The local player's vanilla scoreboard team name, when on one.
+    pub scoreboard_team: Option<String>,
 }
 
 pub const CONTROLS: [&str; 9] = ["forward", "left", "back", "right", "jump", "sneak", "sprint", "attack", "use"];

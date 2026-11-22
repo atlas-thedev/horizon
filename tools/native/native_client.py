@@ -297,6 +297,17 @@ patch(REMOTE,
       '                self.native_svc_login();\n'
       '                if let Some(r) = self.remote.as_mut() {\n')
 
+# Waypoints and Markers project their icons with `locator_camera`. Upstream sets it after `hud()`, so the Native HUD
+# (drawn inside `hud()`) used the previous frame's camera and the icons slid over the world while turning.
+# Set it before the HUD is built too (upstream's own assignment after it stays, and gives the same value).
+patch(GAME,
+      '        // GUI hooks project against this frame\'s camera, including its bob/spin and FOV.\n'
+      '        let mut hud = horizon_client::spans::time("hud", || self.hud(size));\n',
+      '        // GUI hooks project against this frame\'s camera, including its bob/spin and FOV.\n'
+      '        self.locator_camera =\n'
+      '            (!title).then_some((camera.to_array(), view_yaw, view_pitch, fov_degrees));\n'
+      '        let mut hud = horizon_client::spans::time("hud", || self.hud(size));\n')
+
 print('native_client: Native modules applied')
 
 # New Native-only labels remain translation keys.

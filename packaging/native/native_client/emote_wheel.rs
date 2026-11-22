@@ -1,8 +1,12 @@
 //! Eight radial sectors over the world, with actual player renders and an open cancel zone.
+//! Styled cleanly after the sleek translucent circular wheel: floating `◀ Page N ▶` top pill,
+//! smooth dark translucent annulus without cluttered grid dividers, translucent sector highlight
+//! with a crisp white inner-rim arc indicator on the hovered sector, outer-rim numbers `1`..`8`,
+//! Native logo centered in the inner circle, and large bold selected emote name below the wheel.
 use super::{net, preview3d, ui::Ui};
 use horizon_client::{
     native_emotes,
-    native_ui::{Canvas, Image, font, theme},
+    native_ui::{Canvas, Image, font, icons, theme},
 };
 use std::collections::HashMap;
 const SECTOR_HALF: f32 = std::f32::consts::FRAC_PI_4 * 0.5 - 0.027;
@@ -162,10 +166,12 @@ fn radius(width: f32, height: f32) -> f32 {
 fn wrap_page(page: usize, delta: i32, pages: usize) -> usize {
     (page as i32 + delta).rem_euclid(pages.max(1) as i32) as usize
 }
+#[allow(clippy::too_many_arguments)]
 fn sector(c: &mut Canvas, cx: f32, cy: f32, inner: f32, outer: f32, a: f32, b: f32, color: u32) {
-    for n in 0..14 {
-        let x = a + (b - a) * n as f32 / 14.0;
-        let y = a + (b - a) * (n + 1) as f32 / 14.0;
+    let steps = (((b - a).abs() / (std::f32::consts::PI / 28.0)).ceil() as usize).max(14);
+    for n in 0..steps {
+        let x = a + (b - a) * n as f32 / steps as f32;
+        let y = a + (b - a) * (n + 1) as f32 / steps as f32;
         c.free_quad(
             None,
             [
@@ -183,6 +189,14 @@ fn sector(c: &mut Canvas, cx: f32, cy: f32, inner: f32, outer: f32, a: f32, b: f
         );
     }
 }
+/// A straight radial line from radius `r0` to `r1` at angle `ang`, `width` pixels wide.
+fn spoke(c: &mut Canvas, cx: f32, cy: f32, r0: f32, r1: f32, ang: f32, width: f32, color: u32) {
+    let (dx, dy) = (ang.cos(), ang.sin());
+    let (nx, ny) = (-dy * width / 2.0, dx * width / 2.0);
+    let (x0, y0, x1, y1) = (cx + dx * r0, cy + dy * r0, cx + dx * r1, cy + dy * r1);
+    c.free_quad(None, [x0 + nx, y0 + ny, x1 + nx, y1 + ny, x1 - nx, y1 - ny, x0 - nx, y0 - ny], [0.0; 8], color);
+}
+
 impl Wheel {
     fn hover(&mut self, slot: Option<usize>, now: f64) -> f64 {
         if slot != self.selected { self.hover_started = now; }
@@ -225,50 +239,80 @@ impl Wheel {
             self.change_page(if ui.scroll > 0.0 { -1 } else { 1 }, pages);
         }
         let outer = radius(c.width(), c.height());
-        let inner = outer * 0.27;
-        let (cx, cy) = (c.width() * 0.5, c.height() * 0.5 - 4.0);
+        let inner = outer * 0.34;
+        let (cx, cy) = (c.width() * 0.5, c.height() * 0.5);
         let api = net::api();
-        c.fill(0.0, 0.0, c.width(), c.height(), 0x28000000);
+        c.fill(0.0, 0.0, c.width(), c.height(), 0x24000000);
+
+        // Top floating page pill: ◀   Page N   ▶
+        let pill_w = 134.0;
+        let pill_h = 30.0;
+        let pill_x = cx - pill_w / 2.0;
+        let pill_y = (cy - outer - 44.0).max(12.0);
+        c.shadow(pill_x, pill_y + 2.0, pill_w, pill_h, 8.0, 14.0, 0x55000000);
+        c.round(pill_x, pill_y, pill_w, pill_h, 8.0, 0xD811131A);
+        c.outline(pill_x, pill_y, pill_w, pill_h, 8.0, 1.0, theme::HAIRLINE_STRONG);
+        let page_txt = format!("{} {}", horizon_client::lang::get("native.emotes.page"), self.page + 1);
+        let pw = c.text_width(font::SEMIBOLD, 12.0, &page_txt);
+        let plh = c.line_height(font::SEMIBOLD, 12.0);
+        c.text(font::SEMIBOLD, 12.0, &page_txt, cx - pw / 2.0, pill_y + (pill_h - plh) / 2.0, theme::TEXT_STRONG);
+        let chev_col = if pages > 1 { theme::TEXT_SECONDARY } else { theme::alpha(theme::TEXT_MUTED, 0.45) };
+        let over_prev = pages > 1 && ui.hover(c, pill_x + 2.0, pill_y, 28.0, pill_h);
+        let over_next = pages > 1 && ui.hover(c, pill_x + pill_w - 30.0, pill_y, 28.0, pill_h);
+        c.icon(theme::I_CHEVRON_LEFT, 13.0, pill_x + 16.0, pill_y + pill_h / 2.0, if over_prev { theme::TEXT_STRONG } else { chev_col });
+        c.icon(theme::I_CHEVRON_RIGHT, 13.0, pill_x + pill_w - 16.0, pill_y + pill_h / 2.0, if over_next { theme::TEXT_STRONG } else { chev_col });
+        let page_clicked = (pages > 1 && ui.clicked(c, "emote:prev", pill_x, pill_y, 32.0, pill_h) && {
+            self.change_page(-1, pages);
+            true
+        }) || (pages > 1 && ui.clicked(c, "emote:next", pill_x + pill_w - 32.0, pill_y, 32.0, pill_h) && {
+            self.change_page(1, pages);
+            true
+        });
+
         let hover_elapsed = self.hover(slot_at(ui.mx - cx, ui.my - cy, inner, outer), ui.now);
         let (skin, slim) = preview3d::wheel_skin(&native_emotes::local_name());
+
+        // Smooth dark translucent circular ring (no cluttered grid lines).
+        sector(c, cx, cy, inner, outer, 0.0, std::f32::consts::TAU, 0xD812151C);
+        sector(c, cx, cy, outer - 1.2, outer, 0.0, std::f32::consts::TAU, 0x1EFFFFFF);
+        sector(c, cx, cy, inner, inner + 1.2, 0.0, std::f32::consts::TAU, 0x22FFFFFF);
+        // Thin divider lines between the eight slots.
+        for i in 0..8 {
+            let ang = i as f32 * std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2 - std::f32::consts::FRAC_PI_8;
+            spoke(c, cx, cy, inner + 1.5, outer - 1.5, ang, 1.2, 0x33FFFFFF);
+        }
+
+        // Hovered sector translucent highlight + crisp white inner rim arc indicator.
+        if let Some(slot) = self.selected {
+            let angle = slot as f32 * std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2;
+            let a = angle - std::f32::consts::FRAC_PI_4 * 0.5;
+            let b = angle + std::f32::consts::FRAC_PI_4 * 0.5;
+            sector(c, cx, cy, inner + 1.0, outer - 1.0, a, b, 0x24FFFFFF);
+            sector(c, cx, cy, inner - 0.5, inner + 2.8, a + 0.02, b - 0.02, 0xFFFFFFFF);
+            // Tiny outward pointer chevron at the midpoint of the inner rim arc
+            let px = cx + angle.cos() * (inner + 5.0);
+            let py = cy + angle.sin() * (inner + 5.0);
+            c.circle(px, py, 2.2, 0xFFFFFFFF);
+        }
+
+        let mut selected_name: Option<String> = None;
         for slot in 0..8 {
             let angle = slot as f32 * std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2;
-            let a = angle - std::f32::consts::FRAC_PI_4 * 0.5 + 0.022;
-            let b = angle + std::f32::consts::FRAC_PI_4 * 0.5 - 0.022;
             let active = self.selected == Some(slot);
-            sector(
-                c,
-                cx,
-                cy,
-                inner,
-                outer,
-                a,
-                b,
-                if active { theme::TEXT_SECONDARY } else { theme::HAIRLINE_STRONG },
-            );
-            sector(
-                c,
-                cx,
-                cy,
-                inner + 1.3,
-                outer - 1.3,
-                a + 0.005,
-                b - 0.005,
-                if active { 0xf014171d } else { 0xd008090c },
-            );
             let item = me["pages"][self.page][slot]
                 .as_str()
                 .and_then(|id| me["catalog"].as_array()?.iter().find(|i| i["id"] == id));
-            let label = item
-                .and_then(|i| i["name"].as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| horizon_client::lang::get("native.emotes.empty"));
+            if active
+                && let Some(n) = item.and_then(|i| i["name"].as_str())
+            {
+                selected_name = Some(n.replace(['_', '-'], " "));
+            }
             let (x, y) = (
-                cx + angle.cos() * outer * 0.65,
-                cy + angle.sin() * outer * 0.65,
+                cx + angle.cos() * outer * 0.67,
+                cy + angle.sin() * outer * 0.67,
             );
-            let h0 = outer * 0.34;
-            let label_y = y + h0 * 0.38;
+            let h0 = outer * 0.36;
+            let label_y = y + h0 * 0.44;
             let mut drawn = false;
             if let Some(hash) = item.and_then(|i| i["hash"].as_str())
                 && let Some(pose) = native_emotes::preview_pose(hash, if active { Some(hover_elapsed) } else { None })
@@ -307,90 +351,62 @@ impl Wheel {
                 );
                 drawn = true;
             }
+            // An empty slot (or one whose art is still loading) shows the smiley, as the Java wheel does.
             if !drawn {
                 c.icon(
                     theme::I_SMILE,
                     (outer * 0.13).min(24.0),
                     x,
-                    y - outer * 0.03,
-                    theme::TEXT_MUTED,
+                    y,
+                    if active { theme::TEXT_STRONG } else { theme::TEXT_MUTED },
                 );
             }
-            let fs = (outer * 0.065).min(11.0);
-            let label = c.ellipsize(font::SEMIBOLD, fs, &label, outer * 0.42);
-            let tw = c.text_width(font::SEMIBOLD, fs, &label);
+            // Small slot number 1..8 cleanly tucked near the outer rim.
+            let num_angle = angle - 0.18;
+            let num_r = outer * 0.90;
+            let num = (slot + 1).to_string();
+            let nw = c.text_width(font::MEDIUM, 10.0, &num);
+            let nh = c.line_height(font::MEDIUM, 10.0);
             c.text(
-                font::SEMIBOLD,
-                fs,
-                &label,
-                x - tw / 2.0,
-                label_y,
-                if active { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY },
+                font::MEDIUM,
+                10.0,
+                &num,
+                cx + num_angle.cos() * num_r - nw / 2.0,
+                cy + num_angle.sin() * num_r - nh / 2.0,
+                if active { theme::TEXT_STRONG } else { 0x88A1A1AA },
             );
-            c.text(font::REGULAR, 9.0, &(slot + 1).to_string(),
-                cx + angle.cos() * outer * 0.90 - 3.0,
-                cy + angle.sin() * outer * 0.90 - 5.0, theme::TEXT_MUTED);
         }
-        let title = horizon_client::lang::get("native.emotes.title");
-        let tw = c.text_width(font::SEMIBOLD, 16.0, &title);
-        c.text(
-            font::SEMIBOLD,
-            16.0,
-            &title,
-            cx - tw / 2.0,
-            cy - outer - 29.0,
-            theme::TEXT_STRONG,
-        );
-        c.circle(cx, cy, inner - 7.0, 0xb008090c);
-        c.icon(theme::I_X, 14.0, cx, cy - 7.0, theme::TEXT_SECONDARY);
-        let cancel = horizon_client::lang::get("native.emotes.cancel");
-        let cw = c.text_width(font::REGULAR, 10.0, &cancel);
-        c.text(font::REGULAR, 10.0, &cancel, cx - cw / 2.0, cy + 7.0, theme::TEXT_MUTED);
-        let count = format!(
-            "{} {} / {}",
-            horizon_client::lang::get("native.emotes.page"),
-            self.page + 1,
-            pages
-        );
-        let tw = c.text_width(font::REGULAR, 12.0, &count);
-        let footer = cy + outer + 17.0;
-        c.text(
-            font::REGULAR,
-            12.0,
-            &count,
-            cx - tw / 2.0,
-            footer,
-            theme::TEXT,
-        );
-        if pages > 1 {
-            c.icon(theme::I_CHEVRON_LEFT, 15.0, cx - 72.0, footer + 7.0, theme::TEXT_SECONDARY);
-            c.icon(theme::I_CHEVRON_RIGHT, 15.0, cx + 72.0, footer + 7.0, theme::TEXT_SECONDARY);
-            if ui.clicked(c, "emote:prev", cx - 88.0, footer - 6.0, 32.0, 28.0) {
-                self.change_page(-1, pages);
-            }
-            if ui.clicked(c, "emote:next", cx + 56.0, footer - 6.0, 32.0, 28.0) {
-                self.change_page(1, pages);
-            }
-        }
-        let hint = horizon_client::lang::get(if me.is_null() {
-            "native.emotes.signin"
+
+        // Center inner circle with Native emblem (clicking closes/cancels).
+        let over_center = (ui.mx - cx).powi(2) + (ui.my - cy).powi(2) < inner * inner;
+        c.circle(cx, cy, inner - 1.0, if over_center { 0xA8161922 } else { 0x7A0E1016 });
+        let emblem = icons::for_module("watermark", theme::I_SPARKLES);
+        c.icon(emblem, (inner * 0.72).clamp(24.0, 56.0), cx, cy, if over_center { 0xFFFFFFFF } else { 0xE6FFFFFF });
+
+        // Large bold selected emote name centered below the wheel (or quiet hint when empty).
+        let footer = cy + outer + 20.0;
+        if let Some(name) = selected_name {
+            let fs = 20.0;
+            let tw = c.text_width(font::BOLD, fs, &name);
+            c.text(font::BOLD, fs, &name, cx - tw / 2.0 + 1.5, footer + 1.5, 0x99000000);
+            c.text(font::BOLD, fs, &name, cx - tw / 2.0, footer, 0xFFFFFFFF);
         } else {
-            "native.emotes.hint"
-        });
-        let hint = c.ellipsize(font::REGULAR, 10.0, &hint, c.width() - 32.0);
-        let tw = c.text_width(font::REGULAR, 10.0, &hint);
-        c.text(
-            font::REGULAR,
-            10.0,
-            &hint,
-            cx - tw / 2.0,
-            footer + 26.0,
-            theme::TEXT_MUTED,
-        );
-        if ui.pressed && self.selected.is_some() {
+            let hint = if me.is_null() {
+                horizon_client::lang::get("native.emotes.signin")
+            } else if self.selected.is_some() {
+                horizon_client::lang::get("native.emotes.empty")
+            } else {
+                horizon_client::lang::get("native.emotes.hint")
+            };
+            let hint = c.ellipsize(font::MEDIUM, 11.5, &hint, c.width() - 32.0);
+            let tw = c.text_width(font::MEDIUM, 11.5, &hint);
+            c.text(font::MEDIUM, 11.5, &hint, cx - tw / 2.0, footer + 6.0, theme::TEXT_MUTED);
+        }
+
+        if !page_clicked && ui.pressed && self.selected.is_some() {
             return self.select();
         }
-        if ui.pressed && (ui.mx - cx).powi(2) + (ui.my - cy).powi(2) < inner * inner {
+        if !page_clicked && ui.pressed && over_center {
             self.open = false;
             self.selected = None;
             return true;
