@@ -881,9 +881,10 @@ impl Menu {
         let on = ui.anim_on(&format!("{id}#on"), m.state.enabled, 14.0);
         c.round(x, y, w, h, 12.0, theme::mix(CARD, CARD_HOVER, hv));
         c.outline(x, y, w, h, 12.0, 1.0, theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv));
-        c.round(x + 12.0, y + 12.0, 36.0, 36.0, 10.0, theme::mix(theme::SUBTLE_HOVER, 0xFFF4F4F5, on));
+        c.round(x + 12.0, y + 12.0, 36.0, 36.0, 10.0, 0xFF050608);
+        c.outline(x + 12.0, y + 12.0, 36.0, 36.0, 10.0, 1.0, theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, on));
         let art = self.art_for(m.state.id);
-        module_icon(c, art.as_ref(), m.state.icon, 17.0, x + 30.0, y + 30.0, theme::mix(theme::TEXT, theme::SOLID_FG, on));
+        module_icon(c, art.as_ref(), m.state.icon, 17.0, x + 30.0, y + 30.0, theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, on));
         let tw = w - 160.0;
         let is_new = NEW_MODS.contains(&m.state.id);
         let name = c.ellipsize(font::SEMIBOLD, 13.0, &label(m.state.name), tw - if is_new { 40.0 } else { 0.0 });
@@ -1068,13 +1069,14 @@ impl Menu {
         let ic = 36.0;
         let (ix, iy) = (div_x + 16.0, y + (hh - ic) / 2.0);
         if let Some(art) = self.art_for(id) {
-            c.round(ix, iy, ic, ic, 10.0, CARD);
-            c.outline(ix, iy, ic, ic, 10.0, 1.0, theme::HAIRLINE_STRONG);
+            c.round(ix, iy, ic, ic, 10.0, 0xFF050608);
+            c.outline(ix, iy, ic, ic, 10.0, 1.0, if enabled { theme::HAIRLINE_STRONG } else { theme::HAIRLINE });
             let s = 24.0;
             c.image(&art, ix + (ic - s) / 2.0, iy + (ic - s) / 2.0, s, s, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
         } else {
-            c.round(ix, iy, ic, ic, 10.0, if enabled { 0xFFF4F4F5 } else { theme::SUBTLE_HOVER });
-            c.icon(icon, 18.0, ix + ic / 2.0, iy + ic / 2.0, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });
+            c.round(ix, iy, ic, ic, 10.0, 0xFF050608);
+            c.outline(ix, iy, ic, ic, 10.0, 1.0, if enabled { theme::HAIRLINE_STRONG } else { theme::HAIRLINE });
+            c.icon(icon, 18.0, ix + ic / 2.0, iy + ic / 2.0, if enabled { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY });
         }
         let tx = ix + ic + 12.0;
         c.text(font::SEMIBOLD, 15.0, &name, tx, y + 15.0, theme::TEXT_STRONG);
@@ -1165,8 +1167,9 @@ impl Menu {
             set_hud_scale(m, keep);
         } else if !m.behaviour.preview(&m.state, c, &sample, ui.now, ix, iy, iw, ih) {
             let cy = iy + ih / 2.0;
-            c.circle(ix + iw / 2.0, cy, 32.0, if enabled { 0xFFF4F4F5 } else { theme::SUBTLE_HOVER });
-            c.icon(m.state.icon, 24.0, ix + iw / 2.0, cy, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });
+            c.circle(ix + iw / 2.0, cy, 32.0, 0xFF050608);
+            c.outline(ix + iw / 2.0 - 32.0, cy - 32.0, 64.0, 64.0, 32.0, 1.0, if enabled { theme::HAIRLINE_STRONG } else { theme::HAIRLINE });
+            c.icon(m.state.icon, 24.0, ix + iw / 2.0, cy, if enabled { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY });
         }
         c.pop_clip();
         // Tag in the corner.
