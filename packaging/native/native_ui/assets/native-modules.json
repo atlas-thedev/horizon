@@ -1,336 +1,815 @@
 {
-  "family": "Native Module Icons",
-  "version": 1,
-  "license": "CC0-1.0",
-  "icons": [
+  "family": "Native Icons",
+  "version": 2,
+  "modules": [
     {
       "id": "fps",
       "label": "FPS",
-      "codepoint": "F400",
-      "glyph": "native_fps",
-      "sha256": "9dd7f9a6ee307b2d4d73fa68915946c0df848fff03619709b2aa0fd2fcd659d1"
+      "icon": "gauge",
+      "codepoint": "F400"
     },
     {
       "id": "cps",
       "label": "CPS",
-      "codepoint": "F401",
-      "glyph": "native_cps",
-      "sha256": "67e32d79f970ea8e264bb6cd0602dcfadb4cf9d2374bee265007e4f376a9013d"
+      "icon": "cursor",
+      "codepoint": "F401"
     },
     {
       "id": "keystrokes",
       "label": "Keystrokes",
-      "codepoint": "F402",
-      "glyph": "native_keystrokes",
-      "sha256": "269aea454d42da403f7ab06821da4fdc1acde34e98a403237405ecff59c49e86"
+      "icon": "keys-wasd",
+      "codepoint": "F402"
     },
     {
       "id": "coords",
       "label": "Coordinates",
-      "codepoint": "F403",
-      "glyph": "native_coords",
-      "sha256": "46cae5f05dc181efdb6b7a6933d866c7a35f2690f7f4bf71df569008c9938e6c"
+      "icon": "move",
+      "codepoint": "F403"
     },
     {
       "id": "direction",
       "label": "Direction",
-      "codepoint": "F404",
-      "glyph": "native_direction",
-      "sha256": "6119605ddcc67795209f36e70882cfde33a840b0b476fb27f8b1171e78182d27"
+      "icon": "map",
+      "codepoint": "F404"
     },
     {
       "id": "clock",
       "label": "Clock",
-      "codepoint": "F405",
-      "glyph": "native_clock",
-      "sha256": "07cd86d47c86c54e736a4d35b18d57ba72dd12aa24d8dd1737b59e3b01ec2b9f"
+      "icon": "stopwatch",
+      "codepoint": "F405"
     },
     {
       "id": "memory",
       "label": "Memory",
-      "codepoint": "F406",
-      "glyph": "native_memory",
-      "sha256": "e4c370147b4e49b9b018a56fbfbe317031e1b59c012e3444b22463fdc029c9a2"
+      "icon": "memory",
+      "codepoint": "F406"
     },
     {
       "id": "ping",
       "label": "Ping",
-      "codepoint": "F407",
-      "glyph": "native_ping",
-      "sha256": "1a56199a746f50e7fc477834ae5bde9db4ff5e8a928cacd857fb78efd74096d1"
+      "icon": "signal",
+      "codepoint": "F407"
     },
     {
       "id": "server",
       "label": "Server IP",
-      "codepoint": "F408",
-      "glyph": "native_server",
-      "sha256": "a1b19d4b5f0f83bc05cd89c2d8f5b5c478574d2716c8f307ad2c2b78363f3bae"
+      "icon": "server",
+      "codepoint": "F408"
     },
     {
       "id": "speed",
       "label": "Speed",
-      "codepoint": "F409",
-      "glyph": "native_speed",
-      "sha256": "c0f326d04f7371f031cc999063a8c95c896cd6d7ca4d876beea06ac35b29515d"
+      "icon": "wind",
+      "codepoint": "F409"
     },
     {
       "id": "scoreboard",
       "label": "Scoreboard",
-      "codepoint": "F40A",
-      "glyph": "native_scoreboard",
-      "sha256": "fbae64c74a3cfcef445a39e5e571f077e077c584d5587dfec9dccf338974d5c0"
+      "icon": "document",
+      "codepoint": "F40A"
     },
     {
       "id": "bossbar",
       "label": "Boss Bar",
-      "codepoint": "F40B",
-      "glyph": "native_bossbar",
-      "sha256": "b44ed929cf7e986cd5e2ea391ff08667e38bf6a61158c75cc96f9e6a1a661873"
+      "icon": "crown",
+      "codepoint": "F40B"
     },
     {
       "id": "togglesprint",
       "label": "Toggle Sprint",
-      "codepoint": "F40C",
-      "glyph": "native_togglesprint",
-      "sha256": "a4fc90c779617a0bf8d95eb57e43fb1419f005a976f0fd8ba6f879cfc4b40242"
+      "icon": "bolt",
+      "codepoint": "F40C"
     },
     {
       "id": "zoom",
       "label": "Zoom",
-      "codepoint": "F40D",
-      "glyph": "native_zoom",
-      "sha256": "1fee49c6760f91d6729f46250bb3c88a060b095a1928d9b760509365b7a72e05"
+      "icon": "zoom-in",
+      "codepoint": "F40D"
     },
     {
       "id": "fullbright",
       "label": "Fullbright",
-      "codepoint": "F40E",
-      "glyph": "native_fullbright",
-      "sha256": "a75ef4d39b617956638104207f77b27fc2725e72753f462da4b3ceb8c328e9ae"
+      "icon": "sun",
+      "codepoint": "F40E"
     },
     {
       "id": "bgfps",
-      "label": "Background FPS",
-      "codepoint": "F40F",
-      "glyph": "native_bgfps",
-      "sha256": "fee5b8bdda94767d65977558ab6cc9f371282520bc5e3abf0a724fe5a9fcef2e"
+      "label": "Lag Free",
+      "icon": "feather",
+      "codepoint": "F40F"
     },
     {
       "id": "effects",
       "label": "Potion Effects",
-      "codepoint": "F410",
-      "glyph": "native_effects",
-      "sha256": "d648e4ae905cab5206f6cf30191a4563238a3e8e64fca2386283fa60e6464e88"
+      "icon": "flask",
+      "codepoint": "F410"
     },
     {
       "id": "armor",
-      "label": "Armor Status",
-      "codepoint": "F411",
-      "glyph": "native_armor",
-      "sha256": "c2dbd5dfed6a14ac15a4f1bd977a98f5e58dd130da672253163ba0c934ef8e03"
+      "label": "Armor Stats",
+      "icon": "shield",
+      "codepoint": "F411"
     },
     {
       "id": "inventory",
       "label": "Inventory",
-      "codepoint": "F412",
-      "glyph": "native_inventory",
-      "sha256": "0ac795c3036318b3c05f079a0581d89b64b7bb1e03f25d41acd279a50298df47"
+      "icon": "backpack",
+      "codepoint": "F412"
     },
     {
       "id": "crosshair",
       "label": "Crosshair",
-      "codepoint": "F413",
-      "glyph": "native_crosshair",
-      "sha256": "1cde1b5cb234ecc31c470865af4965f0a37fe7c62dbdfb04380f6eda8abc2f06"
+      "icon": "crosshair",
+      "codepoint": "F413"
     },
     {
       "id": "hitbox-colours",
       "label": "Hitbox Colours",
-      "codepoint": "F414",
-      "glyph": "native_hitbox_colours",
-      "sha256": "3728bf0c1c2add4f958865af64db2a157d898f32de7f64a868607a5965f8d96d"
+      "icon": "cube",
+      "codepoint": "F414"
     },
     {
       "id": "critical-colours",
       "label": "Critical Colours",
-      "codepoint": "F415",
-      "glyph": "native_critical_colours",
-      "sha256": "67512304bb0abace0b0911ebee28dcf364a137e715ae9dd0de70a95279cadb12"
+      "icon": "sword",
+      "codepoint": "F415"
     },
     {
       "id": "watermark",
       "label": "Native Watermark",
-      "codepoint": "F416",
-      "glyph": "native_watermark",
-      "sha256": "5d921d149b4d707e4aa8efb4c449e8e318eebca9b87e7bfb93c64a4e9cc8282e"
+      "icon": "diamond",
+      "codepoint": "F416"
     },
     {
       "id": "voice",
       "label": "Voice Chat",
-      "codepoint": "F417",
-      "glyph": "native_voice",
-      "sha256": "0386375181e48e88bf29ce19dc0f9906fb044e3230c10ce64357b556133b2b47"
+      "icon": "mic",
+      "codepoint": "F417"
     },
     {
       "id": "voice-overlay",
       "label": "Voice Overlay",
-      "codepoint": "F418",
-      "glyph": "native_voice_overlay",
-      "sha256": "1327351a7a43228bdf8c6fd9d75c75c5fe69a09861866d7c3ada0c1c88b0312c"
+      "icon": "volume",
+      "codepoint": "F418"
     },
     {
       "id": "nether-coords",
       "label": "Nether Coordinates",
-      "codepoint": "F419",
-      "glyph": "native_nether_coords",
-      "sha256": "2c738629c6b9ad98cc51144b74a182232847c74ec2c893014dfbc7b34a9b16e1"
+      "icon": "route",
+      "codepoint": "F419"
     },
     {
       "id": "moon-phase",
       "label": "Moon Phase",
-      "codepoint": "F41A",
-      "glyph": "native_moon_phase",
-      "sha256": "b1359b6ca2b2515eae94b79cc32cc634223aac3d462015195abf270704f16e80"
+      "icon": "star",
+      "codepoint": "F41A"
     },
     {
       "id": "day-night",
       "label": "Day / Night Cycle",
-      "codepoint": "F41B",
-      "glyph": "native_day_night",
-      "sha256": "b19a92a6fc76c9f5d92f80cc4e611e2c136b5e25ab855d01a258e40333b002a2"
+      "icon": "brightness",
+      "codepoint": "F41B"
     },
     {
       "id": "totem-counter",
       "label": "Totem Counter",
-      "codepoint": "F41C",
-      "glyph": "native_totem_counter",
-      "sha256": "dbf04b1ba2664abdbebefb761a21c36c57031705dbc4668afa5f498cebc59c60"
+      "icon": "medal",
+      "codepoint": "F41C"
     },
     {
       "id": "item-counter",
       "label": "Item Counter",
-      "codepoint": "F41D",
-      "glyph": "native_item_counter",
-      "sha256": "98180ffdb5285a203321b74fc57bb8a27e5c76068c2770378ab4d1d2e02604d1"
+      "icon": "coins",
+      "codepoint": "F41D"
     },
     {
       "id": "playtime",
       "label": "Playtime",
-      "codepoint": "F41E",
-      "glyph": "native_playtime",
-      "sha256": "63407e3f1d2f2c1b1501e86b289f229996bc15e5cf33a85a9192343c60ecbdee"
+      "icon": "calendar",
+      "codepoint": "F41E"
     },
     {
       "id": "reach",
       "label": "Reach Display",
-      "codepoint": "F41F",
-      "glyph": "native_reach",
-      "sha256": "4584072968fb7c777c985a90449377c13552f35f5a5f55524ff8a26a33f3e99c"
+      "icon": "expand",
+      "codepoint": "F41F"
     },
     {
       "id": "low-fire",
       "label": "Low Fire",
-      "codepoint": "F420",
-      "glyph": "native_low_fire",
-      "sha256": "18c57a824085ab34cce55d135d8d97d2c74de2d613c0736830558c1880f42ac0"
+      "icon": "flame",
+      "codepoint": "F420"
     },
     {
       "id": "damage-tint",
       "label": "Damage Tint",
-      "codepoint": "F421",
-      "glyph": "native_damage_tint",
-      "sha256": "02ed121564114a32d27184c4ce08ab1ca0567002145188cd91c69ebc89f144d4"
+      "icon": "heart-broken",
+      "codepoint": "F421"
     },
     {
       "id": "combo",
       "label": "Combo Counter",
-      "codepoint": "F422",
-      "glyph": "native_combo",
-      "sha256": "d7c5b7a86b184208c5c574ac38366fda0abdad5e260d5e553bd43e2d5e2475b2"
+      "icon": "trend",
+      "codepoint": "F422"
     },
     {
       "id": "cooldowns",
       "label": "Item Cooldowns",
-      "codepoint": "F423",
-      "glyph": "native_cooldowns",
-      "sha256": "532f978d043de242de7fc667759159c2b1b78eff1d8cda0e04e011750e4c0799"
+      "icon": "refresh",
+      "codepoint": "F423"
     },
     {
       "id": "block-overlay",
       "label": "Block Overlay",
-      "codepoint": "F424",
-      "glyph": "native_block_overlay",
-      "sha256": "d3c5a36e3a1001572b3dd8a106b4d4531770bd3498bb33f84e75a480c1eac576"
+      "icon": "frame",
+      "codepoint": "F424"
     },
     {
       "id": "freelook",
       "label": "Freelook",
-      "codepoint": "F425",
-      "glyph": "native_freelook",
-      "sha256": "092328e3fc612d8cb6e012577f1b71533a656dcb238576f6ec396352f6a795a0"
+      "icon": "eye",
+      "codepoint": "F425"
     },
     {
       "id": "no-hurt-cam",
       "label": "No Hurt Cam",
-      "codepoint": "F426",
-      "glyph": "native_no_hurt_cam",
-      "sha256": "117fc4f17dd666550504342923ac2ae7468f74cae36f681c35fe9039c617fd72"
+      "icon": "video",
+      "codepoint": "F426"
     },
     {
       "id": "time-changer",
       "label": "Time Changer",
-      "codepoint": "F427",
-      "glyph": "native_time_changer",
-      "sha256": "b9267fa3358095f137e5b664ea8c7dc43296c1fd5beb0f14a3976655afacbc60"
+      "icon": "hourglass",
+      "codepoint": "F427"
     },
     {
       "id": "weather-changer",
       "label": "Weather Changer",
-      "codepoint": "F428",
-      "glyph": "native_weather_changer",
-      "sha256": "ab1b8c55a6d8edd2d785d012c1e2e71f52c386f7071bcbde1ba22c62a82fa179"
+      "icon": "snowflake",
+      "codepoint": "F428"
     },
     {
       "id": "now-playing",
       "label": "Now Playing",
-      "codepoint": "F429",
-      "glyph": "native_now_playing",
-      "sha256": "ffa3d5e47f286a640456d7d66bd53af156a832588250e3dff4026647a8207bfa"
+      "icon": "music",
+      "codepoint": "F429"
     },
     {
       "id": "motion-blur",
       "label": "Motion Blur",
-      "codepoint": "F42A",
-      "glyph": "native_motion_blur",
-      "sha256": "4a78cebcc937fa801fa6c22373ebdae394d63523f329e6d40b707e69fdf901df"
+      "icon": "film",
+      "codepoint": "F42A"
     },
     {
       "id": "waypoints",
       "label": "Waypoints",
-      "codepoint": "F42B",
-      "glyph": "native_waypoints",
-      "sha256": "98f4fbf083ac56574f9f44b653ef4e11a48ea76397f23a5afc265a894b3daec0"
+      "icon": "map-pin",
+      "codepoint": "F42B"
     },
     {
       "id": "markers",
       "label": "Markers",
-      "codepoint": "F42C",
-      "glyph": "native_markers",
-      "sha256": "ac062cdd6896f7b52756bcf4d0652031a1702b7d3e075e7a2578696ddb47c965"
+      "icon": "flag",
+      "codepoint": "F42C"
     },
     {
       "id": "emotes",
       "label": "Emotes",
-      "codepoint": "F42D",
-      "glyph": "native_emotes",
-      "sha256": "5e085efbc06502ae8642fe83c7ab6721a1304683be183761155aad9b3f5feb01"
+      "icon": "sparkles",
+      "codepoint": "F42D"
     },
     {
       "id": "discord-rpc",
       "label": "Discord RPC",
-      "codepoint": "F42E",
-      "glyph": "native_discord_rpc",
-      "sha256": "bd07e810a01a144e19ead8a1db295ca0a2e3b965d41477daed2076fb6d137c93"
+      "icon": "broadcast",
+      "codepoint": "F42E"
+    }
+  ],
+  "library": [
+    {
+      "name": "gauge",
+      "codepoint": "F600",
+      "sha256": "1e4b0d5a5b32bb7de41d301082c96a8956add9de21778c34f8219f0a28c5e1dc"
+    },
+    {
+      "name": "cursor",
+      "codepoint": "F601",
+      "sha256": "a52e45e6f5670e250de028a6d204929676ed813475c761087733723d2f2f1a90"
+    },
+    {
+      "name": "keyboard",
+      "codepoint": "F602",
+      "sha256": "e133a815c435eca551256f488e3ab792a2e3ef3c2551dd7c9264d5e7f9e9acb9"
+    },
+    {
+      "name": "keys-wasd",
+      "codepoint": "F603",
+      "sha256": "534c6f6efc409f7d9ced3a04cca79550ef8ddbc6067e313fae6853eda5d27249"
+    },
+    {
+      "name": "move",
+      "codepoint": "F604",
+      "sha256": "0eb33ff8e7ecf22d4705a1fb6752eb84e6260b20d055c082ccc62e9e6332d366"
+    },
+    {
+      "name": "crosshair",
+      "codepoint": "F605",
+      "sha256": "927005525007f288bfeaf072d3e955574e498433753e6d622ed186119b2a4037"
+    },
+    {
+      "name": "brightness",
+      "codepoint": "F606",
+      "sha256": "6d8c007de559d5269e9af5e77c6c74e7a8ae7186f7b7b917aba8ebfd2c5cd1e4"
+    },
+    {
+      "name": "sword",
+      "codepoint": "F607",
+      "sha256": "ab1b459a2a02fb51e9bbeb0a2eb9bf0b76ef50a4b182585d08c9f0e80ec87302"
+    },
+    {
+      "name": "shield",
+      "codepoint": "F608",
+      "sha256": "4e6aa6b6ae39a1c32890fa9cd9821c743d2280fdf54765b03ff47cef20c59833"
+    },
+    {
+      "name": "shirt",
+      "codepoint": "F609",
+      "sha256": "e86b5c2a42df53e17fb0a97f2a5365f1039729d6211f05985c826c0e58422d3d"
+    },
+    {
+      "name": "cube",
+      "codepoint": "F60A",
+      "sha256": "43992f2fde9bfae4aab44e7adc3ddaf092eec90abd5b8623ab29498618e5d625"
+    },
+    {
+      "name": "layers",
+      "codepoint": "F60B",
+      "sha256": "09c70bc938b04981fbfc524d18639131358637aeb223a9f2e7fe4d99aa48c092"
+    },
+    {
+      "name": "eye",
+      "codepoint": "F60C",
+      "sha256": "ae2a92f1bf4ba267c460115d1f2b7352701bf6619a311831a4b01d521985e3f1"
+    },
+    {
+      "name": "eye-off",
+      "codepoint": "F60D",
+      "sha256": "44cd96457f724ddf9268265a4e22fdc560ac0f14168b3e3fb41b27f1a4ebcc47"
+    },
+    {
+      "name": "sun",
+      "codepoint": "F60E",
+      "sha256": "ce27a0494b656e09502d6a9c101945c03998ef0ccde7459791338948820f528e"
+    },
+    {
+      "name": "sparkles",
+      "codepoint": "F60F",
+      "sha256": "01a4dd94bebe18c9ee52c66fe499aabc592cb8cee6378d91da4b1fd3c838c259"
+    },
+    {
+      "name": "brush",
+      "codepoint": "F610",
+      "sha256": "b48ad209699f3fcaeb0688105c5469c2a0c5653319e8a769028d7d152763f4ae"
+    },
+    {
+      "name": "palette",
+      "codepoint": "F611",
+      "sha256": "16aba3378a2e6241b4f56039ae9af92abdc4285d64dbbcecaec8830048f61f74"
+    },
+    {
+      "name": "image",
+      "codepoint": "F612",
+      "sha256": "ef374b799453a73e2d602c44a70f73afbafab5b976758c4b07336faf2dd11c5e"
+    },
+    {
+      "name": "video",
+      "codepoint": "F613",
+      "sha256": "d281f65d8aec7bb5217f272000ab45e5ff0728553ba5a198b91560223874331f"
+    },
+    {
+      "name": "film",
+      "codepoint": "F614",
+      "sha256": "cc86f61633933140a278f1fbc5a9ac0ffb83368dd416b311dd429269e0d79a79"
+    },
+    {
+      "name": "music",
+      "codepoint": "F615",
+      "sha256": "df59625975aa539fd96aa7203ad5ad26d8491b3057f99e6047ed239090dd39a5"
+    },
+    {
+      "name": "volume",
+      "codepoint": "F616",
+      "sha256": "6b25eda337a45116aa3165b96d0ea3595c7f1853064636fa61ee0f5444ba1f6d"
+    },
+    {
+      "name": "volume-mute",
+      "codepoint": "F617",
+      "sha256": "48ca0719dd64f8b5eae816706762c0ddb96aa957c672788638aa1224761b7c92"
+    },
+    {
+      "name": "mic",
+      "codepoint": "F618",
+      "sha256": "6d46c8d5869b9bfafc285c9400400d13834afe6d89f2a814b5216a63c9eb6c56"
+    },
+    {
+      "name": "mic-off",
+      "codepoint": "F619",
+      "sha256": "ac588869fcb35b321130ae740c9b3264ad53bc6294dae665990c14d2ceec0f94"
+    },
+    {
+      "name": "broadcast",
+      "codepoint": "F61A",
+      "sha256": "3a7e673b6dc412f559d35e19016d8d66aee9573ebd07184da1a3a88bb6ad31ee"
+    },
+    {
+      "name": "shuffle",
+      "codepoint": "F61B",
+      "sha256": "4b507a42e7606a516f28f377a16f834fdbb90dcc112aa1d3ae88615b79cb65e2"
+    },
+    {
+      "name": "repeat",
+      "codepoint": "F61C",
+      "sha256": "562293616196707562d245a310c64d9835ab3e751dc44da5c5704dc274b6bec8"
+    },
+    {
+      "name": "infinity",
+      "codepoint": "F61D",
+      "sha256": "51088a9d915b8854838ddd7ebfc85752fe71f3206edab73e11fefca60724f937"
+    },
+    {
+      "name": "map",
+      "codepoint": "F61E",
+      "sha256": "a951524525e05cfbcbb4c8c8909ab3a93418727f08a66f1bb9bb062451f8f196"
+    },
+    {
+      "name": "map-pin",
+      "codepoint": "F61F",
+      "sha256": "926608b48c167060281a38b929a95432f54d542cce5a1a587faa592a35dceca5"
+    },
+    {
+      "name": "route",
+      "codepoint": "F620",
+      "sha256": "3b1868368fd2c5a1249290312886d9e0c7772047dcabb3a89ff3a679da4688b7"
+    },
+    {
+      "name": "flag",
+      "codepoint": "F621",
+      "sha256": "4e62caa4541dfc4c0ab71f4985970822a52b80d750048fcb276ee9a59e5d11e9"
+    },
+    {
+      "name": "flag-checkered",
+      "codepoint": "F622",
+      "sha256": "89449f9facd68fdfae61e88202af8c5c8d7ff4a69908de5bbed25339be0834c3"
+    },
+    {
+      "name": "warning",
+      "codepoint": "F623",
+      "sha256": "d8c73ac57fd921bc549f54e0c2cb76f37c34c600755b66ea5187204facffc868"
+    },
+    {
+      "name": "star",
+      "codepoint": "F624",
+      "sha256": "1449922791d514554a6095abe7df266c077ec462346cb53a13211618b9675269"
+    },
+    {
+      "name": "diamond",
+      "codepoint": "F625",
+      "sha256": "bf75441b5d30e5feb4857de93dc34bdddd42ed77537e9152c37ee2c899717b47"
+    },
+    {
+      "name": "crown",
+      "codepoint": "F626",
+      "sha256": "ea0c9bc085f704964133ec33fd0add3c1b06057bbf375e134783e1f3cd4f47be"
+    },
+    {
+      "name": "trophy",
+      "codepoint": "F627",
+      "sha256": "ef79a4046ea1ec3b126835337b6d4651a2718d423b23af0f184be5b1f51a429b"
+    },
+    {
+      "name": "medal",
+      "codepoint": "F628",
+      "sha256": "c5906754a8ee4a100f536300314852c5de17de7ea9fb641e314a5ad73c8d306e"
+    },
+    {
+      "name": "book",
+      "codepoint": "F629",
+      "sha256": "b682412dc64530f1d01bd6324a85ae432d0c91bb2cf326181b65058fa9927332"
+    },
+    {
+      "name": "backpack",
+      "codepoint": "F62A",
+      "sha256": "64eddcafc392f4a6d2ad505d337a9d8a6fca43a468a170b5c819f2241f3cdd33"
+    },
+    {
+      "name": "chest",
+      "codepoint": "F62B",
+      "sha256": "843d40e8339aaa65005e28692518cd6fdbcfc55f04abfea83d2b14fccf815178"
+    },
+    {
+      "name": "coins",
+      "codepoint": "F62C",
+      "sha256": "ea636c6efd43a4ee20302a7daa70314be42300ec00fb1a5cba1c8b1028bc2650"
+    },
+    {
+      "name": "flask",
+      "codepoint": "F62D",
+      "sha256": "f1e4547aa69cf8f758af2cf1a0866bcae604d52c6493576ffc801a078ff68ba3"
+    },
+    {
+      "name": "cauldron",
+      "codepoint": "F62E",
+      "sha256": "38a3a559a9323387629f3460acd68985029f2588de812158570f55afc353842f"
+    },
+    {
+      "name": "apple",
+      "codepoint": "F62F",
+      "sha256": "dd43c510716480bd2a7f35205b3a652c539a8a4122f3433b765505e94f19efeb"
+    },
+    {
+      "name": "drumstick",
+      "codepoint": "F630",
+      "sha256": "27e9969a3e0cbf85d7670df7109f4a9c6205ca489de5caadfa2066e664a05e28"
+    },
+    {
+      "name": "heart",
+      "codepoint": "F631",
+      "sha256": "ec5cd7e38ea7f97ff5b810711b7b3aa2b78aaf151e64aa3db1f2f6e1e68b79ca"
+    },
+    {
+      "name": "heart-broken",
+      "codepoint": "F632",
+      "sha256": "0b57f5c0aa8b94820d07b0fabcd013271c1eb20fc0bb53ec13b6c7379b3effb4"
+    },
+    {
+      "name": "bolt",
+      "codepoint": "F633",
+      "sha256": "25b650ba319573b252daccc1738a73bfbd795ef97bf845ed4a964c3270b0ed25"
+    },
+    {
+      "name": "leaf",
+      "codepoint": "F634",
+      "sha256": "b832b37cf9ca8a0fb82959df527e9f099d580932e96a57a73571567a7427cff2"
+    },
+    {
+      "name": "feather",
+      "codepoint": "F635",
+      "sha256": "dbe3f304416b9966779f7faa39078226b662f867247cf032aaec18c54d42c99c"
+    },
+    {
+      "name": "rocket",
+      "codepoint": "F636",
+      "sha256": "53de61bfd1d9234fa092313f904b83834402160c377569b11f589acc9a707dc7"
+    },
+    {
+      "name": "hourglass",
+      "codepoint": "F637",
+      "sha256": "c92bf3c0fe669054242db4f1434fd01a47d75dd32ea4b03c174e1b6fbadc2914"
+    },
+    {
+      "name": "stopwatch",
+      "codepoint": "F638",
+      "sha256": "5521d95a1026c288af7f0ff6394363cf9b04826d2ec8899affb49151a5ccd95b"
+    },
+    {
+      "name": "calendar",
+      "codepoint": "F639",
+      "sha256": "23527e53947519e783b388c74badb57761ca27c7840067dbf7de1a498cee884a"
+    },
+    {
+      "name": "cloud-download",
+      "codepoint": "F63A",
+      "sha256": "9174da1c3ec2f04e5ca741df5919e44898f0ee3c3061bf2350733e31e45c370d"
+    },
+    {
+      "name": "cloud-upload",
+      "codepoint": "F63B",
+      "sha256": "0d8ec81aa113adda2eb5398d466be93bbcb19b19c0e959d9f6e21a0b5825739f"
+    },
+    {
+      "name": "document",
+      "codepoint": "F63C",
+      "sha256": "7fc6650a713d6223bcf6be79eada1d369dd649010ed30c69a403b709deed129e"
+    },
+    {
+      "name": "checkbox",
+      "codepoint": "F63D",
+      "sha256": "8494865c818e544d5d8117ef5226de39a4b1ed75316e5123d2a04f2e0f1cd562"
+    },
+    {
+      "name": "signal",
+      "codepoint": "F63E",
+      "sha256": "462cc6ce8c848e5c6418b5349c64d1afea92f762e683d31c112eaced58db773e"
+    },
+    {
+      "name": "trend",
+      "codepoint": "F63F",
+      "sha256": "88783b956051640d629853d7ea7128710a96ef5b56a01cc22c7fb19882c28d90"
+    },
+    {
+      "name": "server",
+      "codepoint": "F640",
+      "sha256": "c6518e49b9cbd4b65a471d263e508e9d211074d36c124baba3ebd61a4a571fa6"
+    },
+    {
+      "name": "database",
+      "codepoint": "F641",
+      "sha256": "58a3a3aa29af59ebabeedf5afc284a662f34c4f77c0b3fab0123b644b847f98e"
+    },
+    {
+      "name": "network",
+      "codepoint": "F642",
+      "sha256": "f0464f2398cbbe7011574a4774b01709450df0eea9e2be6ccaa4a3e06dc2af89"
+    },
+    {
+      "name": "plug",
+      "codepoint": "F643",
+      "sha256": "3eaf57e3651728b1d344dbeeb351f3fb7de5c343d1c96836bf9934b760f535a3"
+    },
+    {
+      "name": "cpu",
+      "codepoint": "F644",
+      "sha256": "baf03623f5665358d0ab97114876b6a37443769bc6d34ec9f9aa0bb3b7fe0941"
+    },
+    {
+      "name": "memory",
+      "codepoint": "F645",
+      "sha256": "f4c3ad3b0c1e61d6fa3331710eb2afbfcf56b0dd2963372296b05dd476d390f7"
+    },
+    {
+      "name": "thermometer",
+      "codepoint": "F646",
+      "sha256": "2a6410d1025bb7469e016d7487a52c6df6fc1d0b9fde5751b0d8207ee8a120a5"
+    },
+    {
+      "name": "snowflake",
+      "codepoint": "F647",
+      "sha256": "6236334f7a7339ebde45799fddb5e42e7f60efc7a615acdb2f7d7ca87a4e8fe9"
+    },
+    {
+      "name": "flame",
+      "codepoint": "F648",
+      "sha256": "5bd804ceabd10290d8027b6e0e630642e577114db85d486af132e5f4233018ac"
+    },
+    {
+      "name": "droplet",
+      "codepoint": "F649",
+      "sha256": "5cb00b9c611bb4ae572e20badadf3893b4324b57184471b04792011ba9c1649f"
+    },
+    {
+      "name": "wind",
+      "codepoint": "F64A",
+      "sha256": "4417cc6f6cc531115a09ed4af72e012a75ec1d9c77ba1739ed5714c3e55de954"
+    },
+    {
+      "name": "frame",
+      "codepoint": "F64B",
+      "sha256": "608c10a83272e547c9a78beba2fd4b13b150032a2d5b11594a19003c7d852dc9"
+    },
+    {
+      "name": "window",
+      "codepoint": "F64C",
+      "sha256": "0534602b89bcbf619d31576e0f2dd01935b57e1e2412532b07e28167bf619f10"
+    },
+    {
+      "name": "copy",
+      "codepoint": "F64D",
+      "sha256": "ab416e9f08fc07797161aada68baa33282704c0c2f5099dcf6f8d5131f539efd"
+    },
+    {
+      "name": "layers-plus",
+      "codepoint": "F64E",
+      "sha256": "6f344978595edd42c697441b017accd8d6c15dfc74e7d11944722c20ae5ab867"
+    },
+    {
+      "name": "grid",
+      "codepoint": "F64F",
+      "sha256": "63c524d6fbab1d685e4bf738ce596ac0844c9a80e224b3077d9db805eed1a48d"
+    },
+    {
+      "name": "fullscreen",
+      "codepoint": "F650",
+      "sha256": "2d40a5e5955f6a9c4b747e60fd9d0c67169896b34e00b7304d38e01a7f46ceb1"
+    },
+    {
+      "name": "zoom-out",
+      "codepoint": "F651",
+      "sha256": "fa5d7bc8569c488b15b664923ead1057d11caf6e7ec157cf7de45c2b101f2d6e"
+    },
+    {
+      "name": "zoom-in",
+      "codepoint": "F652",
+      "sha256": "c6090179aa4d9080727ee6ba8b8b86df60234530b6fcff6872cbd5fcd82243cb"
+    },
+    {
+      "name": "expand",
+      "codepoint": "F653",
+      "sha256": "09694dbb996a5c113721d27a505505110ccbd3cc3a015b682a11b76fc5de4674"
+    },
+    {
+      "name": "collapse",
+      "codepoint": "F654",
+      "sha256": "5e0299ad1e7f189cd62a472a642ac1a2fd56ecb5df63a030ffe901057c7c2136"
+    },
+    {
+      "name": "swap",
+      "codepoint": "F655",
+      "sha256": "a49b6db16b903f055fd36bbf32eec9b0293931a426c35eeb1483a0b68fb0bfd0"
+    },
+    {
+      "name": "code",
+      "codepoint": "F656",
+      "sha256": "4450f61061ac9e4ebb76c8e759a3ed4938c3842ba1d6c8b0b98565160b4091c5"
+    },
+    {
+      "name": "terminal",
+      "codepoint": "F657",
+      "sha256": "b6e09c00060e4d54e8c87e2509c944332b1bb2b278b64d179454c6461287f443"
+    },
+    {
+      "name": "bug",
+      "codepoint": "F658",
+      "sha256": "386cc71d9f80152b5fb9062dcddfc8253fd012927081b3032b0addafb7999ca8"
+    },
+    {
+      "name": "shield-check",
+      "codepoint": "F659",
+      "sha256": "04ff410bde13eefdf0420ab9a2379df2ba70a85390183524bcb5631bf8d6040c"
+    },
+    {
+      "name": "settings",
+      "codepoint": "F65A",
+      "sha256": "863b7b420c06045acce49890dc1c564e41ea7fdb358a10063c4c79b80941bc10"
+    },
+    {
+      "name": "sliders",
+      "codepoint": "F65B",
+      "sha256": "788d8d1fe071efbf5bd0c3ccc3c3f0e523481e38bbe5ed982cf80079dc8fc0ac"
+    },
+    {
+      "name": "tune",
+      "codepoint": "F65C",
+      "sha256": "87cf7c4ae57bf14f0b2309d6d3e3337c08fbaec4e747fc2dabaecb52d7e523e6"
+    },
+    {
+      "name": "filter",
+      "codepoint": "F65D",
+      "sha256": "253380de91ed03f60222daa416bd24105a7e5fef503c466f231e1a8226724f3b"
+    },
+    {
+      "name": "filter-plus",
+      "codepoint": "F65E",
+      "sha256": "48a19239b9ab400f37faf184c1d68cdc229ae6f276e1ea22086de13fff00527a"
+    },
+    {
+      "name": "trash",
+      "codepoint": "F65F",
+      "sha256": "3ac578acbe3b02090b5d6352c481576fec7f0300e8caf271aa34688105879c5e"
+    },
+    {
+      "name": "save",
+      "codepoint": "F660",
+      "sha256": "320e8f8b3761856d82c4e9098dd7e6c8b712ec341cbb6d82c439241c24d41fe0"
+    },
+    {
+      "name": "upload",
+      "codepoint": "F661",
+      "sha256": "375adce506efe9ac1839c2ffa6e7e3d134fcbf171a1aa682b34ad8e9f28faf29"
+    },
+    {
+      "name": "download",
+      "codepoint": "F662",
+      "sha256": "770c21d4b43581edcbc2322ec952d76c6381fcd090273411770b705aa9ce3e9b"
+    },
+    {
+      "name": "refresh",
+      "codepoint": "F663",
+      "sha256": "eff6794e55c77701df2ea1e948c0e72266bf6c1ad47caf0098e5f81e33ed7481"
+    },
+    {
+      "name": "lock",
+      "codepoint": "F664",
+      "sha256": "0b58676da3b369f84fc910375f7ecd05d32c08509fb3f7606f731204d8830964"
+    },
+    {
+      "name": "unlock",
+      "codepoint": "F665",
+      "sha256": "e6234ba7fa0fd5a23a72b406011348f5e6c153015d549d052ed1b6532fc4d59f"
+    },
+    {
+      "name": "user",
+      "codepoint": "F666",
+      "sha256": "22dddf893b513c370d32058cbc3fa90e38023b8f5df037e2ce92e9f9fc83ca5e"
+    },
+    {
+      "name": "users",
+      "codepoint": "F667",
+      "sha256": "368568408687984c1f5500dfc8968dd24455b556fd068c0dd02aedbe8fa34814"
+    },
+    {
+      "name": "magic",
+      "codepoint": "F668",
+      "sha256": "0f102ea97922c61a16a94518a4910038ef9b6337125e20561c68aebf0245b5e8"
     }
   ]
 }

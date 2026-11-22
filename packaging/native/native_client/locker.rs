@@ -1,6 +1,5 @@
-//! The unified Locker (Cosmetics + Emotes sidebar, search + A-Z sort, 3-column square rounded cards with crisp
-//! emerald `✓ Equipped` bottom strip and centered labels below, and right-hand 3D rotatable player preview +
-//! Equip / Take off controls).
+//! The Cosmetics tab (same layout as the launcher locker): a stage with the
+//! player's model on the left, the slots and the owned items on the right.
 #![allow(dead_code)]
 
 use super::menu::{CARD, CARD_HOVER, clamp01, disabled, ease, empty, glow};
@@ -10,27 +9,16 @@ use super::scroll::Scroll;
 use super::textfield::TextField;
 use super::ui::{self, Ui};
 use super::wardrobe::{self, Item, SLOT_NAMES, SLOTS, State};
-use horizon_client::native_emotes;
-use horizon_client::native_ui::{Canvas, font, icons, theme};
+use horizon_client::native_ui::{Canvas, font, theme};
 
 /// One per wardrobe slot, for item cards without a picture; `BALLOON_ICON` is drawn by hand (the icon font has no balloon).
 const BALLOON_ICON: u32 = 0;
-pub const SLOT_ICONS: [u32; 7] = [
-    theme::I_LAYERS,
-    theme::I_HAT,
-    theme::I_BACKPACK,
-    theme::I_FOOTPRINTS,
-    theme::I_HAND,
-    theme::I_SPARKLES,
-    BALLOON_ICON,
-];
-
-/// Navigation choice returned by the shared Locker sidebar (`Some(0..7)` = cosmetic slot, `Some(7)` = Emotes).
-pub const SIDEBAR_EMOTES: usize = 7;
-pub const SIDEBAR_W: f32 = 194.0;
+/// The "equipped" colour of the locker cards.
+const EQUIP_GREEN: u32 = 0xFF16A34A;
+const SLOT_ICONS: [u32; 7] = [theme::I_LAYERS, theme::I_HAT, theme::I_BACKPACK, theme::I_FOOTPRINTS, theme::I_HAND, theme::I_SPARKLES, BALLOON_ICON];
 
 /// A slot's icon; the balloon is a round balloon, its knot and a wavy string.
-pub fn slot_icon(c: &mut Canvas, icon: u32, size: f32, cx: f32, cy: f32, color: u32) {
+fn slot_icon(c: &mut Canvas, icon: u32, size: f32, cx: f32, cy: f32, color: u32) {
     if icon != BALLOON_ICON {
         c.icon(icon, size, cx, cy, color);
         return;
@@ -46,140 +34,17 @@ pub fn slot_icon(c: &mut Canvas, icon: u32, size: f32, cx: f32, cy: f32, color: 
     }
 }
 
-/// Shared unified Locker left sidebar (~194 px): Locker header + Cosmetics slots (`Capes`..`Balloons`) with counts
-/// and green equipped dots + `Emotes` entry + bottom `Native Store` button.
-/// Returns `Some(0..7)` when a cosmetic slot is clicked, or `Some(SIDEBAR_EMOTES)` when Emotes is clicked.
-#[allow(clippy::too_many_arguments)]
-pub fn draw_sidebar(ui: &mut Ui, c: &mut Canvas, active: usize, x: f32, y: f32, w: f32, h: f32) -> Option<usize> {
-    let mut picked = None;
-    let l = wardrobe::snapshot();
-    let emotes_snap = native_emotes::snapshot();
-    let emote_count = emotes_snap["catalog"]
-        .as_array()
-        .map_or(0, |a| a.iter().filter(|o| o["owned"].as_bool().unwrap_or(true)).count());
-    let has_emote_equipped = native_emotes::pages_of(&emotes_snap).iter().any(|p| p.iter().any(Option::is_some));
-
-    // Locker header
-    let emblem = icons::for_module("watermark", theme::I_SPARKLES);
-    c.icon(emblem, 18.0, x + 16.0, y + 16.0, theme::TEXT_STRONG);
-    let lh = c.line_height(font::BOLD, 15.0);
-    c.text(font::BOLD, 15.0, "Locker", x + 32.0, y + 16.0 - lh / 2.0, theme::TEXT_STRONG);
-
-    let total_cosmetics: usize = (0..SLOTS.len()).map(|i| wardrobe::owned_in(&l, SLOTS[i]).len()).sum();
-    let any_cosmetic = l.equipped.is_some() || !l.wearing.is_empty();
-    let mut ry = y + 42.0;
-
-    // Cosmetics group header
-    c.icon(theme::I_SHIRT, 13.0, x + 14.0, ry + 11.0, theme::TEXT_SECONDARY);
-    let hdr = format!("Cosmetics ({total_cosmetics})");
-    let hlh = c.line_height(font::SEMIBOLD, 11.5);
-    c.text(font::SEMIBOLD, 11.5, &hdr, x + 28.0, ry + 11.0 - hlh / 2.0, theme::TEXT_STRONG);
-    if any_cosmetic {
-        c.circle(x + w - 14.0, ry + 11.0, 3.2, theme::ONLINE);
-    }
-    ry += 26.0;
-
-    // 7 Cosmetic slot rows
-    let row_h = 31.0;
-    for i in 0..SLOTS.len() {
-        let count = wardrobe::owned_in(&l, SLOTS[i]).len();
-        let worn = if i == 0 { l.equipped.is_some() } else { l.wearing.contains_key(SLOTS[i]) };
-        let sel = active == i;
-        let id = format!("locker:nav:{i}");
-        let over = ui.hover(c, x, ry, w, row_h);
-        if ui.clicked(c, &id, x, ry, w, row_h) {
-            picked = Some(i);
-        }
-        let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-        let on = ui.anim_on(&format!("{id}#on"), sel, 16.0);
-        let bg = theme::mix(theme::alpha(0x14FFFFFF, hv), 0x22FFFFFF, on);
-        if bg >> 24 > 0 {
-            c.round(x, ry, w, row_h, 7.0, bg);
-        }
-        if on > 0.05 {
-            c.outline(x, ry, w, row_h, 7.0, 1.0, theme::alpha(theme::HAIRLINE_STRONG, on));
-        }
-        let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::TEXT_STRONG, on);
-        slot_icon(c, SLOT_ICONS[i], 13.5, x + 20.0, ry + row_h / 2.0, fg);
-        let label = format!("{} ({count})", SLOT_NAMES[i]);
-        let label = c.ellipsize(font::MEDIUM, 11.5, &label, w - 50.0);
-        let rlh = c.line_height(font::MEDIUM, 11.5);
-        c.text(font::MEDIUM, 11.5, &label, x + 34.0, ry + (row_h - rlh) / 2.0, fg);
-        if worn {
-            c.circle(x + w - 14.0, ry + row_h / 2.0, 3.2, theme::ONLINE);
-        }
-        if over {
-            ui.cursor_hand = true;
-        }
-        ry += row_h + 2.0;
-    }
-
-    ry += 6.0;
-    c.fill(x + 4.0, ry, w - 8.0, 1.0, theme::HAIRLINE);
-    ry += 8.0;
-
-    // Emotes entry
-    {
-        let sel = active == SIDEBAR_EMOTES;
-        let id = "locker:nav:emotes";
-        let over = ui.hover(c, x, ry, w, row_h + 2.0);
-        if ui.clicked(c, id, x, ry, w, row_h + 2.0) {
-            picked = Some(SIDEBAR_EMOTES);
-        }
-        let hv = ui.anim_on("locker:nav:emotes#h", over, 14.0);
-        let on = ui.anim_on("locker:nav:emotes#on", sel, 16.0);
-        let bg = theme::mix(theme::alpha(0x14FFFFFF, hv), 0x22FFFFFF, on);
-        if bg >> 24 > 0 {
-            c.round(x, ry, w, row_h + 2.0, 7.0, bg);
-        }
-        if on > 0.05 {
-            c.outline(x, ry, w, row_h + 2.0, 7.0, 1.0, theme::alpha(theme::HAIRLINE_STRONG, on));
-        }
-        let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::TEXT_STRONG, on);
-        c.icon(theme::I_SMILE, 14.0, x + 20.0, ry + (row_h + 2.0) / 2.0, fg);
-        let label = format!("Emotes ({emote_count})");
-        let label = c.ellipsize(font::SEMIBOLD, 11.5, &label, w - 50.0);
-        let rlh = c.line_height(font::SEMIBOLD, 11.5);
-        c.text(font::SEMIBOLD, 11.5, &label, x + 34.0, ry + (row_h + 2.0 - rlh) / 2.0, fg);
-        if has_emote_equipped {
-            c.circle(x + w - 14.0, ry + (row_h + 2.0) / 2.0, 3.2, theme::ONLINE);
-        }
-        if over {
-            ui.cursor_hand = true;
-        }
-    }
-
-    // Bottom: Native Store button
-    let store_h = 34.0;
-    let store_y = y + h - store_h;
-    let over_store = ui.hover(c, x, store_y, w, store_h);
-    let shv = ui.anim_on("locker:store#h", over_store, 14.0);
-    c.round(x, store_y, w, store_h, 8.0, theme::mix(0xFF171A24, 0xFF212636, shv));
-    c.outline(x, store_y, w, store_h, 8.0, 1.0, theme::mix(0x334F86F7, 0x774F86F7, shv));
-    let stxt = "Native Store";
-    let sw = c.text_width(font::SEMIBOLD, 11.5, stxt);
-    let slh = c.line_height(font::SEMIBOLD, 11.5);
-    let sx = x + (w - (sw + 18.0)) / 2.0;
-    c.icon(theme::I_STORE, 13.0, sx + 6.0, store_y + store_h / 2.0, 0xFF8AB4FF);
-    c.text(font::SEMIBOLD, 11.5, stxt, sx + 18.0, store_y + (store_h - slh) / 2.0, theme::TEXT_STRONG);
-    if over_store {
-        ui.cursor_hand = true;
-        ui.tip("Get more cosmetics & emotes in the Native Store in the launcher");
-    }
-
-    picked
-}
-
 pub struct Locker {
     slot: usize,
     /// Selection in the current slot: `None` = nothing picked yet, `Some("")` = the "Nothing" card, else an item id.
     pick: Option<String>,
     scroll: Scroll,
-    search: TextField,
-    sort_desc: bool,
     preview: PlayerPreview,
     /// When the slot last changed: only the items animate, the 3D preview stays solid.
     locker_at: f64,
+    /// Search over the slot's items, and their A-Z order (off: the store's order, newest first).
+    search: TextField,
+    sort_alpha: bool,
 }
 
 impl Default for Locker {
@@ -194,31 +59,13 @@ fn singular(slot: usize) -> &'static str {
 
 impl Locker {
     pub fn new() -> Self {
-        let mut search = TextField::new("locker:search");
+        let mut search = TextField::new("menu:locker:search");
         search.max_length = 48;
         search.bare = true;
-        Locker {
-            slot: 0,
-            pick: None,
-            scroll: Scroll::new("locker"),
-            search,
-            sort_desc: false,
-            preview: PlayerPreview::new(),
-            locker_at: 0.0,
-        }
+        Locker { slot: 0, pick: None, scroll: Scroll::new("locker"), preview: PlayerPreview::new(), locker_at: 0.0, search, sort_alpha: true }
     }
 
-    /// Switches to a specific cosmetic slot (0..7) from the unified Locker sidebar.
-    pub fn set_slot(&mut self, slot: usize, now: f64) {
-        let slot = slot.min(SLOTS.len() - 1);
-        if self.slot != slot {
-            self.slot = slot;
-            self.pick = None;
-            self.scroll.reset();
-            self.locker_at = now;
-        }
-    }
-
+    /// Esc: leaves the search first. True when it was consumed.
     pub fn escape(&mut self, ui: &mut Ui) -> bool {
         if self.search.focused(ui) {
             ui.focus = None;
@@ -235,187 +82,53 @@ impl Locker {
         wardrobe::refresh(false);
     }
 
-    /// Draws the unified Cosmetics Locker view. Returns `true` when the user clicked `Emotes` in the sidebar.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, who: &str, page_at: f64, x: f32, y: f32, w: f32, h: f32) -> bool {
-        // 1. Left Sidebar (~194 px)
-        let sb_w = SIDEBAR_W.min(w * 0.24);
-        if let Some(nav) = draw_sidebar(ui, c, self.slot, x, y, sb_w, h) {
-            if nav == SIDEBAR_EMOTES {
-                return true;
-            }
-            self.set_slot(nav, ui.now);
-        }
-        c.fill(x + sb_w + 10.0, y, 1.0, h, theme::HAIRLINE);
-
+    pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, who: &str, page_at: f64, x: f32, y: f32, w: f32, h: f32) {
         let l = wardrobe::snapshot();
-        let worn = if self.slot == 0 {
-            wardrobe::item(&l, l.equipped.as_deref())
-        } else {
-            wardrobe::item(&l, l.wearing.get(SLOTS[self.slot]).map(String::as_str))
-        };
+        let sw = (w * 0.36).min(320.0);
+        let worn = if self.slot == 0 { wardrobe::item(&l, l.equipped.as_deref()) } else { wardrobe::item(&l, l.wearing.get(SLOTS[self.slot]).map(String::as_str)) };
         let picked = self.pick.as_deref().filter(|p| !p.is_empty()).and_then(|p| wardrobe::item(&l, Some(p)));
         let nothing = self.pick.as_deref() == Some("");
 
-        // 2. Right column: 3D rotatable player preview + Equip / Take off controls
-        let right_w = (w * 0.28).clamp(220.0, 268.0);
-        let rx = x + w - right_w;
-        c.fill(rx - 10.0, y, 1.0, h, theme::HAIRLINE);
-        self.draw_preview_pane(ui, c, &l, who, worn.as_ref(), picked.as_ref(), nothing, rx, y, right_w, h);
-
-        // 3. Center column: Search bar + A-Z sort toggle + 3-column square rounded cards
-        let cx = x + sb_w + 22.0;
-        let cw = (rx - 22.0 - cx).max(160.0);
-
-        if !net::signed_in() {
-            session_lock(ui, c, "menu:locker:lock", cx, y, cw, h);
-            return false;
-        }
-        if l.state == State::NoAccount {
-            wardrobe::refresh(false);
-        }
-        if matches!(l.state, State::Idle | State::Loading | State::NoAccount) {
-            ui.dots(c, cx + cw / 2.0, y + h / 2.0, theme::TEXT_SECONDARY);
-            if l.state == State::Idle {
-                wardrobe::refresh(false);
-            }
-            return false;
-        }
-        if l.state == State::Error {
-            empty(c, cx, y, cw, h - 60.0, theme::I_WIFI_OFF, "Could not load your locker", "Check your connection and try again.");
-            if ui.button(c, "menu:wardrobe:retry", cx + cw / 2.0 - 60.0, y + h / 2.0 + 20.0, 120.0, 36.0, "Retry", theme::I_REFRESH, ui::BTN_GLASS) {
-                wardrobe::refresh(true);
-            }
-            return false;
-        }
-
-        // Top search + A-Z sort bar
-        let bar_h = 32.0;
-        let sort_w = 66.0;
-        let search_w = (cw - sort_w - 8.0).max(80.0);
-        self.draw_search(ui, c, cx, y, search_w, bar_h);
-        let sort_x = cx + search_w + 8.0;
-        let sort_lbl = if self.sort_desc { "Z-A" } else { "A-Z" };
-        let over_sort = ui.hover(c, sort_x, y, sort_w, bar_h);
-        let shv = ui.anim_on("locker:sort#h", over_sort, 14.0);
-        c.round(sort_x, y, sort_w, bar_h, 8.0, theme::mix(0xFF14161E, 0xFF1C202C, shv));
-        c.outline(sort_x, y, sort_w, bar_h, 8.0, 1.0, theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, shv));
-        c.icon(theme::I_ARROWS_UP, 11.5, sort_x + 16.0, y + bar_h / 2.0, theme::TEXT_SECONDARY);
-        let slh = c.line_height(font::SEMIBOLD, 11.0);
-        c.text(font::SEMIBOLD, 11.0, sort_lbl, sort_x + 28.0, y + (bar_h - slh) / 2.0, theme::TEXT_STRONG);
-        if over_sort {
-            ui.cursor_hand = true;
-            ui.tip("Toggle alphabetical sort");
-        }
-        if ui.clicked(c, "locker:sort", sort_x, y, sort_w, bar_h) {
-            self.sort_desc = !self.sort_desc;
-        }
-
-        // Filter & sort items
-        let needle = self.search.value().trim().to_lowercase();
-        let mut items: Vec<Item> = wardrobe::owned_in(&l, SLOTS[self.slot])
-            .into_iter()
-            .filter(|it| needle.is_empty() || it.display().to_lowercase().contains(&needle))
-            .collect();
-        items.sort_by(|a, b| {
-            let ord = a.display().to_lowercase().cmp(&b.display().to_lowercase());
-            if self.sort_desc { ord.reverse() } else { ord }
-        });
-
-        let gy = y + bar_h + 12.0;
-        let gh = y + h - gy - if l.error.is_some() { 24.0 } else { 0.0 };
-        let gap = 12.0;
-        let cols = 3usize;
-        let card_w = (cw - gap * (cols - 1) as f32) / cols as f32;
-        let card_sq = card_w;
-        let label_h = 22.0;
-        let cell_h = card_sq + label_h;
-        let show_nothing = needle.is_empty();
-        let total = items.len() + usize::from(show_nothing);
-
-        if total == 0 {
-            empty(c, cx, gy + 10.0, cw, gh.min(220.0), theme::I_SEARCH, "No cosmetics found", "Try another search or category.");
-        } else {
-            let off = self.scroll.begin(ui, c, cx, gy, cw + 6.0, gh);
-            for i in 0..total {
-                let ix = cx + (i % cols) as f32 * (card_w + gap);
-                let iy = gy + (i / cols) as f32 * (cell_h + gap) - off;
-                if iy + cell_h < gy - 4.0 || iy > gy + gh + 4.0 {
-                    continue;
-                }
-                let e = ease(clamp01(((ui.now - page_at.max(self.locker_at) - 20.0 - i as f64 * 16.0) / 260.0) as f32));
-                c.push_alpha(e);
-                let item = if show_nothing && i == 0 {
-                    None
-                } else {
-                    Some(&items[i - usize::from(show_nothing)])
-                };
-                self.tile(ui, c, &l, item, ix, iy + (1.0 - e) * 8.0, card_w, card_sq, label_h, worn.as_ref());
-                c.pop_alpha();
-            }
-            self.scroll.end(ui, c, total.div_ceil(cols) as f32 * (cell_h + gap) - gap);
-        }
-
-        if let Some(err) = &l.error {
-            let err = c.ellipsize(font::MEDIUM, 11.0, err, cw);
-            c.text(font::MEDIUM, 11.0, &err, cx, y + h - 16.0, 0xFFFCA5A5);
-        }
-        false
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn draw_preview_pane(
-        &mut self,
-        ui: &mut Ui,
-        c: &mut Canvas,
-        l: &wardrobe::Locker,
-        who: &str,
-        worn: Option<&Item>,
-        picked: Option<&Item>,
-        nothing: bool,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-    ) {
-        c.round(x, y, w, h, 10.0, 0xFF101218);
-        glow(c, x, y, w, h * 0.45, 10.0, 0x0CFFFFFF);
-        c.outline(x, y, w, h, 10.0, 1.0, theme::HAIRLINE);
-        c.text(font::SEMIBOLD, 10.0, "PREVIEW", x + 14.0, y + 14.0, theme::TEXT_MUTED);
+        // The stage.
+        c.round(x, y, sw, h, 14.0, 0x66000000);
+        glow(c, x, y, sw, h * 0.6, 14.0, 0x10FFFFFF);
+        c.outline(x, y, sw, h, 14.0, 1.0, theme::HAIRLINE);
+        c.text(font::SEMIBOLD, 10.5, "PREVIEW", x + 16.0, y + 16.0, theme::TEXT_MUTED);
         let title = if nothing {
             format!("No {}", singular(self.slot))
-        } else if let Some(p) = picked {
+        } else if let Some(p) = &picked {
             p.display().to_owned()
         } else {
             "Your look".to_owned()
         };
-        let title = c.ellipsize(font::SEMIBOLD, 14.0, &title, w - 28.0);
-        c.text(font::SEMIBOLD, 14.0, &title, x + 14.0, y + 29.0, theme::TEXT_STRONG);
+        let title = c.ellipsize(font::SEMIBOLD, 15.0, &title, sw - 32.0);
+        c.text(font::SEMIBOLD, 15.0, &title, x + 16.0, y + 32.0, theme::TEXT_STRONG);
         let bare = nothing.then_some(SLOTS[self.slot]);
-        c.push_clip(x + 1.0, y + 52.0, w - 2.0, h - 52.0 - 92.0);
-        self.preview.draw(ui, c, "menu:preview", x, y + 56.0, w, h - 56.0 - 98.0, l, who, picked, bare);
+        c.push_clip(x + 1.0, y + 56.0, sw - 2.0, h - 56.0 - 96.0);
+        self.preview.draw(ui, c, "menu:preview", x, y + 60.0, sw, h - 60.0 - 104.0, &l, who, picked.as_ref(), bare);
         c.pop_clip();
         let hint = "Drag to turn";
-        let hw = c.text_width(font::REGULAR, 10.5, hint);
-        c.text(font::REGULAR, 10.5, hint, x + (w - hw) / 2.0, y + h - 84.0, theme::TEXT_MUTED);
-        c.fill(x + 14.0, y + h - 64.0, w - 28.0, 1.0, theme::HAIRLINE);
-        let (bx, by, bw, bh) = (x + 14.0, y + h - 50.0, w - 28.0, 36.0);
+        let hw = c.text_width(font::REGULAR, 11.0, hint);
+        c.text(font::REGULAR, 11.0, hint, x + (sw - hw) / 2.0, y + h - 92.0, theme::TEXT_MUTED);
+        c.fill(x + 16.0, y + h - 70.0, sw - 32.0, 1.0, theme::HAIRLINE);
+        let (bx, by, bw, bh) = (x + 16.0, y + h - 54.0, sw - 32.0, 38.0);
         let ready = l.state == State::Ready;
         if l.busy.is_some() {
-            c.round(bx, by, bw, bh, 8.0, theme::SUBTLE_HOVER);
+            c.round(bx, by, bw, bh, 10.0, theme::SUBTLE_HOVER);
             ui.dots(c, bx + bw / 2.0, by + bh / 2.0, theme::TEXT_STRONG);
         } else if !ready || (picked.is_none() && !nothing) {
-            disabled(c, bx, by, bw, bh, if ready { "Pick an item to try on" } else { "Equip" });
+            disabled(c, bx, by, bw, bh, if ready { "Pick something to try on" } else { "Equip" });
         } else if nothing {
-            if let Some(worn) = worn {
+            if let Some(worn) = &worn {
                 if ui.button(c, "menu:locker:off", bx, by, bw, bh, &format!("Take off {}", singular(self.slot)), theme::I_BAN, ui::BTN_PRIMARY) {
                     wardrobe::toggle(worn);
                 }
             } else {
                 disabled(c, bx, by, bw, bh, "Nothing worn");
             }
-        } else if let Some(p) = picked {
-            if wardrobe::is_worn(l, p) {
+        } else if let Some(p) = &picked {
+            if wardrobe::is_worn(&l, p) {
                 if ui.button(c, "menu:locker:off", bx, by, bw, bh, "Take off", theme::I_X, ui::BTN_GLASS) {
                     wardrobe::toggle(p);
                 }
@@ -423,81 +136,168 @@ impl Locker {
                 wardrobe::toggle(p);
             }
         }
+
+        // The locker.
+        let (lx, lw) = (x + sw + 20.0, w - sw - 20.0);
+        if !net::signed_in() {
+            // Guest, expired or offline: no locker to show (and nothing stale to equip).
+            session_lock(ui, c, "menu:locker:lock", lx, y, lw, h);
+            return;
+        }
+        if l.state == State::NoAccount {
+            wardrobe::refresh(false); // Signed in again: reload the locker.
+        }
+        if matches!(l.state, State::Idle | State::Loading | State::NoAccount) {
+            ui.dots(c, lx + lw / 2.0, y + h / 2.0, theme::TEXT_SECONDARY);
+            if l.state == State::Idle {
+                wardrobe::refresh(false);
+            }
+            return;
+        }
+        if l.state == State::Error {
+            empty(c, lx, y, lw, h - 60.0, theme::I_WIFI_OFF, "Could not load your locker", "Check your connection and try again.");
+            if ui.button(c, "menu:wardrobe:retry", lx + lw / 2.0 - 60.0, y + h / 2.0 + 20.0, 120.0, 36.0, "Retry", theme::I_REFRESH, ui::BTN_GLASS) {
+                wardrobe::refresh(true);
+            }
+            return;
+        }
+        // Slot tabs.
+        let (mut tx, mut ty) = (lx, y);
+        for i in 0..SLOTS.len() {
+            // text only, like the launcher's tabs
+            let label = SLOT_NAMES[i].replace("Hand Items", "Hand");
+            let tw = c.text_width(font::SEMIBOLD, 11.5, &label) + 28.0;
+            if tx + tw > lx + lw {
+                tx = lx;
+                ty += 36.0;
+            }
+            let id = format!("menu:slot:{i}");
+            let over = ui.hover(c, tx, ty, tw, 30.0);
+            if ui.clicked(c, &id, tx, ty, tw, 30.0) && self.slot != i {
+                self.slot = i;
+                self.pick = None;
+                self.scroll.reset();
+                // Not the page's fade: it would make the 3D model show through itself.
+                self.locker_at = ui.now;
+            }
+            let on = ui.anim_on(&format!("{id}#on"), self.slot == i, 16.0);
+            let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
+            c.round(tx, ty, tw, 30.0, 15.0, theme::mix(theme::mix(theme::SUBTLE, theme::SUBTLE_HOVER, hv), 0xFFF4F4F5, on));
+            if on < 0.99 {
+                c.outline(tx, ty, tw, 30.0, 15.0, 1.0, theme::alpha(theme::HAIRLINE, 1.0 - on));
+            }
+            let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::SOLID_FG, on);
+            let lh = c.line_height(font::SEMIBOLD, 11.5);
+            c.text(font::SEMIBOLD, 11.5, &label, tx + 14.0, ty + (30.0 - lh) / 2.0, fg);
+            tx += tw + 6.0;
+        }
+        let all = wardrobe::owned_in(&l, SLOTS[self.slot]);
+        let hy = ty + 50.0;
+        c.text(font::SEMIBOLD, 10.5, "YOUR LOCKER", lx, hy, theme::TEXT_MUTED);
+        c.text(font::SEMIBOLD, 17.0, SLOT_NAMES[self.slot], lx, hy + 16.0, theme::TEXT_STRONG);
+        let owned = if all.len() == 1 { "1 owned".to_owned() } else { format!("{} owned", all.len()) };
+        let ow = c.text_width(font::MEDIUM, 11.5, &owned);
+        let name_w = c.text_width(font::SEMIBOLD, 17.0, SLOT_NAMES[self.slot]);
+        c.text(font::MEDIUM, 11.5, &owned, lx + name_w + 10.0, hy + 22.0, theme::TEXT_MUTED);
+        // Search and order, right of the heading.
+        let sort_w = 56.0;
+        let srch_w = (lw - name_w - ow - sort_w - 40.0).clamp(110.0, 200.0);
+        self.search_box(ui, c, lx + lw - sort_w - 6.0 - srch_w, hy + 8.0, srch_w, 30.0);
+        if ui.button(c, "menu:locker:sort", lx + lw - sort_w, hy + 8.0, sort_w, 30.0, if self.sort_alpha { "A-Z" } else { "New" }, 0, ui::BTN_GLASS) {
+            self.sort_alpha = !self.sort_alpha;
+            self.scroll.reset();
+        }
+        let needle = self.search.value().trim().to_lowercase();
+        let mut items: Vec<Item> = all.into_iter().filter(|it| needle.is_empty() || it.display().to_lowercase().contains(&needle)).collect();
+        if self.sort_alpha {
+            items.sort_by_key(|it| it.display().to_lowercase());
+        }
+        let gy = hy + 52.0;
+        let gh = y + h - gy - if l.error.is_some() { 26.0 } else { 0.0 };
+        let gap = 12.0;
+        let cols = (((lw + gap) / (124.0 + gap)) as usize).max(2);
+        let tw = (lw - gap * (cols - 1) as f32) / cols as f32;
+        let th = tw * 0.8 + 38.0;
+        let off = self.scroll.begin(ui, c, lx, gy, lw + 6.0, gh);
+        let n = items.len() + 1;
+        for i in 0..n {
+            let ix = lx + (i % cols) as f32 * (tw + gap);
+            let iy = gy + (i / cols) as f32 * (th + gap) - off;
+            if iy + th < gy - 4.0 || iy > gy + gh + 4.0 {
+                continue;
+            }
+            let e = ease(clamp01(((ui.now - page_at.max(self.locker_at) - 40.0 - i as f64 * 22.0) / 300.0) as f32));
+            c.push_alpha(e);
+            let item = if i == 0 { None } else { Some(&items[i - 1]) };
+            self.tile(ui, c, &l, item, ix, iy + (1.0 - e) * 10.0, tw, th, worn.as_ref());
+            c.pop_alpha();
+        }
+        self.scroll.end(ui, c, n.div_ceil(cols) as f32 * (th + gap) - gap);
+        if items.is_empty() && gh > th + 120.0 {
+            let msg = format!("Get {} in the Native Store in the launcher.", SLOT_NAMES[self.slot].to_lowercase());
+            c.icon(theme::I_STORE, 14.0, lx + 8.0, gy + th + 30.0, theme::TEXT_MUTED);
+            let msg = c.ellipsize(font::REGULAR, 11.5, &msg, lw - 24.0);
+            let mh = c.line_height(font::REGULAR, 11.5);
+            c.text(font::REGULAR, 11.5, &msg, lx + 22.0, gy + th + 30.0 - mh / 2.0, theme::TEXT_MUTED);
+        }
+        if let Some(err) = &l.error {
+            let err = c.ellipsize(font::MEDIUM, 11.5, err, lw);
+            c.text(font::MEDIUM, 11.5, &err, lx, y + h - 16.0, 0xFFFCA5A5);
+        }
     }
 
-    fn draw_search(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
+    fn search_box(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
         let f = self.search.focused(ui);
-        let fa = ui.anim_on("locker:search#f", f, 14.0);
-        c.round(x, y, w, h, 8.0, theme::mix(0xFF14161E, 0xFF1A1E29, fa));
-        c.outline(x, y, w, h, 8.0, 1.0, theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, fa));
-        c.icon(theme::I_SEARCH, 13.0, x + 15.0, y + h / 2.0, theme::TEXT_MUTED);
+        let fa = ui.anim_on("menu:locker:search#f", f, 14.0);
+        c.round(x, y, w, h, h / 2.0, theme::mix(0xB808090C, 0xE00E1014, fa));
+        c.outline(x, y, w, h, h / 2.0, 1.0, theme::mix(theme::HAIRLINE_STRONG, theme::BORDER_HOVER, fa));
+        c.icon(theme::I_SEARCH, 13.0, x + 16.0, y + h / 2.0, theme::TEXT_MUTED);
         let clear = !self.search.is_empty();
-        if ui.pressed && ui.hover(c, x, y, w - if clear { 28.0 } else { 0.0 }, h) {
+        if ui.pressed && ui.hover(c, x, y, w - if clear { 30.0 } else { 0.0 }, h) {
             self.search.focus(ui);
-            ui.focus_claimed = true;
         }
-        let ph = format!("Search {}...", SLOT_NAMES[self.slot].to_lowercase());
-        self.search.draw(ui, c, x + 18.0, y, w - if clear { 48.0 } else { 22.0 }, h, &ph, 12.0);
-        if clear && ui.icon_button(c, "locker:search:clear", x + w - 26.0, y + (h - 22.0) / 2.0, 22.0, theme::I_X, None) {
+        self.search.draw(ui, c, x + 18.0, y, w - if clear { 48.0 } else { 22.0 }, h, "Search", 12.0);
+        if clear && ui.icon_button(c, "menu:locker:search:clear", x + w - 28.0, y + (h - 22.0) / 2.0, 22.0, theme::I_X, None) {
             self.search.clear();
             self.search.focus(ui);
-            ui.focus_claimed = true;
         }
     }
 
-    /// Square rounded card (`radius = 10px`) with crisp emerald `✓ Equipped` bottom strip and centered name below.
+    /// One locker card; `None` is the "Nothing" card that empties the slot.
     #[allow(clippy::too_many_arguments)]
-    fn tile(
-        &mut self,
-        ui: &mut Ui,
-        c: &mut Canvas,
-        l: &wardrobe::Locker,
-        it: Option<&Item>,
-        x: f32,
-        y: f32,
-        w: f32,
-        sq_h: f32,
-        label_h: f32,
-        worn: Option<&Item>,
-    ) {
+    fn tile(&mut self, ui: &mut Ui, c: &mut Canvas, l: &wardrobe::Locker, it: Option<&Item>, x: f32, y: f32, w: f32, h: f32, worn: Option<&Item>) {
         let key = it.map_or("", |i| i.id.as_str()).to_owned();
         let id = format!("menu:item:{}:{key}", self.slot);
-        let over = ui.hover(c, x, y, w, sq_h + label_h);
-        if ui.clicked(c, &id, x, y, w, sq_h + label_h) {
+        let over = ui.hover(c, x, y, w, h);
+        if ui.clicked(c, &id, x, y, w, h) {
             self.pick = Some(key.clone());
         }
         let is_worn = it.map_or(worn.is_none(), |i| wardrobe::is_worn(l, i));
         let sel = self.pick.as_deref() == Some(key.as_str());
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let sl = ui.anim_on(&format!("{id}#s"), sel, 16.0);
-        let base_bg = if is_worn && it.is_some() { 0xFF142119 } else { 0xFF181A22 };
-        let hover_bg = if is_worn && it.is_some() { 0xFF1A2D21 } else { 0xFF212430 };
-        c.round(x, y, w, sq_h, 10.0, theme::mix(base_bg, hover_bg, hv.max(sl * 0.6)));
-        let border = if sel {
-            0xE6FFFFFF
-        } else if is_worn && it.is_some() {
-            0xAA22C55E
-        } else {
-            theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv)
-        };
-        c.outline(x, y, w, sq_h, 10.0, if sel || (is_worn && it.is_some()) { 1.4 } else { 1.0 }, border);
-
-        let strip_h = if is_worn && it.is_some() { 22.0 } else { 0.0 };
-        let (ix, iy, iw, ih) = (x + 8.0, y + 8.0, w - 16.0, sq_h - 16.0 - strip_h);
+        let eq = ui.anim_on(&format!("{id}#eq"), is_worn, 14.0);
+        let base = theme::mix(CARD, CARD_HOVER, hv.max(sl * 0.7));
+        c.round(x, y, w, h, 12.0, theme::mix(base, theme::mix(0xFF13261A, 0xFF193522, hv), eq));
+        let edge = theme::mix(theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv), 0xE6FFFFFF, sl);
+        c.outline(x, y, w, h, 12.0, if sel || is_worn { 1.5 } else { 1.0 }, theme::mix(edge, theme::alpha(EQUIP_GREEN, 0.9), eq * (1.0 - sl * 0.5)));
+        let meta = 34.0;
+        let (ix, iy, iw, ih) = (x + 8.0, y + 8.0, w - 16.0, h - meta - 12.0);
+        c.round(ix, iy, iw, ih, 8.0, 0x40000000);
         match it {
             None => c.icon(theme::I_BAN, 26.0, ix + iw / 2.0, iy + ih / 2.0, theme::mix(theme::TEXT_MUTED, theme::TEXT_SECONDARY, hv)),
             Some(item) if item.is_cape() => {
                 let still = item.still_url.as_deref().map(|u| net::image(u, 4 * 1024 * 1024));
                 let strip = if item.animated() { item.strip_url.as_deref().map(|u| net::image(u, 4 * 1024 * 1024)) } else { None };
-                let dh = (ih - 6.0).max(20.0);
-                let dw = dh * 10.0 / 16.0;
+                let (dh, dw) = (ih - 12.0, (ih - 12.0) * 10.0 / 16.0);
                 match (strip, still) {
                     (Some(Pic::Ready(strip)), _) => {
+                        // An animated cape: the current frame of the strip (frames are stacked top to bottom).
                         let (fr, n) = (item.frame(ui.now / 1000.0) as f32, item.frames as f32);
-                        c.image(&strip, ix + (iw - dw) / 2.0, iy + (ih - dh) / 2.0, dw, dh, [1.0 / 64.0, (fr * 32.0 + 1.0) / (32.0 * n), 11.0 / 64.0, (fr * 32.0 + 17.0) / (32.0 * n)], 0xFFFFFFFF);
+                        c.image(&strip, ix + (iw - dw) / 2.0, iy + 6.0, dw, dh, [1.0 / 64.0, (fr * 32.0 + 1.0) / (32.0 * n), 11.0 / 64.0, (fr * 32.0 + 17.0) / (32.0 * n)], 0xFFFFFFFF);
                     }
                     (_, Some(Pic::Ready(img))) => {
-                        c.image(&img, ix + (iw - dw) / 2.0, iy + (ih - dh) / 2.0, dw, dh, [1.0 / 64.0, 1.0 / 32.0, 11.0 / 64.0, 17.0 / 32.0], 0xFFFFFFFF);
+                        c.image(&img, ix + (iw - dw) / 2.0, iy + 6.0, dw, dh, [1.0 / 64.0, 1.0 / 32.0, 11.0 / 64.0, 17.0 / 32.0], 0xFFFFFFFF);
                     }
                     (_, Some(Pic::Failed)) | (_, None) => {}
                     _ => ui.dots(c, ix + iw / 2.0, iy + ih / 2.0, theme::TEXT_MUTED),
@@ -505,7 +305,7 @@ impl Locker {
             }
             Some(item) => match item.still_url.as_deref().map(|u| net::image(u, 4 * 1024 * 1024)) {
                 Some(Pic::Ready(img)) => {
-                    let k = ((iw - 4.0) / img.width.max(1) as f32).min((ih - 4.0) / img.height.max(1) as f32);
+                    let k = ((iw - 8.0) / img.width as f32).min((ih - 8.0) / img.height as f32);
                     let (dw, dh) = (img.width as f32 * k, img.height as f32 * k);
                     c.image(&img, ix + (iw - dw) / 2.0, iy + (ih - dh) / 2.0, dw, dh, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
                 }
@@ -516,36 +316,39 @@ impl Locker {
         if let Some(item) = it
             && item.partner_name.is_some()
         {
-            partner_tag(c, item, x + 6.0, y + 6.0, w - 12.0);
+            partner_tag(c, item, ix + 5.0, iy + 5.0, iw - 34.0);
         }
-
-        // Crisp emerald green `✓ Equipped` bottom strip inside the square card.
-        if is_worn && it.is_some() {
-            let sy = y + sq_h - strip_h;
-            c.push_clip(x, sy, w, strip_h);
-            c.round(x, sy - 8.0, w, strip_h + 8.0, 10.0, 0xFF15803D);
+        if eq > 0.02 {
+            // The emerald "Equipped" strip along the bottom of the picture.
+            let sh = 20.0;
+            c.push_clip(ix, iy + ih - sh * eq, iw, sh * eq);
+            c.round(ix, iy + ih - sh, iw, sh, 8.0, theme::alpha(EQUIP_GREEN, 0.92 * eq));
             c.pop_clip();
-            let txt = "Equipped";
-            let tw = c.text_width(font::SEMIBOLD, 10.0, txt);
-            let tlh = c.line_height(font::SEMIBOLD, 10.0);
-            let tx = x + (w - (tw + 15.0)) / 2.0;
-            c.circle(tx + 5.0, sy + strip_h / 2.0, 5.0, 0xFFFFFFFF);
-            c.icon(theme::I_CHECK, 7.5, tx + 5.0, sy + strip_h / 2.0, 0xFF15803D);
-            c.text(font::SEMIBOLD, 10.0, txt, tx + 14.0, sy + (strip_h - tlh) / 2.0, 0xFFFFFFFF);
+            let txt = if it.is_none() { "Active" } else { "Equipped" };
+            let etw = c.text_width(font::SEMIBOLD, 10.0, txt);
+            let (ex, ey) = (ix + (iw - etw - 14.0) / 2.0, iy + ih - sh / 2.0);
+            c.push_alpha(eq);
+            c.icon(theme::I_CHECK, 10.0, ex + 5.0, ey, 0xFFFFFFFF);
+            let lh = c.line_height(font::SEMIBOLD, 10.0);
+            c.text(font::SEMIBOLD, 10.0, txt, ex + 14.0, ey - lh / 2.0, 0xFFFFFFFF);
+            c.pop_alpha();
         }
-
-        // Centered name below the square card.
-        let my = y + sq_h + 4.0;
+        // The card's meta line.
+        c.fill(x + 1.0, y + h - meta, w - 2.0, 1.0, theme::HAIRLINE);
+        let my = y + h - meta / 2.0;
         if it.is_some_and(|i| l.busy.as_deref() == Some(i.id.as_str())) {
-            ui.dots(c, x + w / 2.0, my + 8.0, theme::TEXT_STRONG);
+            ui.dots(c, x + w / 2.0, my, theme::TEXT_STRONG);
         } else {
             let name = it.map_or("Nothing", Item::display);
-            let name = c.ellipsize(font::SEMIBOLD, 11.0, name, w - 4.0);
-            let nw = c.text_width(font::SEMIBOLD, 11.0, &name);
-            c.text(font::SEMIBOLD, 11.0, &name, x + (w - nw) / 2.0, my, if is_worn || sel { theme::TEXT_STRONG } else { theme::TEXT });
-        }
-        if over {
-            ui.cursor_hand = true;
+            let tag: Option<&str> = None;
+            let tag_w = tag.map_or(0.0, |t| c.text_width(font::MEDIUM, 10.0, t) + 8.0);
+            let name = c.ellipsize(font::SEMIBOLD, 11.5, name, w - 22.0 - tag_w);
+            let lh = c.line_height(font::SEMIBOLD, 11.5);
+            c.text(font::SEMIBOLD, 11.5, &name, x + 11.0, my - lh / 2.0, if is_worn || sel { theme::TEXT_STRONG } else { theme::TEXT });
+            if let Some(tag) = tag {
+                let th = c.line_height(font::MEDIUM, 10.0);
+                c.text(font::MEDIUM, 10.0, tag, x + w - 11.0 - tag_w + 8.0, my - th / 2.0, theme::ACCENT);
+            }
         }
     }
 }

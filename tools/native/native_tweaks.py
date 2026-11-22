@@ -498,7 +498,7 @@ patch(RENDER / 'hud.rs',
       '        let other = root.join("assets/kimo/textures/entity/creeper");\n'
       '        fs::create_dir_all(&other).unwrap();\n'
       '        write_strip(&other.join("big.png"), 64, 32, &[[9, 9, 9, 255]], None);\n'
-      '        let atlas = HudAtlas::build(&root).unwrap();\n'
+      '        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(root.clone())).unwrap();\n'
       '        let rect = atlas.sprites["kimo:entity/equipment/humanoid/frost"];\n'
       '        assert_eq!(texel_at(&atlas, rect, 0, 0), [0, 120, 200, 255]);\n'
       '        // only the armour layers of a namespace that is not a content mod\'s\n'

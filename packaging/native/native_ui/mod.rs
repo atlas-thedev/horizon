@@ -33,6 +33,12 @@ pub mod assets {
     pub const LUCIDE: &[u8] = include_bytes!("assets/lucide.ttf");
     pub const MODULE_ICONS: &[u8] = include_bytes!("assets/native-modules.ttf");
     pub const LOGO: &[u8] = include_bytes!("assets/logo.png");
+    /// Full-colour icons (packaging/native/icons/color): the Emotes button and the four marker pins.
+    pub const ICON_EMOTES: &[u8] = include_bytes!("assets/icon-emotes.png");
+    pub const ICON_MARKER_NORMAL: &[u8] = include_bytes!("assets/icon-marker-normal.png");
+    pub const ICON_MARKER_DANGER: &[u8] = include_bytes!("assets/icon-marker-danger.png");
+    pub const ICON_MARKER_FLAG: &[u8] = include_bytes!("assets/icon-marker-flag.png");
+    pub const ICON_MARKER_STAR: &[u8] = include_bytes!("assets/icon-marker-star.png");
     pub const BACKGROUND: &[u8] = include_bytes!("assets/bg1.jpg");
     pub const BACKGROUNDS: &[u8] = include_bytes!("assets/bg1-8.jpg");
     pub const HUD_BACKGROUND: &[u8] = include_bytes!("assets/hudbg.jpg");
@@ -92,7 +98,7 @@ mod tests {
         c.round(0.0, 0.0, 100.0, 40.0, 8.0, theme::PANEL);
         c.icon(theme::I_SEARCH, 16.0, 50.0, 50.0, theme::WHITE);
         c.icon(icons::MODS, 16.0, 80.0, 50.0, theme::WHITE);
-        let mut batch = HudBatch::new([800, 600]);
+        let mut batch = HudBatch::new([800, 600], crate::hud::GuiScale { requested: 0, unicode: false });
         c.finish(&mut batch);
         assert!(!batch.vertices.is_empty());
         // The first frame uploads the whole atlas page.
@@ -108,7 +114,7 @@ mod tests {
         c.push_clip(0.0, 0.0, 50.0, 100.0);
         c.fill(40.0, 0.0, 20.0, 10.0, theme::WHITE);
         c.pop_clip();
-        let mut batch = HudBatch::new([100, 100]);
+        let mut batch = HudBatch::new([100, 100], crate::hud::GuiScale { requested: 0, unicode: false });
         c.finish(&mut batch);
         let xs: Vec<f32> = batch.vertices.iter().map(|v| v.pos[0] * batch.scale).collect();
         assert!(xs.iter().all(|x| *x <= 50.0), "{xs:?}");

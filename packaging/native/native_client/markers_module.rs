@@ -29,7 +29,29 @@ pub const NORMAL: usize = 0;
 pub const DANGER: usize = 1;
 pub const EXCLAMATION: usize = 2;
 pub const QUESTION: usize = 3;
-const KIND_NAMES: [&str; 4] = ["Normal", "Danger", "Objective", "Question"];
+const KIND_NAMES: [&str; 4] = ["Marker", "Danger", "Objective", "Important"];
+/// The picker's tile order, left to right.
+const PICKER: [usize; 4] = [NORMAL, DANGER, EXCLAMATION, QUESTION];
+/// Picker tiles: 4 of `TILE` px with `GAP` between them, centred under the crosshair.
+const TILE: f32 = 58.0;
+const GAP: f32 = 10.0;
+
+/// The colour pins (packaging/native/icons/color) by kind: purple pin, yellow warning, green flag, blue star.
+fn pin_art(kind: usize) -> Option<std::sync::Arc<horizon_client::native_ui::Image>> {
+    use horizon_client::native_ui::{Image, assets};
+    static ART: std::sync::OnceLock<[Option<std::sync::Arc<Image>>; 4]> = std::sync::OnceLock::new();
+    ART.get_or_init(|| {
+        [
+            Image::decode(assets::ICON_MARKER_NORMAL),
+            Image::decode(assets::ICON_MARKER_DANGER),
+            Image::decode(assets::ICON_MARKER_FLAG),
+            Image::decode(assets::ICON_MARKER_STAR),
+        ]
+    })
+    .get(kind)
+    .cloned()
+    .flatten()
+}
 const HOLD_MS: f64 = 200.0;
 pub const RANGE: f64 = 128.0;
 const MAX_MARKERS: usize = 48;
@@ -159,6 +181,7 @@ pub fn all() -> Vec<Module> {
             // Keybinds & controls
             Setting::key("key", "Marker keybind", -1),
             Setting::key("clearKey", "Clear markers keybind", -1),
+            Setting::choice("placeAt", "Place markers at", 0, &["Where I look", "Where I stand"]),
             Setting::bool("middleRemove", "Middle-click to remove", true),
             // Scale, duration & animation
             Setting::num("scale", "Scale", 1.0, 0.5, 2.0, 0.05, "x"),
@@ -186,10 +209,10 @@ pub fn all() -> Vec<Module> {
             Setting::bool("chatNotice", "Chat notification", false),
             Setting::bool("clientNotice", "Native client notification", false),
             // Variant colours
-            Setting::color("colorNormal", "Normal marker colour", 0xFFA6D8FF),
-            Setting::color("colorDanger", "Danger marker colour", 0xFFEA4B1F),
-            Setting::color("colorExcl", "! marker colour", 0xFF3B82F6),
-            Setting::color("colorQuest", "? marker colour", 0xFFF59E0B),
+            Setting::color("pinMarker", "Marker colour", 0xFFB07CFF),
+            Setting::color("pinDanger", "Danger colour", 0xFFFBBF24),
+            Setting::color("pinObjective", "Objective colour", 0xFF34D399),
+            Setting::color("pinImportant", "Important colour", 0xFF60A5FA),
         ],
         None,
         Box::new(Markers::default()),
@@ -647,7 +670,7 @@ impl Markers {
         s.cfg.other_vol = m.num("otherVol");
         s.cfg.chat_notice = m.bool("chatNotice");
         s.cfg.client_notice = m.bool("clientNotice");
-        s.cfg.colors = [m.color("colorNormal"), m.color("colorDanger"), m.color("colorExcl"), m.color("colorQuest")];
+        s.cfg.colors = [m.color("pinMarker"), m.color("pinDanger"), m.color("pinObjective"), m.color("pinImportant")];
         if g.in_world && !g.sample {
             s.cfg.world = g.world.clone();
             s.cfg.dim = waypoints_module::dim_of(g);
@@ -662,10 +685,10 @@ impl Markers {
 
     fn color_for(m: &ModuleState, kind: usize) -> u32 {
         match kind {
-            DANGER => m.color("colorDanger"),
-            EXCLAMATION => m.color("colorExcl"),
-            QUESTION => m.color("colorQuest"),
-            _ => m.color("colorNormal"),
+            DANGER => m.color("pinDanger"),
+            EXCLAMATION => m.color("pinObjective"),
+            QUESTION => m.color("pinImportant"),
+            _ => m.color("pinMarker"),
         }
     }
 
@@ -716,7 +739,14 @@ impl Behaviour for Markers {
             self.wheel_open = false;
             self.wheel_choice = -1;
             // Snapshot target immediately on key press so holding to choose a wheel icon marks what you aimed at.
-            self.pending_target = g.marker_target.clone().or_else(|| {
+            let stand = m.choice("placeAt") == 1;
+            let feet = MarkerTarget {
+                pos: [g.x.floor() + 0.5, g.y.floor() + 0.1, g.z.floor() + 0.5],
+                kind: "block".to_owned(),
+                name: "Position".to_owned(),
+                icon: String::new(),
+            };
+            self.pending_target = if stand { Some(feet) } else { g.marker_target.clone() }.or_else(|| {
                 g.look_block
                     .map(|b| MarkerTarget {
                         pos: [f64::from(b[0]) + 0.5, f64::from(b[1]) + 1.0, f64::from(b[2]) + 0.5],
@@ -747,7 +777,7 @@ impl Behaviour for Markers {
                 let dpitch = g.pitch - self.wheel_start_pitch;
                 self.wheel_dx = (dyaw * 3.8).clamp(-100.0, 100.0);
                 self.wheel_dy = (dpitch * 3.8).clamp(-100.0, 100.0);
-                self.wheel_choice = quadrant_for(self.wheel_dx, self.wheel_dy, 20.0);
+                self.wheel_choice = tile_for(self.wheel_dx);
             }
         } else if !down && self.key_held {
             let was_wheel = self.wheel_open;
@@ -927,7 +957,7 @@ fn draw_world_marker(
     let want_coords = should_show(m.choice("showCoords"), hovered);
 
     // Marker glyph at (cx, cy); info lines stack cleanly right above it.
-    let icon_r = 8.5 * k;
+    let icon_r = 11.5 * k;
     draw_marker_glyph(c, mk.kind, cx, cy, icon_r, Markers::color_for(m, mk.kind));
 
     let mut stack_y = cy - icon_r - 5.0 * k;
@@ -1014,64 +1044,50 @@ fn draw_world_marker(
 }
 
 /// Draws the 4-quadrant Lunar-style radial marker selection wheel.
-fn draw_wheel(m: &ModuleState, c: &mut Canvas, cx: f32, cy: f32, selected: i32, dx: f32, dy: f32) {
-    let (outer, inner) = (92.0, 36.0);
-    draw_annulus(c, cx, cy, inner, outer, 0xDF16181D);
-    if (0..4).contains(&selected) {
-        let sel = selected as usize;
-        let mid = (sel as f64) * std::f64::consts::FRAC_PI_2 - std::f64::consts::FRAC_PI_2;
-        draw_sector(
-            c,
-            cx,
-            cy,
-            inner + 1.0,
-            outer - 1.0,
-            mid - std::f64::consts::FRAC_PI_4 + 0.03,
-            mid + std::f64::consts::FRAC_PI_4 - 0.03,
-            theme::alpha(Markers::color_for(m, sel), 0.24),
-        );
+fn draw_wheel(m: &ModuleState, c: &mut Canvas, cx: f32, cy: f32, selected: i32, dx: f32, _dy: f32) {
+    // The marker picker: four tiles with the colour pins, the one under the pointer lifted and lit.
+    let total = 4.0 * TILE + 3.0 * GAP;
+    let (x0, y0) = (cx - total / 2.0, cy + 34.0);
+    c.shadow(x0 - 10.0, y0 - 10.0, total + 20.0, TILE + 20.0, 16.0, 22.0, 0x88000000);
+    c.round(x0 - 10.0, y0 - 10.0, total + 20.0, TILE + 20.0, 16.0, 0xD80B0C10);
+    c.outline(x0 - 10.0, y0 - 10.0, total + 20.0, TILE + 20.0, 16.0, 1.0, 0x26FFFFFF);
+    for (i, &kind) in PICKER.iter().enumerate() {
+        let on = selected == kind as i32;
+        let (tx, ty) = (x0 + i as f32 * (TILE + GAP), y0 - if on { 4.0 } else { 0.0 });
+        let col = Markers::color_for(m, kind);
+        c.round(tx, ty, TILE, TILE, 13.0, if on { 0xFF16181F } else { 0xFF0F1015 });
+        c.outline(tx, ty, TILE, TILE, 13.0, if on { 1.6 } else { 1.0 }, if on { theme::alpha(col, 0.95) } else { 0x33FFFFFF });
+        if on {
+            c.shadow(tx, ty, TILE, TILE, 13.0, 18.0, theme::alpha(col, 0.45));
+        }
+        draw_marker_glyph(c, kind, tx + TILE / 2.0, ty + TILE / 2.0, if on { 20.5 } else { 17.5 }, col);
     }
-    c.circle(cx, cy, inner - 1.0, 0x99121418);
-    let emblem = horizon_client::native_ui::icons::for_module("watermark", theme::I_SPARKLES);
-    c.icon(emblem, 22.0, cx, cy, 0xE6FFFFFF);
-
-    let icon_dist = (inner + outer) * 0.5;
-    for i in 0..4usize {
-        let a = (i as f64) * std::f64::consts::FRAC_PI_2 - std::f64::consts::FRAC_PI_2;
-        let ix = cx + (a.cos() as f32) * icon_dist;
-        let iy = cy + (a.sin() as f32) * icon_dist;
-        let r = if selected == i as i32 { 12.5 } else { 10.5 };
-        draw_marker_glyph(c, i, ix, iy, r, Markers::color_for(m, i));
-    }
-    if dx * dx + dy * dy > 16.0 {
-        let len = (dx * dx + dy * dy).sqrt();
-        let clamp = len.min(inner - 6.0);
-        c.circle(cx + dx / len * clamp, cy + dy / len * clamp, 3.0, 0xCCFFFFFF);
-    }
-    let label = if (0..4).contains(&selected) {
-        format!("{} Marker", KIND_NAMES[selected as usize])
-    } else {
-        "Release to cancel".to_owned()
-    };
-    let tw = c.text_width(font::SEMIBOLD, 11.0, &label);
-    let lh = c.line_height(font::SEMIBOLD, 11.0);
-    c.round(cx - tw / 2.0 - 10.0, cy + outer + 10.0, tw + 20.0, 22.0, 8.0, 0xC00A0B0E);
-    c.text(
-        font::SEMIBOLD,
-        11.0,
-        &label,
-        cx - tw / 2.0,
-        cy + outer + 10.0 + (22.0 - lh) / 2.0,
-        if (0..4).contains(&selected) {
-            Markers::color_for(m, selected as usize)
-        } else {
-            theme::TEXT_MUTED
-        },
-    );
+    // The pointer: where turning has moved it along the row.
+    let px = (cx + dx * 1.9).clamp(x0, x0 + total);
+    let py = y0 + TILE + 6.0;
+    c.free_quad(None, [px, py, px - 5.0, py + 7.0, px + 5.0, py + 7.0, px + 5.0, py + 7.0], [0.0; 8], 0xE6FFFFFF);
+    let label = if (0..4).contains(&selected) { KIND_NAMES[selected as usize].to_owned() } else { "Turn to pick  ·  release to cancel".to_owned() };
+    let tw = c.text_width(font::SEMIBOLD, 11.5, &label);
+    let lh = c.line_height(font::SEMIBOLD, 11.5);
+    let ly = y0 + TILE + 20.0;
+    c.round(cx - tw / 2.0 - 12.0, ly, tw + 24.0, 24.0, 12.0, 0xD80B0C10);
+    let col = if (0..4).contains(&selected) { Markers::color_for(m, selected as usize) } else { theme::TEXT_MUTED };
+    c.text(font::SEMIBOLD, 11.5, &label, cx - tw / 2.0, ly + (24.0 - lh) / 2.0, col);
 }
 
 /// Draws a crisp marker glyph (Normal diamond, Danger warning triangle with `!`, `!` diamond, `?` diamond).
 pub fn draw_marker_glyph(c: &mut Canvas, kind: usize, cx: f32, cy: f32, r: f32, color: u32) {
+    // A marker's colour pin centred on (cx, cy), `r` its half height; the drawn glyph when the artwork is missing.
+    match pin_art(kind) {
+        Some(img) => {
+            let s = r * 2.3;
+            c.image(&img, cx - s / 2.0, cy - s / 2.0, s, s, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
+        }
+        None => draw_vector_glyph(c, kind, cx, cy, r, color),
+    }
+}
+
+fn draw_vector_glyph(c: &mut Canvas, kind: usize, cx: f32, cy: f32, r: f32, color: u32) {
     if kind == DANGER {
         let top_y = cy - r * 0.95;
         let bot_y = cy + r * 0.80;
@@ -1159,17 +1175,15 @@ fn should_show(mode: usize, hovered: bool) -> bool {
     mode == 0 || (mode == 1 && hovered)
 }
 
-fn quadrant_for(dx: f32, dy: f32, deadzone: f32) -> i32 {
-    if dx * dx + dy * dy < deadzone * deadzone {
-        return -1;
-    }
-    if dy.abs() >= dx.abs() {
-        if dy < 0.0 { NORMAL as i32 } else { EXCLAMATION as i32 }
-    } else if dx > 0.0 {
-        DANGER as i32
-    } else {
-        QUESTION as i32
-    }
+/// The picker tile under the pointer (`dx` px right of the centre), or -1 in the middle gap (release cancels).
+fn tile_for(dx: f32) -> i32 {
+    let x = dx * 1.9 + 2.0 * TILE + 1.5 * GAP;
+    (0..4)
+        .find(|&i| {
+            let l = i as f32 * (TILE + GAP);
+            x >= l && x <= l + TILE
+        })
+        .map_or(-1, |i| PICKER[i] as i32)
 }
 
 fn wrap_deg(d: f32) -> f32 {
@@ -1187,11 +1201,13 @@ mod tests {
 
     #[test]
     fn wheel_quadrants_and_ding_synth_match_java() {
-        assert_eq!(quadrant_for(0.0, 0.0, 20.0), -1);
-        assert_eq!(quadrant_for(0.0, -40.0, 20.0), NORMAL as i32);
-        assert_eq!(quadrant_for(40.0, 0.0, 20.0), DANGER as i32);
-        assert_eq!(quadrant_for(0.0, 40.0, 20.0), EXCLAMATION as i32);
-        assert_eq!(quadrant_for(-40.0, 0.0, 20.0), QUESTION as i32);
+        // The pointer starts in the middle gap (release cancels); turning walks it over the tiles.
+        assert_eq!(tile_for(0.0), -1);
+        assert_eq!(tile_for(-20.0), DANGER as i32);
+        assert_eq!(tile_for(-55.0), NORMAL as i32);
+        assert_eq!(tile_for(20.0), EXCLAMATION as i32);
+        assert_eq!(tile_for(55.0), QUESTION as i32);
+        assert_eq!(tile_for(500.0), -1);
 
         let normal = synth_ding(NORMAL, 44_100, 0.3);
         let danger = synth_ding(DANGER, 44_100, 0.3);

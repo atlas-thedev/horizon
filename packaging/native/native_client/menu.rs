@@ -1,32 +1,29 @@
-//! `MenuView`: the Native Client menu (Right Shift): a unified sleek dark obsidian window (~1020x620) with a top
-//! navigation bar (`MODS`, `COSMETICS`, `EMOTES`, `WAYPOINTS`, `MUSIC`, `SHOTS`, `SETTINGS`), a left Profiles
-//! sidebar with persistent saved profiles (`config/native-profiles.json`), `SAVE AS NEW PROFILE`, and vibrant blue
-//! `EDIT HUD LAYOUT` primary button, plus colored uppercase category pills and 3-column compact horizontal mod cards
-//! with emerald green borders when enabled and crimson red borders when disabled.
+//! `MenuView`: the Native menu (Right Shift): a floating icon rail on the
+//! left, a small toolbar and one big panel with the client mods, the
+//! cosmetics locker and the UI settings. Same glass look as the launcher.
 #![allow(dead_code)]
 
-use super::emotes_view::{EmotesAct, EmotesView};
-use super::locker::Locker;
 use super::module::{GameView, Module, label};
 use super::modules::Modules;
-use super::music_view::MusicView;
+use super::emotes_view::{EmotesAct, EmotesView};
+use super::locker::Locker;
 use super::screenshots::Screenshots;
+use super::music_view::MusicView;
 use super::scroll::Scroll;
 use super::setting::{Kind, Setting};
 use super::textfield::TextField;
 use super::ui::{self, Ui};
 use super::uiconfig::UiConfig;
 use super::widgets::Widgets;
-use horizon_client::native_ui::{Canvas, Image, assets, font, theme};
+use horizon_client::native_ui::{Canvas, Image, assets, font, icons, theme};
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 pub const TABS: [&str; 7] = ["Mods", "Cosmetics", "Emotes", "Settings", "Screenshots", "Music", "Waypoints"];
-/// Top header tab order: MODS, COSMETICS, EMOTES, WAYPOINTS, MUSIC, SHOTS, SETTINGS.
-const TOP_ORDER: [usize; 7] = [TAB_MODS, TAB_COSMETICS, TAB_EMOTES, TAB_WAYPOINTS, TAB_MUSIC, TAB_SHOTS, TAB_SETTINGS];
-const TOP_LABELS: [&str; 7] = ["MODS", "COSMETICS", "EMOTES", "SETTINGS", "SHOTS", "MUSIC", "WAYPOINTS"];
+/// The order the rail shows the tabs in (Waypoints next to Emotes; the TAB_* numbers stay as they were).
+const RAIL_ORDER: [usize; 7] = [0, 1, 2, 6, 3, 4, 5];
 pub const TAB_MODS: usize = 0;
 pub const TAB_COSMETICS: usize = 1;
 pub const TAB_EMOTES: usize = 2;
@@ -34,26 +31,21 @@ pub const TAB_SETTINGS: usize = 3;
 pub const TAB_SHOTS: usize = 4;
 pub const TAB_MUSIC: usize = 5;
 pub const TAB_WAYPOINTS: usize = 6;
-
-const CAT_LABELS: [&str; 6] = ["ALL", "NEW", "HUD", "VISUAL", "MECHANIC", "FAV"];
-const CAT_COLORS: [u32; 6] = [
-    0xFF4F86F7, // ALL (blue)
-    0xFF4D8B31, // NEW (green)
-    0xFF4B6FA5, // HUD (steel blue)
-    0xFF566BAA, // VISUAL (slate indigo)
-    0xFF4E6B94, // MECHANIC (slate blue)
-    0xFFD97706, // FAV (amber)
-];
-const NEW_MODS: [&str; 4] = ["markers", "waypoints", "voice", "emotes"];
-
-pub const PANEL_BG: u32 = 0xF40B0C10;
-pub const CARD: u32 = 0xD811131A;
-pub const CARD_HOVER: u32 = 0xEC181B24;
+const RAIL: f32 = 54.0;
+/// Corner radius of the floating top bars, squared off a little so square avatars sit well.
+const PILL_R: f32 = 13.0;
+const CHIPS: [&str; 7] = ["All", "New", "Favorites", "HUD", "Mechanic", "Visual", "Settings"];
+const CHIP_ICONS: [u32; 7] = [theme::I_GRID, theme::I_SPARKLES, theme::I_HEART, theme::I_LAYOUT, theme::I_MOUSE, theme::I_EYE, theme::I_SLIDERS];
+/// Mods new in this version: a NEW badge on their card and the New category.
+const NEW_MODS: [&str; 7] = ["markers", "waypoints", "damage-tint", "hitbox-colours", "no-hurt-cam", "voice", "emotes"];
+const NEW_RED: u32 = 0xFFEF4444;
+pub const PANEL_BG: u32 = 0xF205060A;
+pub const CARD: u32 = 0xB808090C;
+pub const CARD_HOVER: u32 = 0xD80E1014;
+/// Card state colours (everything else stays monochrome like the rest of the Native UI).
 const ON: u32 = 0xFF22C55E;
-const OFF: u32 = 0xFFDC2626;
-const PRIMARY_BLUE: u32 = 0xFF4F86F7;
+const OFF: u32 = 0xFFEF4444;
 const LOGO_KEY: u64 = 0x4D45_4E55_4C4F_474F;
-const SIDEBAR_W: f32 = 176.0;
 
 /// What the menu asks the game to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -278,11 +270,10 @@ fn apply_modules(mods: &mut Modules, data: &Map<String, Value>) {
     }
 }
 
+
 pub struct Menu {
     pub tab: usize,
     chip: usize,
-    /// 0 = Default order, 1 = Enabled first, 2 = A-Z.
-    sort_mode: u8,
     result_key: String,
     list_view: bool,
     selected: Option<String>,
@@ -290,7 +281,6 @@ pub struct Menu {
     grid: Scroll,
     detail: Scroll,
     prefs: Scroll,
-    profiles: Profiles,
     pub widgets: Widgets,
     shown_at: f64,
     page_at: f64,
@@ -306,10 +296,11 @@ pub struct Menu {
     locker: Locker,
     emotes: EmotesView,
     waypoints: super::waypoints_view::WaypointsView,
+    /// The menu is over a world (the Emotes page can play an emote there).
     in_world: bool,
     who: String,
-    /// The instance folder (screenshots and profiles live under it).
-    pub game_dir: Option<PathBuf>,
+    /// The instance folder (screenshots live under it).
+    pub game_dir: Option<std::path::PathBuf>,
     s_title: Setting,
     s_notify: Setting,
     s_activity: Setting,
@@ -320,6 +311,13 @@ pub struct Menu {
     s_next: Setting,
     s_prev: Setting,
     scale_dragged: bool,
+    /// Saved module setups (config/native-profiles.json).
+    profiles: Profiles,
+    /// Enabled mods first in the grid.
+    sort_enabled: bool,
+    /// Full-colour artwork: the Emotes button and the Markers pin.
+    art_emotes: Option<Arc<Image>>,
+    art_markers: Option<Arc<Image>>,
 }
 
 impl Default for Menu {
@@ -330,7 +328,7 @@ impl Default for Menu {
 
 impl Menu {
     /// A menu for the instance in `game_dir`.
-    pub fn new_in(game_dir: Option<PathBuf>) -> Self {
+    pub fn new_in(game_dir: Option<std::path::PathBuf>) -> Self {
         let mut menu = Self::new();
         menu.game_dir = game_dir;
         menu
@@ -343,7 +341,6 @@ impl Menu {
         Menu {
             tab: TAB_MODS,
             chip: 0,
-            sort_mode: 0,
             result_key: String::new(),
             list_view: false,
             selected: None,
@@ -351,7 +348,6 @@ impl Menu {
             grid: Scroll::new("grid"),
             detail: Scroll::new("detail"),
             prefs: Scroll::new("prefs"),
-            profiles: Profiles::default(),
             widgets: Widgets::default(),
             shown_at: 0.0,
             page_at: 0.0,
@@ -380,6 +376,10 @@ impl Menu {
             s_next: Setting::key("musicnext", "Music: next song", -1),
             s_prev: Setting::key("musicprev", "Music: previous song", -1),
             scale_dragged: false,
+            profiles: Profiles::default(),
+            sort_enabled: true,
+            art_emotes: Image::decode(assets::ICON_EMOTES),
+            art_markers: Image::decode(assets::ICON_MARKER_NORMAL),
         }
     }
 
@@ -390,8 +390,8 @@ impl Menu {
         self.grid_at = now;
         self.widgets.listening = None;
         self.confirm_reset = false;
-        self.profiles.renaming = None;
         self.first = false;
+        self.profiles.renaming = None;
     }
 
     /// Esc: closes the innermost thing first. True when it was consumed (the menu stays open).
@@ -403,6 +403,9 @@ impl Menu {
             ui.focus = None;
             return true;
         }
+        if self.tab == TAB_COSMETICS && self.locker.escape(ui) {
+            return true;
+        }
         if self.search.focused(ui) {
             ui.focus = None;
             if !self.search.is_empty() {
@@ -412,9 +415,6 @@ impl Menu {
         }
         if self.confirm_reset {
             self.confirm_reset = false;
-            return true;
-        }
-        if self.tab == TAB_COSMETICS && self.locker.escape(ui) {
             return true;
         }
         if self.tab == TAB_EMOTES && self.emotes.escape(ui) {
@@ -485,193 +485,131 @@ impl Menu {
         self.who = who.unwrap_or("").to_owned();
         self.in_world = in_world;
         self.profiles.ensure_loaded(self.game_dir.as_deref(), mods);
-
         let (w_all, h_all) = (c.width(), c.height());
-        let e = ease(clamp01(((ui.now - self.shown_at) / 240.0) as f32));
+        let e = ease(clamp01(((ui.now - self.shown_at) / 260.0) as f32));
         if in_world {
-            c.fill(0.0, 0.0, w_all, h_all, theme::alpha(0x9C000000, e));
+            c.fill(0.0, 0.0, w_all, h_all, theme::alpha(0xA0000000, e));
         }
-
-        // Unified dark obsidian window (~1020 x 620)
-        let ww = (w_all - 32.0).min(1020.0);
-        let wh = (h_all - 32.0).min(620.0);
+        let ww = (w_all - 32.0).min(1060.0);
+        let wh = (h_all - 32.0).min(640.0);
         let x0 = (w_all - ww) / 2.0;
-        let y0 = (h_all - wh) / 2.0 + (1.0 - e) * 14.0;
+        let y0 = (h_all - wh) / 2.0 + (1.0 - e) * 18.0;
         c.push_alpha(e);
 
-        c.shadow(x0, y0 + 5.0, ww, wh, 12.0, 26.0, 0x99000000);
-        c.round(x0, y0, ww, wh, 12.0, PANEL_BG);
-        c.outline(x0, y0, ww, wh, 12.0, 1.0, 0x24FFFFFF);
-
-        // ── Top header bar (54 px) ──
-        let hh = 54.0;
-        c.fill(x0 + 1.0, y0 + hh, ww - 2.0, 1.0, theme::HAIRLINE);
-
-        // Left: Native logo + NATIVE CLIENT
+        // Icon rail.
+        let rw = 72.0;
+        panel(c, x0, y0, rw, wh);
         if let Some(logo) = self.logo.clone() {
-            c.stamp(LOGO_KEY, &logo, x0 + 16.0, y0 + (hh - 26.0) / 2.0, 26.0, 26.0, true, 0xFFFFFFFF);
+            c.stamp(LOGO_KEY, &logo, x0 + (rw - 32.0) / 2.0, y0 + 16.0, 32.0, 32.0, true, 0xFFFFFFFF);
         }
-        let brand_lh = c.line_height(font::BOLD, 13.5);
-        c.text(font::BOLD, 13.5, "NATIVE", x0 + 49.0, y0 + (hh - brand_lh) / 2.0, 0xFFFFFFFF);
-        let nw = c.text_width(font::BOLD, 13.5, "NATIVE ");
-        c.text(font::MEDIUM, 13.5, "CLIENT", x0 + 49.0 + nw, y0 + (hh - brand_lh) / 2.0, 0xFFC4C4CC);
-
-        // Right: Square close button + player avatar
-        let close_sz = 28.0;
-        let close_x = x0 + ww - 14.0 - close_sz;
-        let close_y = y0 + (hh - close_sz) / 2.0;
-        let over_close = ui.hover(c, close_x, close_y, close_sz, close_sz);
-        let chv = ui.anim_on("menu:top:close#h", over_close, 16.0);
-        c.round(close_x, close_y, close_sz, close_sz, 6.0, theme::mix(0x18FFFFFF, 0x55EF4444, chv));
-        c.outline(close_x, close_y, close_sz, close_sz, 6.0, 1.0, theme::mix(theme::HAIRLINE, 0x88EF4444, chv));
-        c.icon(theme::I_X, 13.0, close_x + close_sz / 2.0, close_y + close_sz / 2.0, theme::mix(theme::TEXT_SECONDARY, 0xFFFFFFFF, chv));
-        if over_close {
-            ui.cursor_hand = true;
-            ui.tip("Close");
+        c.fill(x0 + 16.0, y0 + 60.0, rw - 32.0, 1.0, theme::HAIRLINE);
+        let rx = x0 + (rw - RAIL) / 2.0;
+        let mut ty = y0 + 74.0;
+        let tab_icons =
+            [theme::I_NAV_MODS, theme::I_NAV_LOCKER, theme::I_SMILE, theme::I_NAV_SETTINGS, icons::CAMERA, icons::MUSIC, theme::I_MAP_PIN];
+        // every tab and the close tile fit, however short the window is
+        let step = (RAIL + 8.0).min((wh - 74.0 - 16.0 - RAIL - 8.0) / TABS.len() as f32);
+        let size = (step - 6.0).clamp(30.0, RAIL);
+        let tx = x0 + (rw - size) / 2.0;
+        for i in RAIL_ORDER {
+            let art = if i == TAB_EMOTES { self.art_emotes.clone() } else { None };
+            if rail_tile_sized(ui, c, &format!("menu:tab:{i}"), tx, ty, size, if art.is_some() { 0 } else { tab_icons[i] }, TABS[i], self.tab == i) {
+                self.set_tab(i, ui.now);
+            }
+            if let Some(img) = art {
+                let is = 32.0 * size / RAIL;
+                let a = if self.tab == i { 1.0 } else { 0.78 };
+                c.image(&img, tx + (size - is) / 2.0, ty + (size - is) / 2.0, is, is, [0.0, 0.0, 1.0, 1.0], theme::alpha(0xFFFFFFFF, a));
+            }
+            ty += step;
         }
-        if ui.clicked(c, "menu:top:close", close_x, close_y, close_sz, close_sz) {
+        if rail_tile(ui, c, "menu:rail:close", rx, y0 + wh - RAIL - 16.0, theme::I_X, "Close", false) {
             c.pop_alpha();
             return Action::Close;
         }
-        let mut right_edge = close_x - 10.0;
+
+        // Toolbar pill.
+        let mx = x0 + rw + 12.0;
+        let mw = ww - rw - 12.0;
+        let tb_h = 40.0;
+        let mods_grid = self.tab == TAB_MODS && self.selected.is_none();
+        let (tb_w, tb_action) = self.toolbar(ui, c, mx, y0, tb_h, mods_grid);
+        if tb_action == Action::EditHud {
+            action = Action::EditHud;
+        }
         if let Some(who) = who {
-            let av = 28.0;
-            let ax = right_edge - av;
-            let ay = y0 + (hh - av) / 2.0;
-            avatar(c, who, ax, ay, av, 6.0);
-            c.circle(ax + av - 2.0, ay + av - 2.0, 4.2, 0xFF0B0C10);
-            c.circle(ax + av - 2.0, ay + av - 2.0, 3.0, theme::ONLINE);
-            if ui.hover(c, ax, ay, av, av) {
-                ui.tip(who);
+            let hw = c.text_width(font::SEMIBOLD, 12.0, who);
+            let av = tb_h - 14.0;
+            let pw = hw + av + 30.0;
+            let px = mx + mw - pw;
+            if px > mx + tb_w + 20.0 {
+                c.shadow(px, y0 + 3.0, pw, tb_h, PILL_R, 18.0, 0x66000000);
+                c.round(px, y0, pw, tb_h, PILL_R, PANEL_BG);
+                c.outline(px, y0, pw, tb_h, PILL_R, 1.0, theme::HAIRLINE_STRONG);
+                let (ax, ay) = (px + 7.0, y0 + (tb_h - av) / 2.0);
+                avatar(c, who, ax, ay, av, 7.0);
+                // Online dot, bottom-right of the head.
+                c.circle(ax + av - 3.0, ay + av - 3.0, 5.0, 0xFF05060A);
+                c.circle(ax + av - 3.0, ay + av - 3.0, 3.5, theme::ONLINE);
+                let lh = c.line_height(font::SEMIBOLD, 12.0);
+                c.text(font::SEMIBOLD, 12.0, who, ax + av + 11.0, y0 + (tb_h - lh) / 2.0, theme::TEXT);
             }
-            right_edge = ax - 10.0;
         }
 
-        // Center: Uppercase pill tabs (MODS, COSMETICS, EMOTES, WAYPOINTS, MUSIC, SHOTS, SETTINGS)
-        let brand_right = x0 + 178.0;
-        let avail_tabs = (right_edge - brand_right).max(200.0);
-        let tab_h = 28.0;
-        let tab_y = y0 + (hh - tab_h) / 2.0;
-        let tab_fs = if avail_tabs < 560.0 { 9.5 } else { 10.5 };
-        let tab_pad = if avail_tabs < 560.0 { 16.0 } else { 22.0 };
-        let tab_gap = 6.0;
-        let widths: Vec<f32> = TOP_ORDER
-            .iter()
-            .map(|&ti| c.text_width(font::BOLD, tab_fs, TOP_LABELS[ti]) + tab_pad)
-            .collect();
-        let total_tabs_w: f32 = widths.iter().sum::<f32>() + tab_gap * (TOP_ORDER.len() - 1) as f32;
-        let mut tx = (x0 + (ww - total_tabs_w) / 2.0).max(brand_right);
-        for (idx, &ti) in TOP_ORDER.iter().enumerate() {
-            let tw = widths[idx];
-            let on = self.tab == ti;
-            let id = format!("menu:toptab:{ti}");
-            let over = ui.hover(c, tx, tab_y, tw, tab_h);
-            let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-            let sl = ui.anim_on(&format!("{id}#on"), on, 16.0);
-            c.round(tx, tab_y, tw, tab_h, 6.0, theme::mix(theme::mix(0x0EFFFFFF, 0x18FFFFFF, hv), 0x26FFFFFF, sl));
-            c.outline(
-                tx,
-                tab_y,
-                tw,
-                tab_h,
-                6.0,
-                1.0,
-                theme::mix(theme::alpha(theme::HAIRLINE, 0.7), 0x42FFFFFF, sl.max(hv * 0.5)),
-            );
-            let lbl = TOP_LABELS[ti];
-            let lw = c.text_width(font::BOLD, tab_fs, lbl);
-            let lh = c.line_height(font::BOLD, tab_fs);
-            c.text(
-                font::BOLD,
-                tab_fs,
-                lbl,
-                tx + (tw - lw) / 2.0,
-                tab_y + (tab_h - lh) / 2.0,
-                theme::mix(theme::mix(theme::TEXT_MUTED, theme::TEXT, hv), 0xFFFFFFFF, sl),
-            );
-            if over {
-                ui.cursor_hand = true;
-            }
-            if ui.clicked(c, &id, tx, tab_y, tw, tab_h) {
-                self.set_tab(ti, ui.now);
-            }
-            tx += tw + tab_gap;
-        }
-
-        // ── Body below header ──
-        let body_y = y0 + hh + 1.0;
-        let body_h = wh - hh - 1.0;
-        let pe = ease(clamp01(((ui.now - self.page_at) / 200.0) as f32));
-
-        // Unified Locker tabs (Cosmetics & Emotes) use the Locker's own category sidebar to avoid double sidebars.
-        if self.tab == TAB_COSMETICS || self.tab == TAB_EMOTES {
-            let (lx, ly, lw, lh) = (x0 + 14.0, body_y + 12.0, ww - 28.0, body_h - 24.0);
-            c.push_alpha(pe);
-            if self.tab == TAB_COSMETICS {
-                if self.locker.draw(ui, c, &self.who, self.page_at, lx, ly, lw, lh) {
-                    self.set_tab(TAB_EMOTES, ui.now);
-                }
-            } else {
-                match self.emotes.draw(ui, c, &self.who, lx, ly, lw, lh, self.in_world) {
-                    EmotesAct::Close => action = Action::Close,
-                    EmotesAct::SwitchCosmetic(slot) => {
-                        self.locker.set_slot(slot, ui.now);
-                        self.set_tab(TAB_COSMETICS, ui.now);
-                    }
-                    EmotesAct::None => {}
-                }
-            }
-            c.pop_alpha();
-            c.pop_alpha();
-            return action;
-        }
-
-        // ── Left Sidebar (~176 px): Profiles + SAVE AS NEW PROFILE + EDIT HUD LAYOUT ──
-        let sb_w = SIDEBAR_W.min(ww * 0.22);
-        c.fill(x0 + sb_w, body_y, 1.0, body_h, theme::HAIRLINE);
-        let sb_action = self.draw_profiles_sidebar(ui, c, mods, x0, body_y, sb_w, body_h);
-        if sb_action != Action::None {
-            action = sb_action;
-        }
-
-        // ── Right Main Content Area ──
-        let (mx, my, mw, mh) = (x0 + sb_w + 16.0, body_y + 14.0, ww - sb_w - 32.0, body_h - 28.0);
+        // Main panel.
+        let py = y0 + tb_h + 10.0;
+        let ph = wh - tb_h - 10.0;
+        panel(c, mx, py, mw, ph);
+        let hh = 60.0;
+        c.fill(mx + 1.0, py + hh, mw - 2.0, 1.0, theme::HAIRLINE);
+        let (bx, by, bw, bh) = (mx + 20.0, py + hh + 16.0, mw - 40.0, ph - hh - 32.0);
+        let pe = ease(clamp01(((ui.now - self.page_at) / 220.0) as f32));
         match self.tab {
             TAB_MODS => {
                 if let Some(id) = self.selected.clone() {
                     c.push_alpha(pe);
-                    let a = self.mod_page(ui, c, mods, cfg, &id, x0 + sb_w + 1.0, body_y, ww - sb_w - 1.0, body_h);
+                    let a = self.mod_page(ui, c, mods, cfg, &id, mx, py, mw, ph);
                     if a != Action::None {
                         action = a;
                     }
                     c.pop_alpha();
                 } else {
-                    let bar_h = 30.0;
-                    self.draw_mods_bar(ui, c, mx, my, mw, bar_h);
-                    let ge = ease(clamp01(((ui.now - self.grid_at) / 200.0) as f32));
+                    let tx = header(c, "Mods", mx, py, hh);
+                    let sw = (mx + mw - 20.0 - tx - 30.0).clamp(160.0, 340.0);
+                    self.draw_search(ui, c, mx + mw - 20.0 - sw, py + (hh - 34.0) / 2.0, sw, 34.0);
+                    let cw = 184.0f32.min(bw * 0.24);
+                    let a = self.categories(ui, c, mods, bx, by, cw, bh);
+                    if a != Action::None {
+                        action = a;
+                    }
+                    c.fill(bx + cw + 12.0, by, 1.0, bh, theme::HAIRLINE);
+                    let (gx, gw) = (bx + cw + 26.0, bw - cw - 26.0);
+                    let ge = ease(clamp01(((ui.now - self.grid_at) / 220.0) as f32));
                     c.push_alpha(ge);
-                    self.mods_grid(ui, c, mods, mx, my + bar_h + 12.0 + (1.0 - ge) * 8.0, mw, mh - bar_h - 12.0);
+                    self.mods_grid(ui, c, mods, gx, by + (1.0 - ge) * 10.0, gw, bh);
                     c.pop_alpha();
                 }
             }
-            TAB_WAYPOINTS => {
+            TAB_COSMETICS | TAB_EMOTES | TAB_SHOTS | TAB_MUSIC | TAB_WAYPOINTS => {
+                header(c, TABS[self.tab], mx, py, hh);
+                if self.tab == TAB_COSMETICS {
+                    let store = "Get more in the Native Store";
+                    let sw = c.text_width(font::MEDIUM, 11.5, store);
+                    c.icon(theme::I_STORE, 14.0, mx + mw - 20.0 - sw - 12.0, py + hh / 2.0, theme::TEXT_MUTED);
+                    let lh = c.line_height(font::MEDIUM, 11.5);
+                    c.text(font::MEDIUM, 11.5, store, mx + mw - 20.0 - sw, py + (hh - lh) / 2.0, theme::TEXT_MUTED);
+                }
                 c.push_alpha(pe);
-                self.waypoints.draw(ui, c, mx, my + (1.0 - pe) * 8.0, mw, mh);
-                c.pop_alpha();
-            }
-            TAB_MUSIC => {
-                c.push_alpha(pe);
-                self.music.draw(ui, c, cfg, mx, my + (1.0 - pe) * 8.0, mw, mh);
-                c.pop_alpha();
-            }
-            TAB_SHOTS => {
-                c.push_alpha(pe);
-                self.shots.draw(ui, c, self.game_dir.as_deref(), mx, my + (1.0 - pe) * 8.0, mw, mh);
+                let a = self.other_tab(ui, c, cfg, bx, by + (1.0 - pe) * 10.0, bw, bh);
+                if a != Action::None {
+                    action = a;
+                }
                 c.pop_alpha();
             }
             _ => {
+                header(c, "Settings", mx, py, hh);
                 c.push_alpha(pe);
-                let a = self.settings(ui, c, mods, cfg, who, mx, my + (1.0 - pe) * 8.0, mw, mh);
+                let a = self.settings(ui, c, mods, cfg, who, bx, by + (1.0 - pe) * 10.0, bw, bh);
                 if a != Action::None {
                     action = a;
                 }
@@ -682,222 +620,75 @@ impl Menu {
         action
     }
 
-    /// Left sidebar (~176 px): Profiles list with inline rename/switch/delete, `SAVE AS NEW PROFILE`, and `EDIT HUD LAYOUT`.
-    #[allow(clippy::too_many_arguments)]
-    fn draw_profiles_sidebar(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, x: f32, y: f32, w: f32, h: f32) -> Action {
-        let pad = 10.0;
-        let btn_h = 34.0;
-        let save_h = 30.0;
-        let hud_y = y + h - pad - btn_h;
-        let save_y = hud_y - 8.0 - save_h;
-
-        // Scrollable profiles list
-        let list_top = y + 10.0;
-        let list_h = (save_y - list_top - 10.0).max(40.0);
-        let row_h = 34.0;
-        let off = self.profiles.scroll.begin(ui, c, x, list_top, w, list_h);
-        let mut ry = list_top - off;
-        let mut switch_idx = None;
-        let mut delete_idx = None;
-        let mut commit_idx = None;
-        let count = self.profiles.list.len();
-        for i in 0..count {
-            let name = self.profiles.list[i].name.clone();
-            let active = name == self.profiles.active;
-            let renaming = self.profiles.renaming == Some(i);
-            let id = format!("menu:prof:{i}");
-            let over = ui.hover(c, x, ry, w, row_h);
-            let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-            let on = ui.anim_on(&format!("{id}#on"), active, 16.0);
-            let bg = theme::mix(theme::alpha(0x14FFFFFF, hv), 0x22FFFFFF, on);
-            if bg >> 24 > 0 {
-                c.fill(x + 1.0, ry, w - 2.0, row_h, bg);
-            }
-            if on > 0.05 {
-                c.fill(x + 1.0, ry + 5.0, 2.5, row_h - 10.0, theme::alpha(PRIMARY_BLUE, on));
-            }
-            if renaming {
-                let enter = self.profiles.rename_field.draw(ui, c, x + 8.0, ry + 3.0, w - 16.0, row_h - 6.0, "Profile name", 11.5);
-                if enter || (ui.pressed && !ui.hover(c, x, ry, w, row_h)) {
-                    commit_idx = Some(i);
-                }
-            } else {
-                let can_del = i > 0;
-                let icons_w = if over || active { if can_del { 42.0 } else { 24.0 } } else { 8.0 };
-                let shown = c.ellipsize(font::SEMIBOLD, 11.5, &name, w - 16.0 - icons_w);
-                let lh = c.line_height(font::SEMIBOLD, 11.5);
-                c.text(
-                    font::SEMIBOLD,
-                    11.5,
-                    &shown,
-                    x + 12.0,
-                    ry + (row_h - lh) / 2.0,
-                    theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), 0xFFFFFFFF, on),
-                );
-                let mut took = false;
-                if over || active {
-                    let mut ix = x + w - 24.0;
-                    if can_del {
-                        let over_del = ui.hover(c, ix, ry + 6.0, 20.0, 22.0);
-                        c.icon(theme::I_TRASH, 11.0, ix + 10.0, ry + row_h / 2.0, if over_del { 0xFFF87171 } else { theme::TEXT_MUTED });
-                        if over_del {
-                            ui.cursor_hand = true;
-                            ui.tip("Delete profile");
-                        }
-                        if ui.clicked(c, &format!("{id}:del"), ix, ry + 6.0, 20.0, 22.0) {
-                            delete_idx = Some(i);
-                            took = true;
-                        }
-                        ix -= 20.0;
-                    }
-                    let over_edit = ui.hover(c, ix, ry + 6.0, 20.0, 22.0);
-                    c.icon(theme::I_PENCIL, 11.0, ix + 10.0, ry + row_h / 2.0, if over_edit { theme::TEXT_STRONG } else { theme::TEXT_MUTED });
-                    if over_edit {
-                        ui.cursor_hand = true;
-                        ui.tip("Rename profile");
-                    }
-                    if ui.clicked(c, &format!("{id}:edit"), ix, ry + 6.0, 20.0, 22.0) {
-                        self.profiles.renaming = Some(i);
-                        self.profiles.rename_field.set(&name);
-                        self.profiles.rename_field.select_all();
-                        self.profiles.rename_field.focus(ui);
-                        ui.focus_claimed = true;
-                        took = true;
-                    }
-                }
-                if !took && ui.clicked(c, &id, x, ry, w, row_h) && !active {
-                    switch_idx = Some(i);
-                }
-                if over {
-                    ui.cursor_hand = true;
-                }
-            }
-            c.fill(x + 10.0, ry + row_h - 1.0, w - 20.0, 1.0, 0x0CFFFFFF);
-            ry += row_h;
+    /// The tabs another part of the port draws (cosmetics, screenshots, music).
+    fn other_tab(&mut self, ui: &mut Ui, c: &mut Canvas, cfg: &mut UiConfig, x: f32, y: f32, w: f32, h: f32) -> Action {
+        if self.tab == TAB_MUSIC {
+            self.music.draw(ui, c, cfg, x, y, w, h);
+            return Action::None;
         }
-        self.profiles.scroll.end(ui, c, count as f32 * row_h);
-
-        let gd = self.game_dir.as_deref();
-        if let Some(i) = commit_idx {
-            self.profiles.commit_rename(i, gd);
-            ui.focus = None;
+        if self.tab == TAB_SHOTS {
+            self.shots.draw(ui, c, self.game_dir.as_deref(), x, y, w, h);
+            return Action::None;
         }
-        if let Some(i) = delete_idx {
-            self.profiles.delete(i, mods, gd);
-        } else if let Some(i) = switch_idx {
-            self.profiles.switch_to(i, mods, gd);
+        if self.tab == TAB_COSMETICS {
+            self.locker.draw(ui, c, &self.who, self.page_at, x, y, w, h);
+            return Action::None;
         }
-
-        // Bottom: SAVE AS NEW PROFILE (outlined)
-        let bw = w - pad * 2.0;
-        let bx = x + pad;
-        let over_save = ui.hover(c, bx, save_y, bw, save_h);
-        let shv = ui.anim_on("menu:prof:save#h", over_save, 14.0);
-        c.round(bx, save_y, bw, save_h, 5.0, theme::mix(0x0AFFFFFF, 0x1CFFFFFF, shv));
-        c.outline(bx, save_y, bw, save_h, 5.0, 1.0, theme::mix(0x28FFFFFF, 0x55FFFFFF, shv));
-        let stxt = "SAVE AS NEW PROFILE";
-        let stw = c.text_width(font::BOLD, 9.0, stxt);
-        let slh = c.line_height(font::BOLD, 9.0);
-        c.text(font::BOLD, 9.0, stxt, bx + (bw - stw) / 2.0, save_y + (save_h - slh) / 2.0, theme::mix(theme::TEXT_SECONDARY, 0xFFFFFFFF, shv));
-        if over_save {
-            ui.cursor_hand = true;
+        if self.tab == TAB_WAYPOINTS {
+            self.waypoints.draw(ui, c, x, y, w, h);
+            return Action::None;
         }
-        if ui.clicked(c, "menu:prof:save", bx, save_y, bw, save_h) {
-            self.profiles.create_from_current(mods, gd);
+        if self.tab == TAB_EMOTES {
+            // an emote played in the world: close the menu so it can be seen
+            let who = self.who.clone();
+            return if matches!(self.emotes.draw(ui, c, &who, x, y, w, h, self.in_world), EmotesAct::Close) { Action::Close } else { Action::None };
         }
-
-        // Bottom: EDIT HUD LAYOUT (vibrant blue #4F86F7 primary button)
-        let over_hud = ui.hover(c, bx, hud_y, bw, btn_h);
-        let hhv = ui.anim_on("menu:sb:hud#h", over_hud, 16.0);
-        c.round(bx, hud_y, bw, btn_h, 6.0, theme::mix(PRIMARY_BLUE, 0xFF6698FF, hhv));
-        let htxt = "EDIT HUD LAYOUT";
-        let htw = c.text_width(font::BOLD, 10.5, htxt);
-        let hlh = c.line_height(font::BOLD, 10.5);
-        c.text(font::BOLD, 10.5, htxt, bx + (bw - htw) / 2.0, hud_y + (btn_h - hlh) / 2.0, 0xFFFFFFFF);
-        if over_hud {
-            ui.cursor_hand = true;
-        }
-        if ui.clicked(c, "menu:sb:hud", bx, hud_y, bw, btn_h) {
-            return Action::EditHud;
-        }
+        empty(c, x, y, w, h.min(260.0), theme::I_SPARKLES, "Coming soon", "This page is still being ported to the Rust Edition.");
         Action::None
     }
 
-    /// Mods top bar: colored uppercase category pills (`ALL`, `NEW`, `HUD`, `VISUAL`, `MECHANIC`, `FAV`),
-    /// grid/list toggle, sort toggle, and compact search box.
-    fn draw_mods_bar(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
-        // Right side: Search box + Sort toggle + Grid/List toggle
-        let search_w = (w * 0.24).clamp(138.0, 204.0);
-        let search_x = x + w - search_w;
-        self.draw_search(ui, c, search_x, y + 1.0, search_w, h - 2.0);
-
-        let icon_s = h - 2.0;
-        let sort_x = search_x - 6.0 - icon_s;
-        let sort_tip = match self.sort_mode {
-            1 => "Sort: Enabled first",
-            2 => "Sort: A-Z",
-            _ => "Sort: Default",
-        };
-        if bar_icon(ui, c, "menu:mods:sort", sort_x, y + 1.0, icon_s, theme::I_ARROWS_UP, self.sort_mode != 0, sort_tip) {
-            self.sort_mode = (self.sort_mode + 1) % 3;
-            self.grid.reset();
+    /// Floating pill above the panel. Returns its width and what was pressed.
+    fn toolbar(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, h: f32, grid_tab: bool) -> (f32, Action) {
+        let w = if grid_tab { 206.0 + h - 4.0 } else { 120.0 };
+        c.shadow(x, y + 3.0, w, h, PILL_R, 18.0, 0x66000000);
+        c.round(x, y, w, h, PILL_R, PANEL_BG);
+        c.outline(x, y, w, h, PILL_R, 1.0, theme::HAIRLINE_STRONG);
+        let mut action = Action::None;
+        if ui.button(c, "menu:tb:hud", x + 4.0, y + 4.0, 112.0, h - 8.0, "Edit HUD", theme::I_MOVE, ui::BTN_GHOST) {
+            action = Action::EditHud;
         }
-        let view_x = sort_x - 5.0 - icon_s;
-        let view_icon = if self.list_view { theme::I_LIST } else { theme::I_GRID };
-        if bar_icon(ui, c, "menu:mods:view", view_x, y + 1.0, icon_s, view_icon, self.list_view, if self.list_view { "List view" } else { "Grid view" }) {
-            self.list_view = !self.list_view;
-            self.grid.reset();
+        if grid_tab {
+            c.fill(x + 122.0, y + 10.0, 1.0, h - 20.0, theme::HAIRLINE_STRONG);
+            if pill_icon(ui, c, "menu:tb:grid", x + 130.0, y + 4.0, h - 8.0, theme::I_GRID, !self.list_view) {
+                self.list_view = false;
+            }
+            if pill_icon(ui, c, "menu:tb:list", x + 130.0 + h - 4.0, y + 4.0, h - 8.0, theme::I_LIST, self.list_view) {
+                self.list_view = true;
+            }
+            let sx = x + 130.0 + 2.0 * (h - 4.0);
+            if pill_icon(ui, c, "menu:tb:sort", sx, y + 4.0, h - 8.0, theme::I_SLIDERS, self.sort_enabled) {
+                self.sort_enabled = !self.sort_enabled;
+            }
+            if ui.hover(c, sx, y + 4.0, h - 8.0, h - 8.0) {
+                ui.tip(if self.sort_enabled { "Enabled first" } else { "Default order" });
+            }
         }
-
-        // Left side: Colored uppercase category pills
-        let pills_right = view_x - 8.0;
-        let mut px = x;
-        let ph = 26.0;
-        let py = y + (h - ph) / 2.0;
-        for (i, &name) in CAT_LABELS.iter().enumerate() {
-            let pw = (c.text_width(font::BOLD, 10.0, name) + 20.0).max(46.0);
-            if px + pw > pills_right {
-                break;
-            }
-            let id = format!("menu:cat:{i}");
-            let active = self.chip == i;
-            let over = ui.hover(c, px, py, pw, ph);
-            let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-            let on = ui.anim_on(&format!("{id}#on"), active, 16.0);
-            let base = CAT_COLORS[i];
-            let bg = theme::mix(theme::alpha(base, 0.36 + 0.16 * hv), base, on);
-            c.round(px, py, pw, ph, 5.0, bg);
-            if on > 0.05 {
-                c.outline(px, py, pw, ph, 5.0, 1.0, theme::alpha(0xFFFFFFFF, 0.25 * on));
-            }
-            let lw = c.text_width(font::BOLD, 10.0, name);
-            let lh = c.line_height(font::BOLD, 10.0);
-            c.text(font::BOLD, 10.0, name, px + (pw - lw) / 2.0, py + (ph - lh) / 2.0, theme::mix(0xFFE4E4E7, 0xFFFFFFFF, on));
-            if over {
-                ui.cursor_hand = true;
-            }
-            if ui.clicked(c, &id, px, py, pw, ph) && self.chip != i {
-                self.chip = i;
-                self.grid.reset();
-                self.grid_at = ui.now;
-            }
-            px += pw + 6.0;
-        }
+        (w, action)
     }
 
     fn draw_search(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
         let f = self.search.focused(ui);
         let fa = ui.anim_on("menu:search#f", f, 14.0);
-        c.round(x, y, w, h, 6.0, theme::mix(0xFF171920, 0xFF1F222C, fa));
-        c.outline(x, y, w, h, 6.0, 1.0, theme::mix(theme::HAIRLINE_STRONG, theme::BORDER_HOVER, fa));
-        c.icon(theme::I_SEARCH, 12.0, x + 13.0, y + h / 2.0, theme::TEXT_MUTED);
+        c.round(x, y, w, h, h / 2.0, theme::mix(0xB808090C, 0xE00E1014, fa));
+        c.outline(x, y, w, h, h / 2.0, 1.0, theme::mix(theme::HAIRLINE_STRONG, theme::BORDER_HOVER, fa));
+        c.icon(theme::I_SEARCH, 14.0, x + 18.0, y + h / 2.0, theme::TEXT_MUTED);
         let clear = !self.search.is_empty();
-        if ui.pressed && ui.hover(c, x, y, w - if clear { 24.0 } else { 0.0 }, h) {
+        if ui.pressed && ui.hover(c, x, y, w - if clear { 32.0 } else { 0.0 }, h) {
             self.search.focus(ui);
             ui.focus_claimed = true;
         }
-        self.search.draw(ui, c, x + 16.0, y, w - if clear { 42.0 } else { 20.0 }, h, "Search...", 11.5);
-        if clear && ui.icon_button(c, "menu:search:clear", x + w - 24.0, y + (h - 20.0) / 2.0, 20.0, theme::I_X, None) {
+        self.search.draw(ui, c, x + 20.0, y, w - if clear { 54.0 } else { 24.0 }, h, "Search modules", 12.5);
+        if clear && ui.icon_button(c, "menu:search:clear", x + w - 30.0, y + (h - 24.0) / 2.0, 24.0, theme::I_X, None) {
             self.search.clear();
             self.search.focus(ui);
             ui.focus_claimed = true;
@@ -908,11 +699,8 @@ impl Menu {
         match chip {
             0 => true,
             1 => NEW_MODS.contains(&m.state.id),
-            2 => m.state.category == super::module::HUD,
-            3 => m.state.category == super::module::VISUAL,
-            4 => m.state.category == super::module::MECHANIC,
-            5 => m.state.favorite,
-            _ => true,
+            2 => m.state.favorite,
+            _ => m.state.category == CHIPS[chip],
         }
     }
 
@@ -935,52 +723,45 @@ impl Menu {
             .filter(|(_, m)| Self::in_chip(m, self.chip) && Self::query_matches(m, &q))
             .map(|(i, _)| i)
             .collect();
-        match self.sort_mode {
-            1 => out.sort_by(|&a, &b| {
-                mods.all[b]
-                    .state
-                    .enabled
-                    .cmp(&mods.all[a].state.enabled)
-                    .then_with(|| label(mods.all[a].state.name).to_lowercase().cmp(&label(mods.all[b].state.name).to_lowercase()))
-            }),
-            2 => out.sort_by(|&a, &b| label(mods.all[a].state.name).to_lowercase().cmp(&label(mods.all[b].state.name).to_lowercase())),
-            _ => {}
+        if self.sort_enabled {
+            // stable: the default order within enabled and within disabled
+            out.sort_by_key(|&i| !mods.all[i].state.enabled);
         }
         out
     }
 
-    // ── Mods Grid (3-column compact horizontal cards) ────────────────────
+    // ── Mods ─────────────────────────────────────────────────────────────
 
     #[allow(clippy::too_many_arguments)]
     fn mods_grid(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, x: f32, y: f32, w: f32, h: f32) {
         let list = self.filtered(mods);
-        let mut key = format!("{}:{}:{}:{}", normalize(&self.search.value()), self.chip, self.list_view, self.sort_mode);
+        let mut key = format!("{}:{}:{}:{}", normalize(&self.search.value()), self.chip, self.list_view, self.sort_enabled);
         for i in &list {
             key.push(':');
             key.push_str(mods.all[*i].state.id);
         }
         if key != self.result_key {
             self.result_key = key;
-            self.grid.reset();
+            self.grid.reset(); // Reset BEFORE drawing, even for an empty result set.
         }
         if list.is_empty() {
-            if self.chip == 5 && self.search.value().trim().is_empty() {
-                empty(c, x, y, w, h.min(260.0), theme::I_HEART, "No favorites yet", "Open a mod and tap the heart to pin it here.");
+            if self.chip == 2 && self.search.value().trim().is_empty() {
+                empty(c, x, y, w, h.min(260.0), theme::I_HEART, "No favorites yet", "Tap the heart on a mod to pin it here.");
             } else {
                 empty(c, x, y, w, h.min(260.0), theme::I_SEARCH, "No mods found", "Try another search or category.");
             }
             return;
         }
-        let gap = 10.0;
+        let gap = 12.0;
         let (cols, card_w, card_h);
         if self.list_view {
             cols = if w > 640.0 { 2 } else { 1 };
             card_w = (w - gap * (cols - 1) as f32) / cols as f32;
-            card_h = 56.0;
+            card_h = 60.0;
         } else {
-            cols = if w >= 540.0 { 3 } else { 2 };
+            cols = (((w + gap) / (150.0 + gap)) as usize).max(2);
             card_w = (w - gap * (cols - 1) as f32) / cols as f32;
-            card_h = 44.0;
+            card_h = 156.0;
         }
         let off = self.grid.begin(ui, c, x, y, w + 6.0, h);
         let mut opened: Option<String> = None;
@@ -1006,104 +787,92 @@ impl Menu {
         }
     }
 
-    /// Compact 44 px horizontal card: emerald green border when ENABLED, crimson red border when DISABLED.
-    /// Left click toggles ON/OFF; vertical divider + gear icon on right opens Settings + Live Preview.
+    /// Feather-style tile: icon and name on top, a wide ENABLED / DISABLED bar and a settings gear along the bottom.
     #[allow(clippy::too_many_arguments)]
     fn card(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, mi: usize, x: f32, y: f32, w: f32, h: f32, index: usize) -> bool {
         let m = &mut mods.all[mi];
-        let mod_id = m.state.id;
-        let id = format!("menu:card:{mod_id}");
-        let e = ease(clamp01(((ui.now - self.grid_at - 15.0 - index as f64 * 10.0) / 220.0) as f32));
+        let id = format!("menu:card:{}", m.state.id);
+        let e = ease(clamp01(((ui.now - self.grid_at - 40.0 - index as f64 * 18.0) / 300.0) as f32));
         c.push_alpha(e);
-        let y = y + (1.0 - e) * 6.0;
-        let gear_w = 36.0;
-        let main_w = (w - gear_w).max(60.0);
-
-        let over_card = ui.hover(c, x, y, w, h);
-        let over_main = ui.hover(c, x, y, main_w, h);
-        let over_gear = ui.hover(c, x + main_w, y, gear_w, h);
-        let hv = ui.anim_on(&format!("{id}#h"), over_card, 14.0);
-        let ghv = ui.anim_on(&format!("{id}#gh"), over_gear, 14.0);
+        let y = y + (1.0 - e) * 12.0;
+        let over = ui.hover(c, x, y, w, h);
+        let mut click = ui.clicked(c, &id, x, y, w, h - 44.0);
+        let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let on = ui.anim_on(&format!("{id}#on"), m.state.enabled, 14.0);
-
-        // Dark tinted card fill + emerald green (ON) / crimson red (OFF) border
-        let fill_off = theme::mix(0xFF130E10, 0xFF1D1316, hv);
-        let fill_on = theme::mix(0xFF0E1612, 0xFF14211A, hv);
-        c.round(x, y, w, h, 6.0, theme::mix(fill_off, fill_on, on));
-        let border = theme::mix(theme::alpha(OFF, 0.65 + 0.25 * hv), theme::alpha(ON, 0.72 + 0.24 * hv), on);
-        c.outline(x, y, w, h, 6.0, 1.2, border);
-
-        // Left section: icon + name + optional red `NEW` badge
-        let icon_col = theme::mix(theme::mix(0xFF8E8E98, 0xFFD4D4DC, hv), 0xFFFFFFFF, on);
-        c.icon(m.state.icon, 16.0, x + 22.0, y + h / 2.0, icon_col);
-        let is_new = NEW_MODS.contains(&mod_id);
-        let badge_w = if is_new { 28.0 } else { 0.0 };
-        let max_name = (main_w - 44.0 - badge_w).max(30.0);
-        let name = c.ellipsize(font::SEMIBOLD, 11.5, &label(m.state.name), max_name);
-        let lh = c.line_height(font::SEMIBOLD, 11.5);
-        let nw = c.text_width(font::SEMIBOLD, 11.5, &name);
-        c.text(font::SEMIBOLD, 11.5, &name, x + 38.0, y + (h - lh) / 2.0, theme::mix(0xFFB4B4BE, 0xFFFFFFFF, on.max(hv * 0.6)));
-        if is_new {
-            c.text(font::BOLD, 7.5, "NEW", x + 38.0 + nw + 4.0, y + 8.0, 0xFFEF4444);
+        c.round(x, y, w, h, 12.0, theme::mix(CARD, CARD_HOVER, hv));
+        if on > 0.01 {
+            glow(c, x, y, w, (h - 44.0) * 0.9, 12.0, theme::alpha(0x14FFFFFF, on));
         }
-
-        // Right section: vertical divider + gear icon
-        c.fill(x + main_w, y + 7.0, 1.0, h - 14.0, theme::alpha(0xFFFFFFFF, 0.12));
-        if ghv > 0.01 {
-            c.round(x + main_w + 3.0, y + 4.0, gear_w - 6.0, h - 8.0, 4.0, theme::alpha(0xFFFFFFFF, 0.08 * ghv));
-        }
-        c.icon(
-            theme::I_SETTINGS,
-            14.0,
-            x + main_w + gear_w / 2.0,
-            y + h / 2.0,
-            theme::mix(theme::TEXT_MUTED, 0xFFFFFFFF, ghv),
+        c.outline(
+            x,
+            y,
+            w,
+            h,
+            12.0,
+            1.0,
+            theme::mix(theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, on), theme::BORDER_HOVER, hv),
         );
-
-        if over_main || over_gear {
-            ui.cursor_hand = true;
+        let iy = y + (h - 44.0) * 0.42;
+        let art = self.art_for(m.state.id);
+        module_icon(c, art.as_ref(), m.state.icon, 30.0, x + w / 2.0, iy - hv * 2.0, theme::mix(theme::mix(0xFF52525B, theme::TEXT_SECONDARY, hv), theme::TEXT_STRONG, on));
+        if NEW_MODS.contains(&m.state.id) {
+            new_badge(c, x + 10.0, y + 10.0);
         }
-        if over_gear {
-            ui.tip("Configure settings");
+        let name = c.ellipsize(font::SEMIBOLD, 12.5, &label(m.state.name), w - 20.0);
+        let nw = c.text_width(font::SEMIBOLD, 12.5, &name);
+        c.text(font::SEMIBOLD, 12.5, &name, x + (w - nw) / 2.0, y + h - 44.0 - 26.0, theme::mix(theme::TEXT, theme::TEXT_STRONG, on));
+        if heart(ui, c, &format!("{id}:fav"), &mut m.state.favorite, x + w - 32.0, y + 8.0, over) {
+            click = false;
+            mods.changed();
         }
-
-        let open_settings = ui.clicked(c, &format!("{id}:gear"), x + main_w, y, gear_w, h);
-        if !open_settings && ui.clicked(c, &id, x, y, main_w, h) {
-            let next = !m.state.enabled;
-            m.set_enabled(next);
+        let m = &mut mods.all[mi];
+        let (mut bx, by, mut bw) = (x + 10.0, y + h - 38.0, w - 20.0);
+        let has_settings = !m.shown_settings().is_empty() || !m.shown_appearance().is_empty() || m.is_hud();
+        if has_settings {
+            if ui.icon_button(c, &format!("{id}:gear"), bx, by, 28.0, theme::I_SETTINGS, Some("Settings")) {
+                click = true;
+            }
+            bx += 32.0;
+            bw -= 32.0;
+        }
+        let enabled = m.state.enabled;
+        if state_button(ui, c, &format!("{id}:t"), bx, by, bw, 28.0, enabled, 10.5) {
+            m.set_enabled(!enabled);
             mods.changed();
         }
         c.pop_alpha();
-        open_settings
+        click
     }
 
     #[allow(clippy::too_many_arguments)]
     fn list_row(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, mi: usize, x: f32, y: f32, w: f32, h: f32, index: usize) -> bool {
         let m = &mut mods.all[mi];
         let id = format!("menu:row:{}", m.state.id);
-        let e = ease(clamp01(((ui.now - self.grid_at - 15.0 - index as f64 * 12.0) / 240.0) as f32));
+        let e = ease(clamp01(((ui.now - self.grid_at - 40.0 - index as f64 * 18.0) / 280.0) as f32));
         c.push_alpha(e);
-        let y = y + (1.0 - e) * 6.0;
+        let y = y + (1.0 - e) * 10.0;
         let over = ui.hover(c, x, y, w, h);
+        let click = ui.clicked(c, &id, x, y, w - 96.0, h);
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         let on = ui.anim_on(&format!("{id}#on"), m.state.enabled, 14.0);
-        let fill_off = theme::mix(0xFF130E10, 0xFF1C1316, hv);
-        let fill_on = theme::mix(0xFF0E1612, 0xFF14211A, hv);
-        c.round(x, y, w, h, 8.0, theme::mix(fill_off, fill_on, on));
-        let border = theme::mix(theme::alpha(OFF, 0.65), theme::alpha(ON, 0.72), on);
-        c.outline(x, y, w, h, 8.0, 1.1, border);
-        c.round(x + 10.0, y + 10.0, 36.0, 36.0, 7.0, theme::mix(0x14FFFFFF, 0x2222C55E, on));
-        c.icon(m.state.icon, 16.0, x + 28.0, y + 28.0, theme::mix(theme::TEXT_SECONDARY, 0xFFFFFFFF, on));
-        let tw = w - 156.0;
-        let name = c.ellipsize(font::SEMIBOLD, 12.5, &label(m.state.name), tw);
-        c.text(font::SEMIBOLD, 12.5, &name, x + 56.0, y + 10.0, theme::TEXT_STRONG);
-        let desc = c.ellipsize(font::REGULAR, 10.5, &label(m.state.description), tw);
-        c.text(font::REGULAR, 10.5, &desc, x + 56.0, y + 29.0, theme::TEXT_MUTED);
-        let mut fav_changed = heart(ui, c, &format!("{id}:fav"), &mut m.state.favorite, x + w - 96.0, y + 16.0, true);
-        let open_gear = ui.icon_button(c, &format!("{id}:gear"), x + w - 68.0, y + 14.0, 28.0, theme::I_SETTINGS, Some("Settings"));
+        c.round(x, y, w, h, 12.0, theme::mix(CARD, CARD_HOVER, hv));
+        c.outline(x, y, w, h, 12.0, 1.0, theme::mix(theme::HAIRLINE, theme::BORDER_HOVER, hv));
+        c.round(x + 12.0, y + 12.0, 36.0, 36.0, 10.0, theme::mix(theme::SUBTLE_HOVER, 0xFFF4F4F5, on));
+        let art = self.art_for(m.state.id);
+        module_icon(c, art.as_ref(), m.state.icon, 17.0, x + 30.0, y + 30.0, theme::mix(theme::TEXT, theme::SOLID_FG, on));
+        let tw = w - 160.0;
+        let is_new = NEW_MODS.contains(&m.state.id);
+        let name = c.ellipsize(font::SEMIBOLD, 13.0, &label(m.state.name), tw - if is_new { 40.0 } else { 0.0 });
+        c.text(font::SEMIBOLD, 13.0, &name, x + 60.0, y + 12.0, theme::TEXT_STRONG);
+        if is_new {
+            let name_w = c.text_width(font::SEMIBOLD, 13.0, &name);
+            new_badge(c, x + 66.0 + name_w, y + 13.0);
+        }
+        let desc = c.ellipsize(font::REGULAR, 11.0, &label(m.state.description), tw);
+        c.text(font::REGULAR, 11.0, &desc, x + 60.0, y + 31.0, theme::TEXT_MUTED);
+        let mut fav_changed = heart(ui, c, &format!("{id}:fav"), &mut m.state.favorite, x + w - 84.0, y + 18.0, true);
         let enabled = m.state.enabled;
-        let click_main = !fav_changed && !open_gear && ui.clicked(c, &id, x, y, w - 102.0, h);
-        let toggled = ui.toggle(c, &format!("{id}:t"), x + w - 38.0, y + 18.0, enabled) || click_main;
+        let toggled = ui.toggle(c, &format!("{id}:t"), x + w - 46.0, y + 20.0, enabled);
         if toggled {
             m.set_enabled(!enabled);
             fav_changed = true;
@@ -1112,7 +881,136 @@ impl Menu {
             mods.changed();
         }
         c.pop_alpha();
-        open_gear
+        click && !fav_changed
+    }
+
+    /// Category list on the left of the mods grid (Feather style): icon, name, count, a marker on the active one.
+    #[allow(clippy::too_many_arguments)]
+    fn categories(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, x: f32, y: f32, w: f32, h: f32) -> Action {
+        c.text(font::SEMIBOLD, 10.0, "CATEGORIES", x + 6.0, y + 2.0, theme::TEXT_MUTED);
+        let mut ry = y + 24.0;
+        let rh = 34.0;
+        for (i, name) in CHIPS.iter().enumerate() {
+            let n = mods.all.iter().filter(|m| Self::in_chip(m, i)).count();
+            let id = format!("menu:cat:{i}");
+            let over = ui.hover(c, x, ry, w, rh);
+            if ui.clicked(c, &id, x, ry, w, rh) && self.chip != i {
+                self.chip = i;
+                self.grid.reset();
+                self.page_at = ui.now;
+                self.grid_at = ui.now;
+            }
+            let on = ui.anim_on(&format!("{id}#on"), self.chip == i, 16.0);
+            let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
+            c.round(x, ry, w, rh, 10.0, theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv * 0.7), 0x16FFFFFF, on));
+            if on > 0.01 {
+                c.outline(x, ry, w, rh, 10.0, 1.0, theme::alpha(theme::HAIRLINE_STRONG, on));
+                c.round(x - 5.0, ry + (rh - 18.0 * on) / 2.0, 3.0, 18.0 * on, 1.5, theme::alpha(theme::WHITE, on));
+            }
+            let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::TEXT_STRONG, on);
+            c.icon(CHIP_ICONS[i], 15.0, x + 22.0, ry + rh / 2.0, fg);
+            let lh = c.line_height(font::SEMIBOLD, 12.5);
+            c.text(font::SEMIBOLD, 12.5, name, x + 40.0, ry + (rh - lh) / 2.0, fg);
+            let count = n.to_string();
+            let nw = c.text_width(font::MEDIUM, 10.5, &count);
+            c.round(x + w - nw - 22.0, ry + (rh - 20.0) / 2.0, nw + 12.0, 20.0, 10.0, theme::mix(theme::SUBTLE, 0xFFF4F4F5, on));
+            let nh = c.line_height(font::MEDIUM, 10.5);
+            c.text(font::MEDIUM, 10.5, &count, x + w - nw - 16.0, ry + (rh - nh) / 2.0, theme::mix(theme::TEXT_MUTED, theme::SOLID_FG, on));
+            ry += rh + 4.0;
+        }
+        // Profiles fill the space between the categories and the footer.
+        let p_top = ry + 14.0;
+        let p_h = y + h - 30.0 - p_top;
+        if p_h > 70.0 {
+            self.profiles_list(ui, c, mods, x, p_top, w, p_h);
+        }
+        let active = mods.all.iter().filter(|m| m.state.enabled).count();
+        let a = format!("{active} of {} enabled", mods.all.len());
+        c.circle(x + 10.0, y + h - 12.0, 3.5, ON);
+        let ah = c.line_height(font::MEDIUM, 11.0);
+        c.text(font::MEDIUM, 11.0, &a, x + 20.0, y + h - 12.0 - ah / 2.0, theme::TEXT_MUTED);
+        Action::None
+    }
+
+    /// The colour artwork of a module, if it has one (Emotes: the masks, Markers: the pin).
+    fn art_for(&self, id: &str) -> Option<Arc<Image>> {
+        match id {
+            "emotes" => self.art_emotes.clone(),
+            "markers" => self.art_markers.clone(),
+            _ => None,
+        }
+    }
+
+    /// Saved module setups: switch with a click, rename / delete on hover, "+" saves the current setup as a new one.
+    #[allow(clippy::too_many_arguments)]
+    fn profiles_list(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, x: f32, y: f32, w: f32, h: f32) {
+        c.fill(x + 6.0, y - 8.0, w - 12.0, 1.0, theme::HAIRLINE);
+        c.text(font::SEMIBOLD, 10.0, "PROFILES", x + 6.0, y + 6.0, theme::TEXT_MUTED);
+        let gd = self.game_dir.clone();
+        if ui.icon_button(c, "menu:prof:new", x + w - 28.0, y, 24.0, theme::I_PLUS, Some("Save as new profile")) {
+            self.profiles.create_from_current(mods, gd.as_deref());
+        }
+        let (ly, lh, rh) = (y + 30.0, h - 30.0, 30.0);
+        let off = self.profiles.scroll.begin(ui, c, x, ly, w, lh);
+        let (mut switch, mut delete, mut commit) = (None, None, None);
+        let count = self.profiles.list.len();
+        for i in 0..count {
+            let ry = ly + i as f32 * (rh + 2.0) - off;
+            if ry + rh < ly - 2.0 || ry > ly + lh + 2.0 {
+                continue;
+            }
+            let name = self.profiles.list[i].name.clone();
+            let is_act = name == self.profiles.active;
+            let id = format!("menu:prof:{i}");
+            let over = ui.hover(c, x, ry, w, rh);
+            let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
+            let on = ui.anim_on(&format!("{id}#on"), is_act, 16.0);
+            c.round(x, ry, w, rh, 9.0, theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv * 0.7), 0x16FFFFFF, on));
+            if on > 0.01 {
+                c.round(x - 5.0, ry + (rh - 14.0 * on) / 2.0, 3.0, 14.0 * on, 1.5, theme::alpha(theme::WHITE, on));
+            }
+            if self.profiles.renaming == Some(i) {
+                let done = self.profiles.rename_field.draw(ui, c, x + 8.0, ry + 2.0, w - 16.0, rh - 4.0, "Profile name", 12.0);
+                if done || (ui.pressed && !ui.hover(c, x, ry, w, rh)) {
+                    commit = Some(i);
+                }
+                continue;
+            }
+            let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::TEXT_STRONG, on);
+            let icons_w = if over { if i == 0 { 26.0 } else { 50.0 } } else { 8.0 };
+            c.icon(theme::I_LAYERS, 13.0, x + 20.0, ry + rh / 2.0, fg);
+            let shown = c.ellipsize(font::SEMIBOLD, 12.0, &name, w - 40.0 - icons_w);
+            let th = c.line_height(font::SEMIBOLD, 12.0);
+            c.text(font::SEMIBOLD, 12.0, &shown, x + 36.0, ry + (rh - th) / 2.0, fg);
+            let mut took = false;
+            if over {
+                let px = x + w - 26.0;
+                if ui.icon_button(c, &format!("{id}:ren"), px, ry + 3.0, 24.0, theme::I_PENCIL, Some("Rename")) {
+                    self.profiles.renaming = Some(i);
+                    self.profiles.rename_field.set(&name);
+                    self.profiles.rename_field.select_all();
+                    self.profiles.rename_field.focus(ui);
+                    took = true;
+                }
+                if i > 0 && ui.icon_button(c, &format!("{id}:del"), px - 24.0, ry + 3.0, 24.0, theme::I_TRASH, Some("Delete")) {
+                    delete = Some(i);
+                    took = true;
+                }
+            }
+            if !took && ui.clicked(c, &id, x, ry, w - icons_w, rh) && !is_act {
+                switch = Some(i);
+            }
+        }
+        self.profiles.scroll.end(ui, c, count as f32 * (rh + 2.0) - 2.0);
+        if let Some(i) = commit {
+            self.profiles.commit_rename(i, gd.as_deref());
+            ui.focus = None;
+        }
+        if let Some(i) = delete {
+            self.profiles.delete(i, mods, gd.as_deref());
+        } else if let Some(i) = switch {
+            self.profiles.switch_to(i, mods, gd.as_deref());
+        }
     }
 
     // ── A module's page ──────────────────────────────────────────────────
@@ -1125,38 +1023,38 @@ impl Menu {
             return Action::None;
         };
         let mut action = Action::None;
-        let hh = 56.0;
-        c.fill(x, y + hh, w, 1.0, theme::HAIRLINE);
+        let hh = 60.0;
 
-        let (back_w, back_h) = (84.0, 32.0);
-        let (back_x, back_y) = (x + 16.0, y + (hh - back_h) / 2.0);
+        // Top header bar.
+        let (back_w, back_h) = (92.0, 34.0);
+        let (back_x, back_y) = (x + 20.0, y + (hh - back_h) / 2.0);
         if ui.button(c, "menu:page:back", back_x, back_y, back_w, back_h, "Back", theme::I_ARROW_LEFT, ui::BTN_GHOST) {
             self.selected = None;
             self.page_at = ui.now;
             return Action::None;
         }
-        let div_x = back_x + back_w + 12.0;
-        c.fill(div_x, y + 14.0, 1.0, hh - 28.0, theme::HAIRLINE);
+        let div_x = back_x + back_w + 14.0;
+        c.fill(div_x, y + 16.0, 1.0, hh - 32.0, theme::HAIRLINE);
 
         let (name, category, icon, enabled, is_hud) = {
             let m = &mods.all[mi];
             (label(m.state.name), m.state.category, m.state.icon, m.state.enabled, m.is_hud())
         };
-        let ic = 34.0;
-        let (ix, iy) = (div_x + 14.0, y + (hh - ic) / 2.0);
-        c.round(ix, iy, ic, ic, 8.0, if enabled { 0xFF192C21 } else { theme::SUBTLE_HOVER });
-        c.outline(ix, iy, ic, ic, 8.0, 1.0, if enabled { 0x9922C55E } else { theme::HAIRLINE });
-        c.icon(icon, 16.0, ix + ic / 2.0, iy + ic / 2.0, if enabled { 0xFF86EFAC } else { theme::TEXT_STRONG });
-        let tx = ix + ic + 10.0;
-        c.text(font::SEMIBOLD, 14.5, &name, tx, y + 13.0, theme::TEXT_STRONG);
-        c.text(font::MEDIUM, 9.5, &category.to_uppercase(), tx, y + 32.0, theme::TEXT_MUTED);
-        let heart_x = tx + c.text_width(font::SEMIBOLD, 14.5, &name) + 10.0;
-        if heart(ui, c, "menu:page:fav", &mut mods.all[mi].state.favorite, heart_x, y + 16.0, true) {
+        let ic = 36.0;
+        let (ix, iy) = (div_x + 16.0, y + (hh - ic) / 2.0);
+        c.round(ix, iy, ic, ic, 10.0, if enabled { 0xFFF4F4F5 } else { theme::SUBTLE_HOVER });
+        c.icon(icon, 18.0, ix + ic / 2.0, iy + ic / 2.0, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });
+        let tx = ix + ic + 12.0;
+        c.text(font::SEMIBOLD, 15.0, &name, tx, y + 15.0, theme::TEXT_STRONG);
+        c.text(font::MEDIUM, 10.0, &category.to_uppercase(), tx, y + 34.0, theme::TEXT_MUTED);
+        let heart_x = tx + c.text_width(font::SEMIBOLD, 15.0, &name) + 12.0;
+        if heart(ui, c, "menu:page:fav", &mut mods.all[mi].state.favorite, heart_x, y + 18.0, true) {
             mods.changed();
         }
 
-        let pad = 16.0;
-        let (state_w, state_h) = (96.0, 32.0);
+        // Header action buttons (right aligned).
+        let pad = 20.0;
+        let (state_w, state_h) = (104.0, 34.0);
         let (state_x, state_y) = (x + w - pad - state_w, y + (hh - state_h) / 2.0);
         if state_button(ui, c, &format!("menu:page:on:{id}"), state_x, state_y, state_w, state_h, enabled, 10.0) {
             mods.all[mi].set_enabled(!enabled);
@@ -1164,8 +1062,8 @@ impl Menu {
         }
         let mut cur_right = state_x;
         if is_hud {
-            let hud_w = 104.0;
-            let hud_x = cur_right - 8.0 - hud_w;
+            let hud_w = 116.0;
+            let hud_x = cur_right - 10.0 - hud_w;
             if ui.button(c, "menu:page:hud", hud_x, state_y, hud_w, state_h, "Edit HUD", theme::I_MOVE, ui::BTN_PRIMARY) {
                 if !mods.all[mi].state.enabled {
                     mods.all[mi].set_enabled(true);
@@ -1175,23 +1073,25 @@ impl Menu {
             }
             cur_right = hud_x;
         }
-        let reset_w = 112.0;
-        let reset_x = cur_right - 8.0 - reset_w;
-        if ui.button(c, "menu:page:reset", reset_x, state_y, reset_w, state_h, "Reset", theme::I_RESET, ui::BTN_GHOST) {
+        let reset_w = 138.0;
+        let reset_x = cur_right - 10.0 - reset_w;
+        if ui.button(c, "menu:page:reset", reset_x, state_y, reset_w, state_h, "Reset Settings", theme::I_RESET, ui::BTN_GHOST) {
             mods.all[mi].reset_settings();
             mods.changed();
         }
 
-        let (bx, by, bw, bh) = (x + pad, y + hh + 12.0, w - pad * 2.0, h - hh - 24.0);
-        let gap = 14.0;
+        // Content: settings on the left, a tall live preview on the right (stacked on narrow windows).
+        let (bx, by, bw, bh) = (x + pad, y + hh + 4.0, w - pad * 2.0, h - hh - 20.0);
+        let gap = 16.0;
         if !mods.all[mi].has_preview() {
+            // Nothing to preview: the options fill the page edge to edge, lined up with the header.
             self.settings_panel(ui, c, mods, cfg, mi, bx, by, bw, bh);
-        } else if bw >= 580.0 {
-            let lw = (bw * 0.56).clamp(320.0, 520.0).min(bw - 190.0).max(300.0);
+        } else if bw >= 640.0 {
+            let lw = (bw * 0.56).clamp(340.0, 600.0).min(bw - 200.0).max(340.0);
             self.settings_panel(ui, c, mods, cfg, mi, bx, by, lw, bh);
             self.stage(ui, c, mods, mi, bx + lw + gap, by, bw - lw - gap, bh);
         } else {
-            let stage_h = (bh * 0.36).clamp(110.0, 190.0);
+            let stage_h = (bh * 0.38).clamp(120.0, 200.0);
             self.stage(ui, c, mods, mi, bx, by, bw, stage_h);
             self.settings_panel(ui, c, mods, cfg, mi, bx, by + stage_h + gap, bw, bh - stage_h - gap);
         }
@@ -1201,8 +1101,8 @@ impl Menu {
     /// The live preview: the module drawn large over a game scene, inside its own card.
     #[allow(clippy::too_many_arguments)]
     fn stage(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, mi: usize, x: f32, y: f32, w: f32, h: f32) {
-        c.round(x, y, w, h, 10.0, CARD);
-        c.outline(x, y, w, h, 10.0, 1.0, theme::HAIRLINE);
+        c.round(x, y, w, h, 12.0, CARD);
+        c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE);
         let inset = 6.0;
         let (ix, iy, iw, ih) = (x + inset, y + inset, w - inset * 2.0, h - inset * 2.0);
         c.push_clip(ix, iy, iw, ih);
@@ -1237,6 +1137,7 @@ impl Menu {
             c.icon(m.state.icon, 24.0, ix + iw / 2.0, cy, if enabled { theme::SOLID_FG } else { theme::TEXT_STRONG });
         }
         c.pop_clip();
+        // Tag in the corner.
         let tag = if enabled { "LIVE PREVIEW" } else { "PREVIEW  \u{b7}  OFF" };
         let tw = c.text_width(font::SEMIBOLD, 9.5, tag) + 18.0;
         c.round(ix + 10.0, iy + 10.0, tw, 20.0, 10.0, 0xB0000000);
@@ -1245,15 +1146,16 @@ impl Menu {
         c.text(font::SEMIBOLD, 9.5, tag, ix + 19.0, iy + 10.0 + (20.0 - lh) / 2.0, theme::TEXT_SECONDARY);
     }
 
+    /// What the module does, then its options in foldable sections (like a game client's module screen).
     #[allow(clippy::too_many_arguments)]
     fn settings_panel(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &UiConfig, mi: usize, x: f32, y: f32, w: f32, h: f32) {
-        c.round(x, y, w, h, 10.0, CARD);
-        c.outline(x, y, w, h, 10.0, 1.0, theme::HAIRLINE);
-        let pad = 16.0;
+        c.round(x, y, w, h, 12.0, CARD);
+        c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE);
+        let pad = 18.0;
         let desc = label(mods.all[mi].state.description);
         let text_w = w - pad * 2.0 - 26.0;
         let desc_h = wrap_height(c, font::REGULAR, 11.5, &desc, text_w, 16.0, 2);
-        let info_h = 34.0f32.max(desc_h + 18.0);
+        let info_h = 34.0f32.max(desc_h + 20.0);
         let iy = y + info_h / 2.0;
         c.circle(x + pad + 8.0, iy, 8.0, theme::SUBTLE_HOVER);
         let iw = c.text_width(font::BOLD, 10.0, "i");
@@ -1272,6 +1174,7 @@ impl Menu {
         self.detail.end(ui, c, cy - (top - off) + 8.0);
     }
 
+    /// One foldable group: a header row (chevron, title, option count) and, when open, the option rows. Returns the y below it.
     #[allow(clippy::too_many_arguments)]
     fn section(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &UiConfig, mi: usize, title: &str, part: Part, x: f32, y: f32, w: f32) -> f32 {
         let rows: Vec<usize> = match part {
@@ -1285,12 +1188,12 @@ impl Menu {
         let mod_id = mods.all[mi].state.id;
         let key = format!("{mod_id}:{title}");
         let open = !self.folded.contains(&key);
-        let (pad, hh) = (16.0, 32.0);
+        let (pad, hh) = (18.0, 34.0);
         let id = format!("menu:sec:{key}");
         let over = ui.hover(c, x + 6.0, y, w - 12.0, hh);
         let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
         if hv > 0.01 {
-            c.round(x + 6.0, y + 1.0, w - 12.0, hh - 2.0, 6.0, theme::alpha(0xFFFFFFFF, 0.04 * hv));
+            c.round(x + 6.0, y + 1.0, w - 12.0, hh - 2.0, 8.0, theme::alpha(0xFFFFFFFF, 0.04 * hv));
         }
         let rot = ui.anim_on(&format!("{id}#o"), open, 14.0);
         c.icon(
@@ -1300,12 +1203,12 @@ impl Menu {
             y + hh / 2.0,
             theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, hv),
         );
-        let lh = c.line_height(font::SEMIBOLD, 12.0);
-        c.text(font::SEMIBOLD, 12.0, title, x + pad + 22.0, y + (hh - lh) / 2.0, theme::TEXT_STRONG);
+        let lh = c.line_height(font::SEMIBOLD, 12.5);
+        c.text(font::SEMIBOLD, 12.5, title, x + pad + 22.0, y + (hh - lh) / 2.0, theme::TEXT_STRONG);
         let count = format!("{} {}", rows.len(), if rows.len() == 1 { "option" } else { "options" });
-        let cw = c.text_width(font::REGULAR, 10.0, &count);
-        let ch = c.line_height(font::REGULAR, 10.0);
-        c.text(font::REGULAR, 10.0, &count, x + w - pad - 8.0 - cw, y + (hh - ch) / 2.0, theme::TEXT_MUTED);
+        let cw = c.text_width(font::REGULAR, 10.5, &count);
+        let ch = c.line_height(font::REGULAR, 10.5);
+        c.text(font::REGULAR, 10.5, &count, x + w - pad - 8.0 - cw, y + (hh - ch) / 2.0, theme::TEXT_MUTED);
         if over {
             ui.cursor_hand = true;
         }
@@ -1316,7 +1219,7 @@ impl Menu {
         if !open {
             return y + 4.0;
         }
-        let (rx, rw) = (x + pad + 4.0, w - pad * 2.0 - 12.0);
+        let (rx, rw) = (x + pad + 4.0, w - pad * 2.0 - 14.0);
         for (n, si) in rows.iter().enumerate() {
             if n > 0 {
                 c.fill(rx, y, rw, 1.0, theme::HAIRLINE);
@@ -1344,7 +1247,7 @@ impl Menu {
             }
             y += rh;
         }
-        y + 8.0
+        y + 10.0
     }
 
     // ── Settings ─────────────────────────────────────────────────────────
@@ -1355,6 +1258,7 @@ impl Menu {
         self.s_title.set_bool(cfg.custom_title);
         self.s_notify.set_bool(cfg.notifications);
         self.s_activity.set_bool(cfg.share_activity);
+        // While the slider is held (and on the frame it is let go) the slider owns the value.
         let scale_held = ui.is_pressing("menu:pref:scale");
         if !scale_held && !self.scale_dragged {
             self.s_scale.set_num(cfg.scale);
@@ -1365,9 +1269,9 @@ impl Menu {
         self.s_next.set_key(cfg.music_next_key);
         self.s_prev.set_key(cfg.music_prev_key);
 
-        let wide = w >= 720.0;
-        let side_w = if wide { 270.0f32.min(w * 0.34) } else { 0.0 };
-        let lw = if wide { w - side_w - 16.0 } else { w };
+        let wide = w >= 760.0;
+        let side_w = if wide { 320.0f32.min(w * 0.36) } else { 0.0 };
+        let lw = if wide { w - side_w - 20.0 } else { w };
         let off = self.prefs.begin(ui, c, x, y, lw + 8.0, h);
         let mut ry = y - off;
         let cw = lw - 6.0;
@@ -1379,26 +1283,27 @@ impl Menu {
             action = a;
         }
         if !wide {
-            ry = self.profile_card(ui, c, mods, who, x, ry, cw) + 14.0;
-            ry = self.about_card(ui, c, x, ry, cw) + 14.0;
+            ry = self.profile_card(ui, c, mods, who, x, ry, cw) + 16.0;
+            ry = self.about_card(ui, c, x, ry, cw) + 16.0;
         }
         c.text(
             font::REGULAR,
-            10.5,
-            "Saved automatically to config/native-ui.json, native-modules.json & native-profiles.json.",
+            11.0,
+            "Saved automatically to config/native-ui.json and config/native-modules.json.",
             x + 4.0,
             ry,
             theme::TEXT_MUTED,
         );
-        ry += 26.0;
+        ry += 28.0;
         self.prefs.end(ui, c, ry + off - y);
 
         if wide {
             let sx = x + w - side_w;
             let sy = self.profile_card(ui, c, mods, who, sx, y, side_w);
-            self.about_card(ui, c, sx, sy + 14.0, side_w);
+            self.about_card(ui, c, sx, sy + 16.0, side_w);
         }
 
+        // Write back.
         let mut save = false;
         if self.s_title.as_bool() != cfg.custom_title {
             cfg.custom_title = self.s_title.as_bool();
@@ -1418,11 +1323,11 @@ impl Menu {
         } else if self.scale_dragged {
             self.scale_dragged = false;
             if (scale - cfg.scale).abs() > 0.001 {
-                cfg.scale = scale;
+                cfg.scale = scale; // Applied on release so the window doesn't jump under the cursor.
                 save = true;
             }
         } else if (scale - cfg.scale).abs() > 0.001 {
-            cfg.scale = scale;
+            cfg.scale = scale; // The reset button.
             save = true;
         }
         if self.s_menu.as_key() != cfg.menu_key && self.s_menu.as_key() != -1 {
@@ -1448,9 +1353,10 @@ impl Menu {
         action
     }
 
+    /// A settings card: icon tile, title and a hint on top, then the rows. Returns the y below it.
     #[allow(clippy::too_many_arguments)]
     fn group(&mut self, ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, icon: u32, title: &str, hint: &str, which: Group) -> f32 {
-        let head = 58.0;
+        let head = 62.0;
         let rows: Vec<&mut Setting> = match which {
             Group::General => vec![&mut self.s_title, &mut self.s_notify, &mut self.s_activity, &mut self.s_scale],
             Group::Keys => vec![&mut self.s_menu, &mut self.s_chat, &mut self.s_play, &mut self.s_next, &mut self.s_prev],
@@ -1461,33 +1367,33 @@ impl Menu {
         card_head(c, x, y, w, icon, title, hint);
         let mut cy = y + head;
         for s in rows {
-            c.fill(x + 16.0, cy, w - 32.0, 1.0, theme::HAIRLINE);
+            c.fill(x + 18.0, cy, w - 36.0, 1.0, theme::HAIRLINE);
             let sid = s.id;
             let rh = Widgets::row_height(s);
-            self.widgets.row(ui, c, &format!("menu:pref:{sid}"), x + 16.0, cy, w - 32.0, s, None);
+            self.widgets.row(ui, c, &format!("menu:pref:{sid}"), x + 18.0, cy, w - 36.0, s, None);
             cy += rh;
         }
-        y + h + 14.0
+        y + h + 16.0
     }
 
     fn hud_card(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, x: f32, y: f32, w: f32) -> (f32, Action) {
         let mut action = Action::None;
-        let h = 58.0 + 70.0 + 14.0;
+        let h = 62.0 + 74.0 + 14.0;
         card_frame(ui, c, "menu:pref:card:hud", x, y, w, h);
         card_head(c, x, y, w, theme::I_LAYOUT, "HUD", "Where your HUD mods sit on screen");
-        let ty = y + 58.0;
+        let ty = y + 62.0;
         let gap = 10.0;
-        let tw = (w - 32.0 - gap * 2.0) / 3.0;
-        let th = 70.0;
-        if self.tile(ui, c, "menu:pref:edit", x + 16.0, ty, tw, th, theme::I_MOVE, "Edit layout", "Drag and resize", false) {
+        let tw = (w - 36.0 - gap * 2.0) / 3.0;
+        let th = 74.0;
+        if self.tile(ui, c, "menu:pref:edit", x + 18.0, ty, tw, th, theme::I_MOVE, "Edit layout", "Drag and resize", false) {
             action = Action::EditHud;
         }
-        if self.tile(ui, c, "menu:pref:positions", x + 16.0 + tw + gap, ty, tw, th, theme::I_RESET, "Reset positions", "Back to defaults", false) {
+        if self.tile(ui, c, "menu:pref:positions", x + 18.0 + tw + gap, ty, tw, th, theme::I_RESET, "Reset positions", "Back to defaults", false) {
             mods.reset_positions();
         }
         let label = if self.confirm_reset { "Click to confirm" } else { "Reset all mods" };
         let hint = if self.confirm_reset { "Settings + on/off" } else { "Every setting" };
-        if self.tile(ui, c, "menu:pref:reset", x + 16.0 + (tw + gap) * 2.0, ty, tw, th, theme::I_POWER, label, hint, true) {
+        if self.tile(ui, c, "menu:pref:reset", x + 18.0 + (tw + gap) * 2.0, ty, tw, th, theme::I_POWER, label, hint, true) {
             if self.confirm_reset {
                 for m in &mut mods.all {
                     m.reset_settings();
@@ -1501,12 +1407,13 @@ impl Menu {
                 self.confirm_reset = true;
             }
         }
-        if self.confirm_reset && ui.pressed && !ui.hover(c, x + 16.0 + (tw + gap) * 2.0, ty, tw, th) {
-            self.confirm_reset = false;
+        if self.confirm_reset && ui.pressed && !ui.hover(c, x + 18.0 + (tw + gap) * 2.0, ty, tw, th) {
+            self.confirm_reset = false; // Clicking anywhere else cancels.
         }
-        (y + h + 14.0, action)
+        (y + h + 16.0, action)
     }
 
+    /// A square-ish action tile with an icon, a title and a hint.
     #[allow(clippy::too_many_arguments)]
     fn tile(&mut self, ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32, icon: u32, title: &str, hint: &str, danger: bool) -> bool {
         let over = ui.hover(c, x, y, w, h);
@@ -1521,8 +1428,16 @@ impl Menu {
             theme::mix(theme::SUBTLE, theme::SUBTLE_HOVER, hv)
         };
         let sy = y + pr * 1.5;
-        c.round(x, sy, w, h, 10.0, bg);
-        c.outline(x, sy, w, h, 10.0, 1.0, if armed { 0x4DEF4444 } else { theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, hv) });
+        c.round(x, sy, w, h, 12.0, bg);
+        c.outline(
+            x,
+            sy,
+            w,
+            h,
+            12.0,
+            1.0,
+            if armed { 0x4DEF4444 } else { theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, hv) },
+        );
         let fg = if armed {
             0xFFFCA5A5
         } else if danger {
@@ -1530,11 +1445,11 @@ impl Menu {
         } else {
             theme::TEXT_STRONG
         };
-        c.icon(icon, 14.0, x + 20.0, sy + 20.0, fg);
-        let t = c.ellipsize(font::SEMIBOLD, 11.5, title, w - 20.0);
-        c.text(font::SEMIBOLD, 11.5, &t, x + 12.0, sy + h - 34.0, fg);
-        let hnt = c.ellipsize(font::REGULAR, 10.0, hint, w - 20.0);
-        c.text(font::REGULAR, 10.0, &hnt, x + 12.0, sy + h - 18.0, theme::TEXT_MUTED);
+        c.icon(icon, 15.0, x + 22.0, sy + 22.0, fg);
+        let t = c.ellipsize(font::SEMIBOLD, 12.0, title, w - 24.0);
+        c.text(font::SEMIBOLD, 12.0, &t, x + 12.0, sy + h - 36.0, fg);
+        let hnt = c.ellipsize(font::REGULAR, 10.5, hint, w - 24.0);
+        c.text(font::REGULAR, 10.5, &hnt, x + 12.0, sy + h - 19.0, theme::TEXT_MUTED);
         if over {
             ui.cursor_hand = true;
         }
@@ -1543,43 +1458,43 @@ impl Menu {
 
     #[allow(clippy::too_many_arguments)]
     fn profile_card(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &Modules, who: Option<&str>, x: f32, y: f32, w: f32) -> f32 {
-        let h = 186.0;
+        let h = 196.0;
         card_frame(ui, c, "menu:pref:card:me", x, y, w, h);
-        glow(c, x, y, w, 82.0, 12.0, 0x10FFFFFF);
+        glow(c, x, y, w, 90.0, 16.0, 0x10FFFFFF);
         let name = who.unwrap_or("Player");
-        let av = 50.0;
-        avatar(c, name, x + 16.0, y + 16.0, av, 10.0);
-        c.circle(x + 16.0 + av - 4.0, y + 16.0 + av - 4.0, 6.5, 0xFF0B0C10);
-        c.circle(x + 16.0 + av - 4.0, y + 16.0 + av - 4.0, 4.5, theme::ONLINE);
-        let tx = x + 16.0 + av + 12.0;
-        let n = c.ellipsize(font::SEMIBOLD, 15.0, name, w - (tx - x) - 14.0);
-        c.text(font::SEMIBOLD, 15.0, &n, tx, y + 20.0, theme::TEXT_STRONG);
-        let status = c.ellipsize(font::REGULAR, 10.5, "Native Client \u{b7} Rust Edition", w - (tx - x) - 14.0);
-        c.text(font::REGULAR, 10.5, &status, tx, y + 42.0, theme::TEXT_MUTED);
+        let av = 56.0;
+        avatar(c, name, x + 18.0, y + 18.0, av, 12.0);
+        c.circle(x + 18.0 + av - 4.0, y + 18.0 + av - 4.0, 7.0, 0xFF05060A);
+        c.circle(x + 18.0 + av - 4.0, y + 18.0 + av - 4.0, 5.0, theme::ONLINE);
+        let tx = x + 18.0 + av + 14.0;
+        let n = c.ellipsize(font::SEMIBOLD, 16.0, name, w - (tx - x) - 16.0);
+        c.text(font::SEMIBOLD, 16.0, &n, tx, y + 24.0, theme::TEXT_STRONG);
+        let status = c.ellipsize(font::REGULAR, 11.0, "Native Client \u{b7} Rust Edition", w - (tx - x) - 16.0);
+        c.text(font::REGULAR, 11.0, &status, tx, y + 48.0, theme::TEXT_MUTED);
         let on = mods.all.iter().filter(|m| m.state.enabled).count();
-        let sy = y + 84.0;
-        let sw = (w - 32.0 - 8.0) / 2.0;
-        stat(c, x + 16.0, sy, sw, &on.to_string(), &format!("of {} mods on", mods.all.len()));
-        stat(c, x + 16.0 + sw + 8.0, sy, sw, &self.profiles.list.len().to_string(), "profiles");
-        let by = y + h - 16.0 - 32.0;
-        if ui.button(c, "menu:pref:locker", x + 16.0, by, w - 32.0, 32.0, "Open locker", theme::I_SHIRT, ui::BTN_PRIMARY) {
+        let sy = y + 92.0;
+        let sw = (w - 36.0 - 10.0) / 2.0;
+        stat(c, x + 18.0, sy, sw, &on.to_string(), &format!("of {} mods on", mods.all.len()));
+        stat(c, x + 18.0 + sw + 10.0, sy, sw, "\u{2014}", "cosmetics owned");
+        let by = y + h - 18.0 - 34.0;
+        if ui.button(c, "menu:pref:locker", x + 18.0, by, w - 36.0, 34.0, "Open locker", theme::I_SHIRT, ui::BTN_PRIMARY) {
             self.set_tab(TAB_COSMETICS, ui.now);
         }
         y + h
     }
 
     fn about_card(&mut self, ui: &mut Ui, c: &mut Canvas, x: f32, y: f32, w: f32) -> f32 {
-        let h = 108.0;
+        let h = 112.0;
         card_frame(ui, c, "menu:pref:card:about", x, y, w, h);
-        let lg = 32.0;
+        let lg = 34.0;
         if let Some(logo) = self.logo.clone() {
-            c.image(&logo, x + 16.0, y + 14.0, lg, lg, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
+            c.image(&logo, x + 18.0, y + 16.0, lg, lg, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
         }
-        c.text(font::SEMIBOLD, 13.5, "Native Client", x + 16.0 + lg + 10.0, y + 15.0, theme::TEXT_STRONG);
-        c.text(font::REGULAR, 10.5, "Rust Edition  \u{b7}  Minecraft 26.3", x + 16.0 + lg + 10.0, y + 34.0, theme::TEXT_MUTED);
-        c.fill(x + 16.0, y + 60.0, w - 32.0, 1.0, theme::HAIRLINE);
-        let t = c.ellipsize(font::REGULAR, 10.5, "Updates install from the launcher. playnative.net", w - 32.0);
-        c.text(font::REGULAR, 10.5, &t, x + 16.0, y + 76.0, theme::TEXT_SECONDARY);
+        c.text(font::SEMIBOLD, 14.0, "Native Client", x + 18.0 + lg + 12.0, y + 17.0, theme::TEXT_STRONG);
+        c.text(font::REGULAR, 11.0, "Rust Edition  \u{b7}  Minecraft 26.3", x + 18.0 + lg + 12.0, y + 36.0, theme::TEXT_MUTED);
+        c.fill(x + 18.0, y + 64.0, w - 36.0, 1.0, theme::HAIRLINE);
+        let t = c.ellipsize(font::REGULAR, 11.0, "Updates install from the launcher. playnative.net", w - 36.0);
+        c.text(font::REGULAR, 11.0, &t, x + 18.0, y + 80.0, theme::TEXT_SECONDARY);
         y + h
     }
 }
@@ -1590,21 +1505,6 @@ enum Group {
     Keys,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn bar_icon(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, s: f32, icon: u32, active: bool, tip: &str) -> bool {
-    let over = ui.hover(c, x, y, s, s);
-    let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-    let on = ui.anim_on(&format!("{id}#on"), active, 14.0);
-    c.round(x, y, s, s, 6.0, theme::mix(theme::mix(0xFF171920, 0xFF222530, hv), 0x334F86F7, on));
-    c.outline(x, y, s, s, 6.0, 1.0, theme::mix(theme::HAIRLINE, 0x884F86F7, on.max(hv * 0.4)));
-    c.icon(icon, 13.0, x + s / 2.0, y + s / 2.0, theme::mix(theme::TEXT_SECONDARY, 0xFFFFFFFF, on.max(hv)));
-    if over {
-        ui.cursor_hand = true;
-        ui.tip(tip);
-    }
-    ui.clicked(c, id, x, y, s, s)
-}
-
 /// `ModuleKeybinds.conflict` for the toggle key of module `mi`.
 pub fn conflict(mods: &Modules, mi: usize) -> Option<String> {
     let b = &mods.all[mi].state.toggle_key;
@@ -1612,6 +1512,7 @@ pub fn conflict(mods: &Modules, mi: usize) -> Option<String> {
         return None;
     }
     let Kind::Binding { key, modifiers } = b.kind else { return None };
+    // Reserved by Native itself: the menu key (Right Shift), chat (Y), voice call control (V, N).
     if modifiers & 6 == 0 && key == 344 {
         return Some("Reserved: Native menu".to_owned());
     }
@@ -1625,6 +1526,7 @@ pub fn conflict(mods: &Modules, mi: usize) -> Option<String> {
         if i != mi && matches!(m.state.toggle_key.kind, Kind::Binding { key: k, modifiers: md } if k == key && md == modifiers) {
             return Some(format!("Conflict: {}", m.state.name));
         }
+        // Hold-to-use controls poll the key state independently of modifiers, even while disabled.
         for s in m.state.all_settings() {
             if !std::ptr::eq(s, b) && matches!(s.kind, Kind::Binding { key: k, modifiers: md } if k == key && md == modifiers) {
                 return Some(format!("Conflict: {} / {}", label(m.state.name), label(s.label)));
@@ -1641,6 +1543,7 @@ fn hud_scale(m: &Module) -> f32 {
     m.state.hud.as_ref().map_or(1.0, |h| h.scale())
 }
 
+/// Sets the module's size without the step snapping (the preview fits the module to its stage).
 fn set_hud_scale(m: &mut Module, v: f32) {
     if let Some(s) = m.state.hud.as_mut().and_then(|h| h.get_mut(super::module::SCALE))
         && let Kind::Num { value, .. } = &mut s.kind
@@ -1678,9 +1581,9 @@ pub fn glow(c: &mut Canvas, x: f32, y: f32, w: f32, gh: f32, r: f32, top: u32) {
 }
 
 pub fn panel(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
-    c.shadow(x, y + 4.0, w, h, 14.0, 22.0, 0x88000000);
-    c.round(x, y, w, h, 14.0, PANEL_BG);
-    c.outline(x, y, w, h, 14.0, 1.0, theme::HAIRLINE_STRONG);
+    c.shadow(x, y + 4.0, w, h, 16.0, 24.0, 0x88000000);
+    c.round(x, y, w, h, 16.0, PANEL_BG);
+    c.outline(x, y, w, h, 16.0, 1.0, theme::HAIRLINE_STRONG);
 }
 
 pub fn header(c: &mut Canvas, title: &str, x: f32, y: f32, h: f32) -> f32 {
@@ -1689,6 +1592,67 @@ pub fn header(c: &mut Canvas, title: &str, x: f32, y: f32, h: f32) -> f32 {
     x + 20.0 + c.text_width(font::SEMIBOLD, 18.0, title)
 }
 
+/// Square icon tile with an active marker; the label shows up as a tooltip.
+#[allow(clippy::too_many_arguments)]
+/// The small red NEW pill of a mod added in this version.
+fn new_badge(c: &mut Canvas, x: f32, y: f32) {
+    let tw = c.text_width(font::BOLD, 8.5, "NEW");
+    c.round(x, y, tw + 10.0, 15.0, 7.5, theme::alpha(NEW_RED, 0.18));
+    c.outline(x, y, tw + 10.0, 15.0, 7.5, 1.0, theme::alpha(NEW_RED, 0.55));
+    let lh = c.line_height(font::BOLD, 8.5);
+    c.text(font::BOLD, 8.5, "NEW", x + 5.0, y + (15.0 - lh) / 2.0, 0xFFFCA5A5);
+}
+
+/// A module's icon: its colour artwork when it has one, else its glyph.
+fn module_icon(c: &mut Canvas, art: Option<&Arc<Image>>, icon: u32, size: f32, cx: f32, cy: f32, color: u32) {
+    match art {
+        Some(img) => {
+            let s = size * 1.35;
+            c.image(img, cx - s / 2.0, cy - s / 2.0, s, s, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
+        }
+        None => c.icon(icon, size, cx, cy, color),
+    }
+}
+
+fn rail_tile(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, icon: u32, label: &str, on: bool) -> bool {
+    rail_tile_sized(ui, c, id, x, y, RAIL, icon, label, on)
+}
+
+/// A rail tile `s` wide and tall (smaller when the window is too short for the full size).
+#[allow(clippy::too_many_arguments)]
+fn rail_tile_sized(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, s: f32, icon: u32, label: &str, on: bool) -> bool {
+    let over = ui.hover(c, x, y, s, s);
+    let click = ui.clicked(c, id, x, y, s, s);
+    let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
+    let sel = ui.anim_on(&format!("{id}#on"), on, 16.0);
+    c.round(x, y, s, s, 15.0, theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv * 0.85), 0x16FFFFFF, sel));
+    if sel > 0.01 {
+        c.outline(x, y, s, s, 15.0, 1.0, theme::alpha(theme::HAIRLINE_STRONG, sel));
+        let bh = 18.0 * sel;
+        c.round(x - 5.0, y + (s - bh) / 2.0, 3.0, bh, 1.5, theme::alpha(theme::WHITE, sel));
+    }
+    let fg = theme::mix(theme::mix(theme::TEXT_MUTED, theme::TEXT_SECONDARY, hv), theme::TEXT_STRONG, sel);
+    if icon != 0 {
+        c.icon(icon, 24.0 * s / RAIL, x + s / 2.0, y + s / 2.0, fg);
+    }
+    if over {
+        ui.tip(label);
+    }
+    click
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pill_icon(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, s: f32, icon: u32, on: bool) -> bool {
+    let over = ui.hover(c, x, y, s, s);
+    let click = ui.clicked(c, id, x, y, s, s);
+    let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
+    let sel = ui.anim_on(&format!("{id}#on"), on, 16.0);
+    c.round(x, y, s, s, 9.0, theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv), 0xFFF4F4F5, sel));
+    c.icon(icon, 14.0, x + s / 2.0, y + s / 2.0, theme::mix(theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, hv), theme::SOLID_FG, sel));
+    click
+}
+
+/// The pin heart; visible on hover or when pinned. True when it took the click.
 fn heart(ui: &mut Ui, c: &mut Canvas, id: &str, favorite: &mut bool, x: f32, y: f32, visible: bool) -> bool {
     let s = 24.0;
     let over = ui.hover(c, x, y, s, s);
@@ -1702,6 +1666,7 @@ fn heart(ui: &mut Ui, c: &mut Canvas, id: &str, favorite: &mut bool, x: f32, y: 
     if v > 0.01 {
         c.round(x, y, s, s, s / 2.0, theme::alpha(theme::SUBTLE_HOVER, hv * v));
         let col = theme::alpha(theme::mix(theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, hv), theme::TEXT_STRONG, fav), v);
+        // Pinned: a solid white heart (the icon font only has outlines, so stack shrinking copies to fill it).
         if fav > 0.01 {
             let fill = theme::alpha(theme::TEXT_STRONG, fav * v);
             let mut fs = 11.5;
@@ -1715,6 +1680,7 @@ fn heart(ui: &mut Ui, c: &mut Canvas, id: &str, favorite: &mut bool, x: f32, y: 
     click || (over && ui.pressed)
 }
 
+/// The wide ENABLED / DISABLED bar of a Feather card. True when clicked.
 #[allow(clippy::too_many_arguments)]
 fn state_button(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32, enabled: bool, fs: f32) -> bool {
     let over = ui.hover(c, x, y, w, h);
@@ -1722,8 +1688,8 @@ fn state_button(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h
     let hv = ui.anim_on(&format!("{id}#h"), over, 16.0);
     let on = ui.anim_on(&format!("{id}#on"), enabled, 14.0);
     let tint = theme::mix(OFF, ON, on);
-    c.round(x, y, w, h, 6.0, theme::alpha(tint, 0.16 + 0.1 * hv));
-    c.outline(x, y, w, h, 6.0, 1.0, theme::alpha(tint, 0.45 + 0.25 * hv));
+    c.round(x, y, w, h, 8.0, theme::alpha(tint, 0.16 + 0.1 * hv));
+    c.outline(x, y, w, h, 8.0, 1.0, theme::alpha(tint, 0.35 + 0.25 * hv));
     let t = if enabled { "ENABLED" } else { "DISABLED" };
     let tw = c.text_width(font::BOLD, fs, t);
     let lh = c.line_height(font::BOLD, fs);
@@ -1737,35 +1703,35 @@ fn state_button(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h
 fn card_frame(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32) {
     let over = ui.hover(c, x, y, w, h);
     let hv = ui.anim_on(id, over, 10.0);
-    c.round(x, y, w, h, 12.0, theme::mix(CARD, CARD_HOVER, hv));
-    glow(c, x, y, w, h.min(64.0), 12.0, 0x0AFFFFFF);
-    c.outline(x, y, w, h, 12.0, 1.0, theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, hv));
+    c.round(x, y, w, h, 16.0, theme::mix(CARD, CARD_HOVER, hv));
+    glow(c, x, y, w, h.min(70.0), 16.0, 0x0AFFFFFF);
+    c.outline(x, y, w, h, 16.0, 1.0, theme::mix(theme::HAIRLINE, theme::HAIRLINE_STRONG, hv));
 }
 
 fn card_head(c: &mut Canvas, x: f32, y: f32, w: f32, icon: u32, title: &str, hint: &str) {
-    let ic = 32.0;
-    c.round(x + 16.0, y + 13.0, ic, ic, 8.0, theme::SUBTLE_HOVER);
-    c.outline(x + 16.0, y + 13.0, ic, ic, 8.0, 1.0, theme::HAIRLINE);
-    c.icon(icon, 15.0, x + 16.0 + ic / 2.0, y + 13.0 + ic / 2.0, theme::TEXT_STRONG);
-    let tx = x + 16.0 + ic + 12.0;
-    c.text(font::SEMIBOLD, 13.5, title, tx, y + 13.0, theme::TEXT_STRONG);
-    let hint = c.ellipsize(font::REGULAR, 10.5, hint, w - (tx - x) - 16.0);
-    c.text(font::REGULAR, 10.5, &hint, tx, y + 31.0, theme::TEXT_MUTED);
+    let ic = 34.0;
+    c.round(x + 18.0, y + 14.0, ic, ic, 10.0, theme::SUBTLE_HOVER);
+    c.outline(x + 18.0, y + 14.0, ic, ic, 10.0, 1.0, theme::HAIRLINE);
+    c.icon(icon, 16.0, x + 18.0 + ic / 2.0, y + 14.0 + ic / 2.0, theme::TEXT_STRONG);
+    let tx = x + 18.0 + ic + 14.0;
+    c.text(font::SEMIBOLD, 14.0, title, tx, y + 15.0, theme::TEXT_STRONG);
+    let hint = c.ellipsize(font::REGULAR, 11.0, hint, w - (tx - x) - 18.0);
+    c.text(font::REGULAR, 11.0, &hint, tx, y + 34.0, theme::TEXT_MUTED);
 }
 
 fn stat(c: &mut Canvas, x: f32, y: f32, w: f32, value: &str, label: &str) {
-    c.round(x, y, w, 42.0, 8.0, theme::SUBTLE);
-    c.text(font::BOLD, 14.5, value, x + 10.0, y + 6.0, theme::TEXT_STRONG);
-    let l = c.ellipsize(font::REGULAR, 10.0, label, w - 20.0);
-    c.text(font::REGULAR, 10.0, &l, x + 10.0, y + 24.0, theme::TEXT_MUTED);
+    c.round(x, y, w, 44.0, 10.0, theme::SUBTLE);
+    c.text(font::BOLD, 15.0, value, x + 12.0, y + 6.0, theme::TEXT_STRONG);
+    let l = c.ellipsize(font::REGULAR, 10.5, label, w - 24.0);
+    c.text(font::REGULAR, 10.5, &l, x + 12.0, y + 25.0, theme::TEXT_MUTED);
 }
 
 pub fn disabled(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32, label: &str) {
-    c.round(x, y, w, h, 8.0, theme::SUBTLE);
-    c.outline(x, y, w, h, 8.0, 1.0, theme::HAIRLINE);
-    let tw = c.text_width(font::SEMIBOLD, 12.0, label);
-    let lh = c.line_height(font::SEMIBOLD, 12.0);
-    c.text(font::SEMIBOLD, 12.0, label, x + (w - tw) / 2.0, y + (h - lh) / 2.0, theme::TEXT_MUTED);
+    c.round(x, y, w, h, 10.0, theme::SUBTLE);
+    c.outline(x, y, w, h, 10.0, 1.0, theme::HAIRLINE);
+    let tw = c.text_width(font::SEMIBOLD, 12.5, label);
+    let lh = c.line_height(font::SEMIBOLD, 12.5);
+    c.text(font::SEMIBOLD, 12.5, label, x + (w - tw) / 2.0, y + (h - lh) / 2.0, theme::TEXT_MUTED);
 }
 
 /// Word-wraps text into at most `max_lines` lines; the last one is ellipsized. Returns the y below it.

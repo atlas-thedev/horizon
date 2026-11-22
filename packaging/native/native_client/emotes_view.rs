@@ -1,10 +1,10 @@
-//! The Emotes section of the unified Locker: shares the left Locker sidebar (`locker::draw_sidebar`), center
+//! The Emotes tab: the account's emotes (equipped cards and the store's), the 8 wheel slots per page and the 3D preview.
 //! search + A-Z sort + 3-column square rounded emote cards with emerald `✓ Equipped` bottom strip and centered
 //! names below, and right-hand 2×4 vertical wheel slots panel (Slots 1..8 per page, numbered top-left, remove
 //! button on occupied slots, `◀ Page N ▶` footer, plus Play & Replay actions).
 
 use super::emote_wheel::poster_url;
-use super::locker::{self, SIDEBAR_EMOTES, SIDEBAR_W, session_lock};
+use super::locker::session_lock;
 use super::menu::{clamp01, ease, empty};
 use super::net::{self, Pic};
 use super::preview3d;
@@ -22,8 +22,6 @@ pub enum EmotesAct {
     None,
     /// Played an emote in the world: close the menu.
     Close,
-    /// Clicked a cosmetic slot (0..7) in the shared Locker sidebar.
-    SwitchCosmetic(usize),
 }
 
 /// One emote of the account's catalogue (`me.catalog`).
@@ -159,17 +157,8 @@ impl EmotesView {
     /// Draws the unified Emotes Locker view.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, who: &str, x: f32, y: f32, w: f32, h: f32, in_world: bool) -> EmotesAct {
-        // 1. Shared Locker Left Sidebar (~194 px)
-        let sb_w = SIDEBAR_W.min(w * 0.24);
-        if let Some(nav) = locker::draw_sidebar(ui, c, SIDEBAR_EMOTES, x, y, sb_w, h)
-            && nav != SIDEBAR_EMOTES
-        {
-            return EmotesAct::SwitchCosmetic(nav);
-        }
-        c.fill(x + sb_w + 10.0, y, 1.0, h, theme::HAIRLINE);
-
-        let body_x = x + sb_w + 22.0;
-        let body_w = (w - sb_w - 22.0).max(200.0);
+        // The Emotes tab owns the whole page (the menu's rail switches to Cosmetics).
+        let (body_x, body_w) = (x, w.max(200.0));
 
         if !net::signed_in() {
             session_lock(ui, c, "emotes:lock", body_x, y, body_w, h);

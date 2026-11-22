@@ -1,0 +1,614 @@
+{
+ "library": [
+  {
+   "name": "gauge",
+   "codepoint": "F600"
+  },
+  {
+   "name": "cursor",
+   "codepoint": "F601"
+  },
+  {
+   "name": "keyboard",
+   "codepoint": "F602"
+  },
+  {
+   "name": "keys-wasd",
+   "codepoint": "F603"
+  },
+  {
+   "name": "move",
+   "codepoint": "F604"
+  },
+  {
+   "name": "crosshair",
+   "codepoint": "F605"
+  },
+  {
+   "name": "brightness",
+   "codepoint": "F606"
+  },
+  {
+   "name": "sword",
+   "codepoint": "F607"
+  },
+  {
+   "name": "shield",
+   "codepoint": "F608"
+  },
+  {
+   "name": "shirt",
+   "codepoint": "F609"
+  },
+  {
+   "name": "cube",
+   "codepoint": "F60A"
+  },
+  {
+   "name": "layers",
+   "codepoint": "F60B"
+  },
+  {
+   "name": "eye",
+   "codepoint": "F60C"
+  },
+  {
+   "name": "eye-off",
+   "codepoint": "F60D"
+  },
+  {
+   "name": "sun",
+   "codepoint": "F60E"
+  },
+  {
+   "name": "sparkles",
+   "codepoint": "F60F"
+  },
+  {
+   "name": "brush",
+   "codepoint": "F610"
+  },
+  {
+   "name": "palette",
+   "codepoint": "F611"
+  },
+  {
+   "name": "image",
+   "codepoint": "F612"
+  },
+  {
+   "name": "video",
+   "codepoint": "F613"
+  },
+  {
+   "name": "film",
+   "codepoint": "F614"
+  },
+  {
+   "name": "music",
+   "codepoint": "F615"
+  },
+  {
+   "name": "volume",
+   "codepoint": "F616"
+  },
+  {
+   "name": "volume-mute",
+   "codepoint": "F617"
+  },
+  {
+   "name": "mic",
+   "codepoint": "F618"
+  },
+  {
+   "name": "mic-off",
+   "codepoint": "F619"
+  },
+  {
+   "name": "broadcast",
+   "codepoint": "F61A"
+  },
+  {
+   "name": "shuffle",
+   "codepoint": "F61B"
+  },
+  {
+   "name": "repeat",
+   "codepoint": "F61C"
+  },
+  {
+   "name": "infinity",
+   "codepoint": "F61D"
+  },
+  {
+   "name": "map",
+   "codepoint": "F61E"
+  },
+  {
+   "name": "map-pin",
+   "codepoint": "F61F"
+  },
+  {
+   "name": "route",
+   "codepoint": "F620"
+  },
+  {
+   "name": "flag",
+   "codepoint": "F621"
+  },
+  {
+   "name": "flag-checkered",
+   "codepoint": "F622"
+  },
+  {
+   "name": "warning",
+   "codepoint": "F623"
+  },
+  {
+   "name": "star",
+   "codepoint": "F624"
+  },
+  {
+   "name": "diamond",
+   "codepoint": "F625"
+  },
+  {
+   "name": "crown",
+   "codepoint": "F626"
+  },
+  {
+   "name": "trophy",
+   "codepoint": "F627"
+  },
+  {
+   "name": "medal",
+   "codepoint": "F628"
+  },
+  {
+   "name": "book",
+   "codepoint": "F629"
+  },
+  {
+   "name": "backpack",
+   "codepoint": "F62A"
+  },
+  {
+   "name": "chest",
+   "codepoint": "F62B"
+  },
+  {
+   "name": "coins",
+   "codepoint": "F62C"
+  },
+  {
+   "name": "flask",
+   "codepoint": "F62D"
+  },
+  {
+   "name": "cauldron",
+   "codepoint": "F62E"
+  },
+  {
+   "name": "apple",
+   "codepoint": "F62F"
+  },
+  {
+   "name": "drumstick",
+   "codepoint": "F630"
+  },
+  {
+   "name": "heart",
+   "codepoint": "F631"
+  },
+  {
+   "name": "heart-broken",
+   "codepoint": "F632"
+  },
+  {
+   "name": "bolt",
+   "codepoint": "F633"
+  },
+  {
+   "name": "leaf",
+   "codepoint": "F634"
+  },
+  {
+   "name": "feather",
+   "codepoint": "F635"
+  },
+  {
+   "name": "rocket",
+   "codepoint": "F636"
+  },
+  {
+   "name": "hourglass",
+   "codepoint": "F637"
+  },
+  {
+   "name": "stopwatch",
+   "codepoint": "F638"
+  },
+  {
+   "name": "calendar",
+   "codepoint": "F639"
+  },
+  {
+   "name": "cloud-download",
+   "codepoint": "F63A"
+  },
+  {
+   "name": "cloud-upload",
+   "codepoint": "F63B"
+  },
+  {
+   "name": "document",
+   "codepoint": "F63C"
+  },
+  {
+   "name": "checkbox",
+   "codepoint": "F63D"
+  },
+  {
+   "name": "signal",
+   "codepoint": "F63E"
+  },
+  {
+   "name": "trend",
+   "codepoint": "F63F"
+  },
+  {
+   "name": "server",
+   "codepoint": "F640"
+  },
+  {
+   "name": "database",
+   "codepoint": "F641"
+  },
+  {
+   "name": "network",
+   "codepoint": "F642"
+  },
+  {
+   "name": "plug",
+   "codepoint": "F643"
+  },
+  {
+   "name": "cpu",
+   "codepoint": "F644"
+  },
+  {
+   "name": "memory",
+   "codepoint": "F645"
+  },
+  {
+   "name": "thermometer",
+   "codepoint": "F646"
+  },
+  {
+   "name": "snowflake",
+   "codepoint": "F647"
+  },
+  {
+   "name": "flame",
+   "codepoint": "F648"
+  },
+  {
+   "name": "droplet",
+   "codepoint": "F649"
+  },
+  {
+   "name": "wind",
+   "codepoint": "F64A"
+  },
+  {
+   "name": "frame",
+   "codepoint": "F64B"
+  },
+  {
+   "name": "window",
+   "codepoint": "F64C"
+  },
+  {
+   "name": "copy",
+   "codepoint": "F64D"
+  },
+  {
+   "name": "layers-plus",
+   "codepoint": "F64E"
+  },
+  {
+   "name": "grid",
+   "codepoint": "F64F"
+  },
+  {
+   "name": "fullscreen",
+   "codepoint": "F650"
+  },
+  {
+   "name": "zoom-out",
+   "codepoint": "F651"
+  },
+  {
+   "name": "zoom-in",
+   "codepoint": "F652"
+  },
+  {
+   "name": "expand",
+   "codepoint": "F653"
+  },
+  {
+   "name": "collapse",
+   "codepoint": "F654"
+  },
+  {
+   "name": "swap",
+   "codepoint": "F655"
+  },
+  {
+   "name": "code",
+   "codepoint": "F656"
+  },
+  {
+   "name": "terminal",
+   "codepoint": "F657"
+  },
+  {
+   "name": "bug",
+   "codepoint": "F658"
+  },
+  {
+   "name": "shield-check",
+   "codepoint": "F659"
+  },
+  {
+   "name": "settings",
+   "codepoint": "F65A"
+  },
+  {
+   "name": "sliders",
+   "codepoint": "F65B"
+  },
+  {
+   "name": "tune",
+   "codepoint": "F65C"
+  },
+  {
+   "name": "filter",
+   "codepoint": "F65D"
+  },
+  {
+   "name": "filter-plus",
+   "codepoint": "F65E"
+  },
+  {
+   "name": "trash",
+   "codepoint": "F65F"
+  },
+  {
+   "name": "save",
+   "codepoint": "F660"
+  },
+  {
+   "name": "upload",
+   "codepoint": "F661"
+  },
+  {
+   "name": "download",
+   "codepoint": "F662"
+  },
+  {
+   "name": "refresh",
+   "codepoint": "F663"
+  },
+  {
+   "name": "lock",
+   "codepoint": "F664"
+  },
+  {
+   "name": "unlock",
+   "codepoint": "F665"
+  },
+  {
+   "name": "user",
+   "codepoint": "F666"
+  },
+  {
+   "name": "users",
+   "codepoint": "F667"
+  },
+  {
+   "name": "magic",
+   "codepoint": "F668"
+  }
+ ],
+ "modules": [
+  {
+   "id": "fps",
+   "icon": "gauge"
+  },
+  {
+   "id": "cps",
+   "icon": "cursor"
+  },
+  {
+   "id": "keystrokes",
+   "icon": "keys-wasd"
+  },
+  {
+   "id": "coords",
+   "icon": "move"
+  },
+  {
+   "id": "direction",
+   "icon": "map"
+  },
+  {
+   "id": "clock",
+   "icon": "stopwatch"
+  },
+  {
+   "id": "memory",
+   "icon": "memory"
+  },
+  {
+   "id": "ping",
+   "icon": "signal"
+  },
+  {
+   "id": "server",
+   "icon": "server"
+  },
+  {
+   "id": "speed",
+   "icon": "wind"
+  },
+  {
+   "id": "scoreboard",
+   "icon": "document"
+  },
+  {
+   "id": "bossbar",
+   "icon": "crown"
+  },
+  {
+   "id": "togglesprint",
+   "icon": "bolt"
+  },
+  {
+   "id": "zoom",
+   "icon": "zoom-in"
+  },
+  {
+   "id": "fullbright",
+   "icon": "sun"
+  },
+  {
+   "id": "bgfps",
+   "icon": "feather"
+  },
+  {
+   "id": "effects",
+   "icon": "flask"
+  },
+  {
+   "id": "armor",
+   "icon": "shield"
+  },
+  {
+   "id": "inventory",
+   "icon": "backpack"
+  },
+  {
+   "id": "crosshair",
+   "icon": "crosshair"
+  },
+  {
+   "id": "hitbox-colours",
+   "icon": "cube"
+  },
+  {
+   "id": "critical-colours",
+   "icon": "sword"
+  },
+  {
+   "id": "watermark",
+   "icon": "diamond"
+  },
+  {
+   "id": "voice",
+   "icon": "mic"
+  },
+  {
+   "id": "voice-overlay",
+   "icon": "volume"
+  },
+  {
+   "id": "nether-coords",
+   "icon": "route"
+  },
+  {
+   "id": "moon-phase",
+   "icon": "star"
+  },
+  {
+   "id": "day-night",
+   "icon": "brightness"
+  },
+  {
+   "id": "totem-counter",
+   "icon": "medal"
+  },
+  {
+   "id": "item-counter",
+   "icon": "coins"
+  },
+  {
+   "id": "playtime",
+   "icon": "calendar"
+  },
+  {
+   "id": "reach",
+   "icon": "expand"
+  },
+  {
+   "id": "low-fire",
+   "icon": "flame"
+  },
+  {
+   "id": "damage-tint",
+   "icon": "heart-broken"
+  },
+  {
+   "id": "combo",
+   "icon": "trend"
+  },
+  {
+   "id": "cooldowns",
+   "icon": "refresh"
+  },
+  {
+   "id": "block-overlay",
+   "icon": "frame"
+  },
+  {
+   "id": "freelook",
+   "icon": "eye"
+  },
+  {
+   "id": "no-hurt-cam",
+   "icon": "video"
+  },
+  {
+   "id": "time-changer",
+   "icon": "hourglass"
+  },
+  {
+   "id": "weather-changer",
+   "icon": "snowflake"
+  },
+  {
+   "id": "now-playing",
+   "icon": "music"
+  },
+  {
+   "id": "motion-blur",
+   "icon": "film"
+  },
+  {
+   "id": "waypoints",
+   "icon": "map-pin"
+  },
+  {
+   "id": "markers",
+   "icon": "flag"
+  },
+  {
+   "id": "emotes",
+   "icon": "sparkles"
+  },
+  {
+   "id": "discord-rpc",
+   "icon": "broadcast"
+  }
+ ]
+}
