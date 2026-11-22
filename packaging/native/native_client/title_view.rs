@@ -59,6 +59,11 @@ pub struct TitleInfo {
 
 #[derive(Default)]
 pub struct TitleView {
+    /// The banner text closed with its X (this session), the quest card's quest and the picked reward.
+    hidden_banner: Option<String>,
+    quest_index: usize,
+    picked: Option<(String, usize)>,
+    promo_art: Option<(u64, u32, u32, std::sync::Arc<crate::native_ui::Image>)>,
     shown_at: f64,
     hidden_ads: HashSet<String>,
     ad_index: usize,
@@ -128,7 +133,14 @@ impl TitleView {
         let (bw, bh, step) = ((w_all - 120.0).min(400.0), 40.0f32, 48.0f32);
         let half = (bw - 8.0) / 2.0;
         let x = (w_all - bw) / 2.0;
-        let total = step * 4.0 + 12.0 + bh;
+        let home = super::home::get();
+        let promo = home.as_ref().and_then(|d| {
+            d.promos
+                .iter()
+                .find(|p| !(d.discord_linked && p.buttons.first().is_some_and(|b| b.action == "discord-link")))
+                .cloned()
+        });
+        let total = step * 4.0 + 12.0 + bh + if promo.is_some() { PROMO_H + 12.0 } else { 0.0 };
         let mut y = 96.0f32.max((h_all / 4.0 + 96.0).min(h_all - 44.0 - total));
         let mp = info.allows_multiplayer;
         if self.row_button(ui, c, 0, "menu:singleplayer", x, y, bw, bh, &horizon_client::lang::get_or("menu.singleplayer", "Singleplayer"), true) {
@@ -189,15 +201,46 @@ impl TitleView {
         if ui.hover(c, x + bw + 8.0, y, bh, bh) {
             ui.tip("Classic title screen");
         }
+        // The title promo (Link your Discord, an event...) under Options / Quit.
+        if let (Some(p), Some(d)) = (promo.as_ref(), home.as_ref())
+            && let Some(a) = self.promo_card(ui, c, p, d, x, y + bh + 12.0, bw, PROMO_H)
+        {
+            act = Some(a);
+        }
         c.pop_alpha();
 
-        // Top-right: friends online, opens Relay.
+        // Top-right: friends online (opens Relay).
         let pill = self.appear(ui, 1);
         c.push_alpha(pill);
         if self.friends_pill(ui, c, w_all - 16.0, 14.0) {
             act = Some(TitleAct::Relay);
         }
         c.pop_alpha();
+        // Top-centre: the sale (with its countdown) or the announcement.
+        if let Some(d) = home.as_ref()
+            && let Some(b) = d.banner.as_ref()
+            && self.hidden_banner.as_deref() != Some(b.text.as_str())
+        {
+            c.push_alpha(self.appear(ui, 0));
+            self.banner(ui, c, d, b, w_all, 14.0);
+            c.pop_alpha();
+        }
+        // Bottom-left: the quest card, when there is room beside the column.
+        let qw = ((w_all - bw) / 2.0 - bh - 8.0 - 32.0).min(300.0);
+        if let Some(d) = home.as_ref().filter(|d| !d.quests.is_empty())
+            && qw >= 230.0
+        {
+            let qh = quest_height(qw);
+            let qy = h_all - 36.0 - qh;
+            if qy >= 64.0 {
+                let e = self.appear(ui, 5);
+                c.push_alpha(e);
+                if let Some(a) = self.quest_card(ui, c, d, 16.0 - (1.0 - e) * 20.0, qy, qw, qh) {
+                    act = Some(a);
+                }
+                c.pop_alpha();
+            }
+        }
 
         // Bottom-right: the sponsored card, when there is room beside the column.
         let ads: Vec<Ad> = ads::list(info.game_dir.clone()).into_iter().filter(|a| !self.hidden_ads.contains(&a.id)).collect();
@@ -401,4 +444,438 @@ fn run(b: &ads::Button) -> Option<TitleAct> {
     }
     super::common::open_url(&b.value);
     None
+}
+
+const QUEST: u32 = 0xFFB5F23D;
+const QUEST_DARK: u32 = 0xFF16210A;
+const SALE: u32 = 0xFFB91C1C;
+const PROMO_H: f32 = 88.0;
+
+/// "3d 15h 59m 26s" until a time (server clock, ms).
+fn countdown(ends_at: f64) -> String {
+    let s = ((ends_at - super::home::server_now()) / 1000.0).max(0.0) as u64;
+    let (d, h, m, sec) = (s / 86400, s / 3600 % 24, s / 60 % 60, s % 60);
+    if d > 0 { format!("{d}d {h}h {m}m {sec}s") } else if h > 0 { format!("{h}h {m}m {sec}s") } else { format!("{m}m {sec}s") }
+}
+
+fn quest_height(w: f32) -> f32 {
+    let tile = 84.0f32.min((w - 32.0 - 16.0) / 3.0);
+    30.0 + 12.0 + 26.0 + 10.0 + tile + 10.0 + 18.0 + 14.0 + 36.0 + 14.0
+}
+
+fn goal_text(q: &super::home::Quest) -> String {
+    if q.discord() {
+        "Link your Discord: type /link with your code in the Native Discord.".into()
+    } else {
+        format!("Play {} minutes on {}.", q.goal_minutes, if q.servers.is_empty() { "any server".to_owned() } else { q.servers.join(", ") })
+    }
+}
+
+fn fmt_thousands(n: i64) -> String {
+    let s = n.abs().to_string();
+    let mut out = String::new();
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    if n < 0 { format!("-{out}") } else { out }
+}
+
+/// A reward's picture: the cape's front, a cosmetic's render, or the coin amount.
+fn reward_art(c: &mut Canvas, r: &super::home::Reward, x: f32, y: f32, s: f32) {
+    if r.coins() {
+        c.circle(x + s / 2.0, y + s / 2.0 - 8.0, s * 0.2, 0xFFF5B301);
+        c.circle(x + s / 2.0, y + s / 2.0 - 8.0, s * 0.12, 0xFFB98300);
+        let n = fmt_thousands(r.amount);
+        let tw = c.text_width(font::BOLD, 12.0, &n);
+        c.text(font::BOLD, 12.0, &n, x + (s - tw) / 2.0, y + s - 22.0, 0xFFFFD35C);
+        return;
+    }
+    match super::net::image(&r.image, 2 * 1024 * 1024) {
+        super::net::Pic::Ready(img) => {
+            if r.item_kind == "cape" && img.width == img.height * 2 {
+                let dh = s - 12.0;
+                let dw = dh * 10.0 / 16.0;
+                c.image(&img, x + (s - dw) / 2.0, y + 6.0, dw, dh, [1.0 / 64.0, 1.0 / 32.0, 11.0 / 64.0, 17.0 / 32.0], 0xFFFFFFFF);
+            } else {
+                let k = ((s - 10.0) / img.width as f32).min((s - 10.0) / img.height as f32);
+                let (dw, dh) = (img.width as f32 * k, img.height as f32 * k);
+                c.image(&img, x + (s - dw) / 2.0, y + (s - dh) / 2.0, dw, dh, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
+            }
+        }
+        _ => c.icon(theme::I_SPARKLES, s * 0.3, x + s / 2.0, y + s / 2.0, 0x66FFFFFF),
+    }
+}
+
+impl TitleView {
+    /// Cover-crops the promo artwork at 2x and bakes smooth anti-aliased rounded corners into its alpha channel.
+    fn rounded_promo_art(&mut self, src: &std::sync::Arc<crate::native_ui::Image>, w: f32, h: f32, r: f32) -> std::sync::Arc<crate::native_ui::Image> {
+        let out_w = ((w * 2.0).round() as u32).clamp(1, 800);
+        let out_h = ((h * 2.0).round() as u32).clamp(1, 256);
+        if let Some((id, cw, ch, ref cached)) = self.promo_art
+            && id == src.id
+            && cw == out_w
+            && ch == out_h
+        {
+            return cached.clone();
+        }
+        let box_aspect = out_w as f32 / out_h as f32;
+        let img_aspect = src.width as f32 / src.height as f32;
+        let (mut uw, mut vh) = (1.0f32, 1.0f32);
+        if img_aspect > box_aspect {
+            uw = box_aspect / img_aspect;
+        } else {
+            vh = img_aspect / box_aspect;
+        }
+        let cu = 0.5 + 0.3 * (1.0 - uw) / 2.0;
+        let cv = 0.5f32;
+        let (u0, v0) = (cu - uw / 2.0, cv - vh / 2.0);
+        let cr = r * out_h as f32 / h;
+        let (sw, sh) = (src.width as usize, src.height as usize);
+        let mut out = vec![0u32; (out_w * out_h) as usize];
+        for py in 0..out_h {
+            let sy = (v0 + (py as f32 + 0.5) / out_h as f32 * vh) * sh as f32 - 0.5;
+            let y0 = (sy.floor() as isize).clamp(0, sh as isize - 1) as usize;
+            let y1 = (y0 + 1).min(sh - 1);
+            let fy = (sy - y0 as f32).clamp(0.0, 1.0);
+            let cy = (py as f32 + 0.5).min(out_h as f32 - (py as f32 + 0.5));
+            for px in 0..out_w {
+                let mut cover = 1.0f32;
+                let cx = (px as f32 + 0.5).min(out_w as f32 - (px as f32 + 0.5));
+                if cx < cr && cy < cr {
+                    let (dx, dy) = (cr - cx, cr - cy);
+                    let d = (dx * dx + dy * dy).sqrt() - cr;
+                    cover = if d <= -0.5 { 1.0 } else if d >= 0.5 { 0.0 } else { 0.5 - d };
+                    if cover <= 0.0 {
+                        continue;
+                    }
+                }
+                let sx = (u0 + (px as f32 + 0.5) / out_w as f32 * uw) * sw as f32 - 0.5;
+                let x0 = (sx.floor() as isize).clamp(0, sw as isize - 1) as usize;
+                let x1 = (x0 + 1).min(sw - 1);
+                let fx = (sx - x0 as f32).clamp(0.0, 1.0);
+                let c00 = src.argb[y0 * sw + x0];
+                let c10 = src.argb[y0 * sw + x1];
+                let c01 = src.argb[y1 * sw + x0];
+                let c11 = src.argb[y1 * sw + x1];
+                let (w00, w10, w01, w11) = ((1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
+                let ch = |shift: u32| -> f32 {
+                    ((c00 >> shift) & 0xFF) as f32 * w00
+                        + ((c10 >> shift) & 0xFF) as f32 * w10
+                        + ((c01 >> shift) & 0xFF) as f32 * w01
+                        + ((c11 >> shift) & 0xFF) as f32 * w11
+                };
+                let a = (ch(24) * cover).round() as u32;
+                let rr = ch(16).round() as u32;
+                let gg = ch(8).round() as u32;
+                let bb = ch(0).round() as u32;
+                out[(py * out_w + px) as usize] = (a << 24) | (rr << 16) | (gg << 8) | bb;
+            }
+        }
+        let img = crate::native_ui::Image::new(out_w, out_h, out);
+        self.promo_art = Some((src.id, out_w, out_h, img.clone()));
+        img
+    }
+
+    /// The top banner: a sale with "Ends in ..." (opens the Store) or the announcement. Its X hides it for the session.
+    fn banner(&mut self, ui: &mut Ui, c: &mut Canvas, d: &super::home::Doc, b: &super::home::Banner, w_all: f32, y: f32) {
+        let sale = b.kind == "sale";
+        let ends = if b.ends_at > 0.0 { format!("Ends in {}", countdown(b.ends_at)) } else { String::new() };
+        let (h, fs) = (32.0, 13.0);
+        let max_w = 640.0f32.min(w_all - 500.0);
+        if max_w < 260.0 {
+            return;
+        }
+        let ends_w = if ends.is_empty() { 0.0 } else { c.text_width(font::SEMIBOLD, fs, &ends) + 14.0 };
+        let text = c.ellipsize(font::MEDIUM, fs, &b.text, max_w - ends_w - 76.0);
+        let text_w = c.text_width(font::MEDIUM, fs, &text);
+        let w = 34.0 + text_w + ends_w + 40.0;
+        let x = (w_all - w) / 2.0;
+        let tint = if sale { SALE } else { 0xFF4F86F7 };
+        let over = ui.hover(c, x, y, w - 32.0, h);
+        let hv = ui.anim_on("title:banner#h", over, 14.0);
+        c.shadow(x, y + 3.0, w, h, 9.0, 18.0, 0x66000000);
+        let base = if sale { 0xF5240A0E } else { 0xF50C1426 };
+        c.round(x, y, w, h, 9.0, theme::mix(base, theme::alpha(tint, 0.95), 0.25 + 0.15 * hv));
+        c.outline(x, y, w, h, 9.0, 1.0, theme::alpha(tint, 0.85));
+        let ty = y + (h - c.line_height(font::MEDIUM, fs)) / 2.0;
+        c.icon(if sale { theme::I_STORE } else { theme::I_BELL }, 14.0, x + 18.0, y + h / 2.0, 0xFFFFFFFF);
+        c.text(font::MEDIUM, fs, &text, x + 34.0, ty, 0xFFFFFFFF);
+        if !ends.is_empty() {
+            c.text(font::SEMIBOLD, fs, &ends, x + 34.0 + text_w + 14.0, ty, 0xFFFFFFFF);
+        }
+        let cx = x + w - 22.0;
+        let over_x = ui.hover(c, cx - 10.0, y, 20.0, h);
+        c.icon(theme::I_X, 13.0, cx, y + h / 2.0, if over_x { 0xFFFFFFFF } else { 0xCCFFFFFF });
+        if ui.clicked(c, "title:banner:x", cx - 10.0, y, 20.0, h) {
+            self.hidden_banner = Some(b.text.clone());
+            return;
+        }
+        if over && (sale || b.action == "url") {
+            ui.cursor_hand = true;
+        }
+        if ui.clicked(c, "title:banner", x, y, w - 32.0, h) {
+            if sale || b.action == "store" {
+                super::common::open_url(&d.store_url);
+            } else if b.action == "url" && b.url.starts_with("https://") {
+                super::common::open_url(&b.url);
+            }
+        }
+    }
+
+    /// The wide title promo: art, title and text, a label in the promo's colour; Link Discord runs the link flow.
+    #[allow(clippy::too_many_arguments)]
+    fn promo_card(&mut self, ui: &mut Ui, c: &mut Canvas, p: &super::home::Promo, d: &super::home::Doc, x: f32, y: f32, w: f32, h: f32) -> Option<TitleAct> {
+        let main = p.buttons.first();
+        let discord = main.is_some_and(|b| b.action == "discord-link");
+        let linked = discord && d.discord_linked;
+        let over = ui.hover(c, x, y, w, h);
+        let hv = ui.anim_on("title:promo#h", over, 12.0);
+        c.shadow(x, y + 6.0, w, h, 14.0, 26.0, theme::alpha(p.accent, 0.30 + 0.25 * hv));
+        c.round(x, y, w, h, 14.0, 0xF00C0A16);
+        match super::net::image(&p.image, 4 * 1024 * 1024) {
+            super::net::Pic::Ready(img) => {
+                let art = self.rounded_promo_art(&img, w, h, 14.0);
+                c.image(&art, x, y, w, h, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
+            }
+            _ => c.round_gradient_h(x, y, w, h, 14.0, theme::alpha(p.accent, 0.55), 0xFF0C0A16),
+        }
+        c.round_gradient_h(x, y, w * 0.75, h, 14.0, 0xC0000000, 0x00000000);
+        if hv > 0.005 {
+            c.round(x, y, w, h, 14.0, theme::alpha(0xFFFFFFFF, 0.04 * hv));
+        }
+        c.outline(x, y, w, h, 14.0, 1.2, theme::alpha(p.accent, 0.55 + 0.35 * hv));
+        let tag = if linked { "LINKED \u{2713}".to_owned() } else { p.tag.to_uppercase() };
+        if !tag.is_empty() {
+            let tw = c.text_width(font::BOLD, 10.5, &tag) + 16.0;
+            c.round(x + w - tw - 8.0, y - 8.0, tw, 22.0, 7.0, if linked { 0xFF16A34A } else { p.accent });
+            let lh = c.line_height(font::BOLD, 10.5);
+            c.text(font::BOLD, 10.5, &tag, x + w - tw, y - 8.0 + (22.0 - lh) / 2.0, 0xFFFFFFFF);
+        }
+        let (tx, max_w) = (x + 18.0, w - 80.0);
+        let (code, link_error, link_busy) = super::home::link_state();
+        if discord && !linked && let Some(code) = code {
+            // The link code: type it in Discord; copy it, open the invite.
+            c.text(font::MEDIUM, 11.5, "In the Native Discord, type:", tx, y + 14.0, 0xD9FFFFFF);
+            c.text(font::BOLD, 20.0, &format!("/link {code}"), tx, y + 32.0, 0xFFFFFFFF);
+            let (bx, by) = (x + w - 18.0 - 118.0, y + h - 34.0);
+            let copy_icon = horizon_client::native_ui::icons::named("copy", theme::I_CHECK);
+            if ui.button(c, "title:promo:copy", bx - 82.0, by, 76.0, 24.0, "Copy", copy_icon, ui::BTN_GLASS) {
+                ui.clip_out = Some(format!("/link {code}"));
+            }
+            if ui.button(c, "title:promo:open", bx, by, 118.0, 24.0, "Open Discord", theme::I_CHEVRON_RIGHT, ui::BTN_PRIMARY) && !d.discord_invite.is_empty() {
+                super::common::open_url(&d.discord_invite);
+            }
+            c.text(font::REGULAR, 10.5, "Waiting for Discord\u{2026}", tx, y + h - 26.0, 0xB3FFFFFF);
+            return None;
+        }
+        let title = c.ellipsize(font::BOLD, 20.0, &p.title, max_w);
+        c.text(font::BOLD, 20.0, &title, tx, y + if p.body.is_empty() { 30.0 } else { 22.0 }, 0xFFFFFFFF);
+        let body = if linked {
+            format!("Linked as {}. Rewards are yours!", if d.discord_name.is_empty() { "your Discord" } else { &d.discord_name })
+        } else if discord && let Some(e) = link_error {
+            e
+        } else {
+            p.body.clone()
+        };
+        if !body.is_empty() {
+            let body = c.ellipsize(font::MEDIUM, 12.0, &body, max_w);
+            c.text(font::MEDIUM, 12.0, &body, tx, y + 50.0, 0xD9FFFFFF);
+        }
+        let main = main?;
+        if linked {
+            return None;
+        }
+        let (ax, ay) = (x + w - 30.0, y + h - 26.0);
+        c.circle(ax, ay, 12.0, theme::alpha(0xFFFFFFFF, 0.85 + 0.15 * hv));
+        if discord && link_busy {
+            ui.dots(c, ax, ay, 0xFF0C0A16);
+        } else {
+            c.icon(theme::I_CHEVRON_RIGHT, 13.0, ax, ay, 0xFF0C0A16);
+        }
+        if over {
+            ui.cursor_hand = true;
+        }
+        if ui.clicked(c, "title:promo", x, y, w, h) {
+            match main.action.as_str() {
+                "discord-link" => super::home::start_link(),
+                "store" => super::common::open_url(&d.store_url),
+                "server" => return Some(TitleAct::Join(main.value.clone())),
+                _ if main.value.starts_with("https://") => super::common::open_url(&main.value),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// The quest card, bottom-left: state strip, title, rewards (pick one for "1 of N"), progress and the action.
+    #[allow(clippy::too_many_arguments)]
+    fn quest_card(&mut self, ui: &mut Ui, c: &mut Canvas, d: &super::home::Doc, x: f32, y: f32, w: f32, h: f32) -> Option<TitleAct> {
+        let quests = &d.quests;
+        if self.quest_index >= quests.len() {
+            self.quest_index = 0;
+        }
+        let q = &quests[self.quest_index];
+        let (active, complete, claimed) = (q.state == "active", q.state == "complete", q.state == "claimed");
+        let (claim_busy, message) = super::home::claim_state();
+        let busy = claim_busy.as_deref() == Some(q.id.as_str());
+        let (code, _, link_busy) = super::home::link_state();
+        let strip = if !d.signed_in {
+            "Sign in to do quests".to_owned()
+        } else if let Some(m) = message {
+            m
+        } else if claimed {
+            "Reward claimed \u{2713}".into()
+        } else if complete {
+            "Quest complete! Claim your reward".into()
+        } else if q.discord() {
+            "Link your Discord to complete".into()
+        } else {
+            "Waiting for quest completion\u{2026}".into()
+        };
+        let sh = 30.0;
+        c.shadow(x, y + 8.0, w, h, 16.0, 30.0, theme::alpha(QUEST, 0.18));
+        c.round(x, y, w, h, 16.0, QUEST);
+        let strip = c.ellipsize(font::SEMIBOLD, 12.5, &strip, w - 24.0);
+        let sw = c.text_width(font::SEMIBOLD, 12.5, &strip);
+        let lh = c.line_height(font::SEMIBOLD, 12.5);
+        c.text(font::SEMIBOLD, 12.5, &strip, x + (w - sw) / 2.0, y + (sh - lh) / 2.0, QUEST_DARK);
+        let (bx, by, bwid, bhgt) = (x + 3.0, y + sh, w - 6.0, h - sh - 3.0);
+        c.round(bx, by, bwid, bhgt, 13.0, 0xF60B0D10);
+        // Title row.
+        let (px, py) = (bx + 14.0, by + 12.0);
+        c.icon(horizon_client::native_ui::icons::named("trophy", theme::I_SPARKLES), 17.0, px + 8.0, py + 12.0, QUEST);
+        let title = c.ellipsize(font::BOLD, 15.0, &q.title, bwid - 90.0);
+        let tlh = c.line_height(font::BOLD, 15.0);
+        c.text(font::BOLD, 15.0, &title, px + 24.0, py + 12.0 - tlh / 2.0, 0xFFFFFFFF);
+        if quests.len() > 1 {
+            let ax = bx + bwid - 50.0;
+            if ui.icon_button(c, "title:quest:prev", ax, py, 22.0, theme::I_CHEVRON_LEFT, None) {
+                self.quest_index = (self.quest_index + quests.len() - 1) % quests.len();
+            }
+            if ui.icon_button(c, "title:quest:next", ax + 24.0, py, 22.0, theme::I_CHEVRON_RIGHT, None) {
+                self.quest_index = (self.quest_index + 1) % quests.len();
+            }
+        } else {
+            let (hx, hy) = (bx + bwid - 24.0, py + 12.0);
+            c.circle(hx, hy, 9.0, 0x33FFFFFF);
+            let qw = c.text_width(font::BOLD, 11.0, "?");
+            let qlh = c.line_height(font::BOLD, 11.0);
+            c.text(font::BOLD, 11.0, "?", hx - qw / 2.0, hy - qlh / 2.0, 0xCCFFFFFF);
+            if ui.hover(c, hx - 10.0, hy - 10.0, 20.0, 20.0) {
+                ui.tip(&goal_text(q));
+            }
+        }
+        // Reward tiles.
+        let n = q.rewards.len().min(3);
+        let tile = 84.0f32.min((bwid - 28.0 - 16.0) / 3.0);
+        let tx0 = bx + (bwid - (n as f32 * tile + (n.saturating_sub(1)) as f32 * 8.0)) / 2.0;
+        let ty = py + 34.0;
+        let can_pick = complete && q.pick_one() && !busy;
+        if self.picked.as_ref().map(|(id, _)| id.as_str()) != Some(q.id.as_str()) {
+            self.picked = None;
+        }
+        let picked = self.picked.as_ref().map(|(_, i)| *i);
+        for (i, r) in q.rewards.iter().take(n).enumerate() {
+            let tx = tx0 + i as f32 * (tile + 8.0);
+            let id = format!("title:quest:r{i}");
+            let over = ui.hover(c, tx, ty, tile, tile);
+            let sel = if claimed { q.choice == i as i64 || !q.pick_one() } else { picked == Some(i) };
+            let hv = ui.anim_on(&format!("{id}#h"), over && can_pick, 14.0);
+            c.round(tx, ty, tile, tile, 10.0, theme::mix(0xFF1A1D24, 0xFF232733, hv));
+            if sel {
+                c.outline(tx, ty, tile, tile, 10.0, 2.0, QUEST);
+            }
+            reward_art(c, r, tx, ty, tile);
+            if r.owned && !r.coins() {
+                c.round(tx + 5.0, ty + 5.0, 36.0, 14.0, 7.0, 0xCC000000);
+                let olh = c.line_height(font::BOLD, 8.0);
+                c.text(font::BOLD, 8.0, "OWNED", tx + 9.0, ty + 5.0 + (14.0 - olh) / 2.0, QUEST);
+            }
+            if over {
+                ui.tip(&r.name);
+                if can_pick {
+                    ui.cursor_hand = true;
+                }
+            }
+            if can_pick && ui.clicked(c, &id, tx, ty, tile, tile) {
+                self.picked = Some((q.id.clone(), i));
+            }
+        }
+        let picked = self.picked.as_ref().map(|(_, i)| *i);
+        // Text.
+        let ly = ty + tile + 10.0;
+        let line = if !q.description.is_empty() {
+            q.description.clone()
+        } else if q.pick_one() {
+            format!("Earn 1 of {} rewards{}", q.rewards.len(), if q.ends_at > 0.0 { " for a limited time!" } else { "!" })
+        } else {
+            format!("Earn {}!", if q.rewards.len() == 1 { q.rewards[0].name.clone() } else { "every reward".into() })
+        };
+        let line = c.ellipsize(font::MEDIUM, 12.0, &line, bwid - 24.0);
+        let lw = c.text_width(font::MEDIUM, 12.0, &line);
+        c.text(font::MEDIUM, 12.0, &line, bx + (bwid - lw) / 2.0, ly, 0xE6FFFFFF);
+        // Action.
+        let (ax, aw, ah) = (bx + 12.0, bwid - 24.0, 36.0);
+        let ay = by + bhgt - 12.0 - ah;
+        if active && !q.discord() && d.signed_in {
+            // Progress bar with the minutes, and Join for the quest's server.
+            let done = if q.goal_minutes > 0 { (q.minutes / q.goal_minutes as f64).min(1.0) as f32 } else { 0.0 };
+            let server = q.servers.first();
+            let join_w = if server.is_some() { 74.0 } else { 0.0 };
+            let bar_w = aw - join_w - if join_w > 0.0 { 8.0 } else { 0.0 };
+            c.round(ax, ay, bar_w, ah, 10.0, 0xFF1A1D24);
+            if done > 0.0 {
+                c.round(ax, ay, (ah * 0.5).max(bar_w * done), ah, 10.0, theme::alpha(QUEST, 0.9));
+            }
+            let prog = format!("{} / {} min{}", q.minutes.floor() as i64, q.goal_minutes, server.map_or(String::new(), |s| format!(" on {s}")));
+            let prog = c.ellipsize(font::SEMIBOLD, 12.0, &prog, bar_w - 16.0);
+            let pw = c.text_width(font::SEMIBOLD, 12.0, &prog);
+            let plh = c.line_height(font::SEMIBOLD, 12.0);
+            c.text(font::SEMIBOLD, 12.0, &prog, ax + (bar_w - pw) / 2.0, ay + (ah - plh) / 2.0, 0xFFFFFFFF);
+            if let Some(server) = server
+                && ui.button(c, "title:quest:join", ax + bar_w + 8.0, ay, join_w, ah, "Join", theme::I_PLAY, ui::BTN_GLASS)
+            {
+                return Some(TitleAct::Join(server.clone()));
+            }
+            return None;
+        }
+        let (label, enabled) = if !d.signed_in {
+            ("Sign in with Native".to_owned(), false)
+        } else if claimed {
+            ("Claimed".to_owned(), false)
+        } else if complete {
+            (if q.pick_one() && picked.is_none() { "Pick a reward".to_owned() } else { "Claim reward".to_owned() }, !busy && (!q.pick_one() || picked.is_some()))
+        } else {
+            (code.as_ref().map_or_else(|| "Link Discord".to_owned(), |code| format!("/link {code}  \u{b7}  Copy")), !link_busy)
+        };
+        let over = ui.hover(c, ax, ay, aw, ah) && enabled;
+        let hv = ui.anim_on("title:quest:act#h", over, 14.0);
+        c.round(ax, ay, aw, ah, 10.0, if enabled { theme::mix(QUEST, 0xFFC8FF5A, hv) } else { 0xFF2A2E36 });
+        if busy {
+            ui.dots(c, ax + aw / 2.0, ay + ah / 2.0, QUEST_DARK);
+        } else {
+            let lw = c.text_width(font::BOLD, 13.5, &label);
+            let llh = c.line_height(font::BOLD, 13.5);
+            c.text(font::BOLD, 13.5, &label, ax + (aw - lw) / 2.0, ay + (ah - llh) / 2.0, if enabled { QUEST_DARK } else { 0xFF9CA3AF });
+        }
+        if over {
+            ui.cursor_hand = true;
+        }
+        if enabled && ui.clicked(c, "title:quest:act", ax, ay, aw, ah) {
+            if complete {
+                super::home::claim(&q.id, if q.pick_one() { picked } else { None });
+            } else if let Some(code) = code {
+                ui.clip_out = Some(format!("/link {code}"));
+                if !d.discord_invite.is_empty() {
+                    super::common::open_url(&d.discord_invite);
+                }
+            } else {
+                super::home::start_link();
+            }
+        }
+        None
+    }
 }

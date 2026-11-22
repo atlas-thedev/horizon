@@ -24,6 +24,7 @@ mod boxes;
 mod chat_media;
 mod common;
 mod gif;
+mod home;
 mod hud_editor;
 mod hud_modules;
 mod keys;
@@ -423,6 +424,7 @@ impl Game<'_> {
         };
         let (action, copied, pause_action) = with_state(|state| {
             let g = self.native_view(state);
+            home::tick(g.in_world, g.server.as_deref());
             let local = self.options.player_name();
             if g.in_world {
                 let mut svc_pos: Vec<(u128, [f64; 3])> = Vec::new();

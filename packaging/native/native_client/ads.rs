@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 const MAX_IMAGE: u64 = 4 * 1024 * 1024;
 /// Rounded top corners baked into the banner, as a share of its width (card radius / card width).
-const CORNER: f32 = 16.0 / 340.0;
+const CORNER: f32 = 16.0 / 300.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Button {
