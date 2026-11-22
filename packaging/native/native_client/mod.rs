@@ -372,16 +372,16 @@ impl Game<'_> {
     }
 
     /// The Native Client window title: the game's version when known.
-    pub(super) fn native_svc_packet(&mut self, channel: &str, data: &[u8]) {
+    pub(in crate::game) fn native_svc_packet(&mut self, channel: &str, data: &[u8]) {
         svc::on_custom_payload(channel, data);
     }
 
-    pub(super) fn native_svc_login(&mut self) {
+    pub(in crate::game) fn native_svc_login(&mut self) {
         let addr = self.server_address().map(str::to_owned);
         svc::on_login(addr.as_deref());
     }
 
-    pub(super) fn native_svc_disconnect(&mut self) {
+    pub(in crate::game) fn native_svc_disconnect(&mut self) {
         svc::on_disconnect();
     }
 
