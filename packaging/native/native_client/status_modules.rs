@@ -377,7 +377,7 @@ fn armor() -> Module {
                 Setting::bool("durability", "Show durability", true).fixed(),
                 Setting::bool("empty", "Show empty slots", false).fixed(),
                 // the durability as text beside (vertical) or under (horizontal) each piece
-                Setting::choice("numbers", "Durability numbers", 0, &["Off", "Left", "Left / Max", "Percent"])
+                Setting::choice("numbers", "Durability numbers", 1, &["Off", "Left", "Left / Max", "Percent"])
                     .shorts(&["Off", "Left", "L / Max", "%"]),
                 Setting::bool("numcolour", "Colour numbers by durability", true),
             ],

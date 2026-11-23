@@ -725,7 +725,28 @@ fn fetch(base: &str, hash: &str, limit: u64) -> Option<Vec<u8>> {
     }
     let _ = std::fs::create_dir_all(cache.parent()?);
     let _ = std::fs::write(&cache, &body);
+    share(hash, &body);
     Some(body)
+}
+
+/// Saves a downloaded file in the launcher's cache too (`<hash>.png`, the name the launcher, the Java mod and
+/// this engine all read), so nobody downloads it again. Only bytes that match their hash; never overwrites.
+fn share(hash: &str, bytes: &[u8]) {
+    use sha2::Digest;
+    if hash.len() != 64 || format!("{:x}", sha2::Sha256::digest(bytes)) != hash {
+        return;
+    }
+    let Some(dir) = launcher_cache() else { return };
+    let file = dir.join(format!("{hash}.png"));
+    if file.is_file() || std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    // a name of its own: the launcher and other games may be writing the same file right now
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let tmp = dir.join(format!("{hash}.png.{}.{nanos}.tmp", std::process::id()));
+    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, &file).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
 }
 
 fn load(base: &str, cosmetic: &horizon_client::native_skins::CosmeticRef) -> Option<Native> {

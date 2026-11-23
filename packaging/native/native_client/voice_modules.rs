@@ -480,7 +480,10 @@ impl CallStrip {
                 is_self,
             });
         }
-        if calling && let Some(fid) = key.strip_prefix("dm:") {
+        // a private call shows the friend next to you, grayed out until they join (like Discord)
+        if let Some(fid) = key.strip_prefix("dm:")
+            && !members.iter().any(|m| m.user_id == fid)
+        {
             let f = super::relay::friend(fid);
             tiles.push(Tile {
                 name: f.as_ref().map_or_else(|| "Friend".to_owned(), |f| f.display().to_owned()),
@@ -502,7 +505,7 @@ impl CallStrip {
             let waiting = t.member.is_none();
             let lvl = t.member.as_ref().map_or(0.0, voice::level);
             let talking = t.member.as_ref().is_some_and(|m| lvl > 0.0 || voice::speaking(m));
-            if waiting {
+            if waiting && calling {
                 for k in 0..3 {
                     let ph = ((ui.now / 1500.0 + f64::from(k) / 3.0) % 1.0) as f32;
                     let ex = r + 2.0 + ph * 16.0;
@@ -525,9 +528,12 @@ impl CallStrip {
             };
             c.circle(cx, cy, r + 2.5, ring_col);
             c.circle(cx, cy, r + 0.5, 0xFF08090C);
-            c.push_alpha(if waiting { 0.55 } else { 1.0 });
+            c.push_alpha(if waiting { 0.4 } else { 1.0 });
             avatars::draw_round(c, t.skin.as_deref(), cx - r, cy - r, face);
             c.pop_alpha();
+            if waiting {
+                c.circle(cx, cy, r, 0x5958_5C66); // a gray veil: not in the call yet
+            }
             if let Some(m) = &t.member {
                 let muted = if t.is_self { voice::muted() } else { m.muted };
                 let deaf = if t.is_self { voice::deafened() } else { m.deafened };
@@ -539,7 +545,14 @@ impl CallStrip {
             }
             let label = c.ellipsize(font::MEDIUM, 11.0, &t.name, slot - 8.0);
             let lw = c.text_width(font::MEDIUM, 11.0, &label);
-            c.text(font::MEDIUM, 11.0, &label, cx - lw / 2.0, fy + face + 7.0, if talking { theme::TEXT_STRONG } else { theme::TEXT_SECONDARY });
+            let label_col = if talking {
+                theme::TEXT_STRONG
+            } else if waiting {
+                theme::TEXT_MUTED
+            } else {
+                theme::TEXT_SECONDARY
+            };
+            c.text(font::MEDIUM, 11.0, &label, cx - lw / 2.0, fy + face + 7.0, label_col);
             if let Some(uid) = &t.user_id {
                 if ui.clicked(c, &format!("relay:stage:{uid}"), cx - r - 4.0, cy - r - 4.0, face + 8.0, face + 8.0) {
                     self.open = if sel { None } else { Some(uid.clone()) };

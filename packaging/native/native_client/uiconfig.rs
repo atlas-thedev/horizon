@@ -21,6 +21,8 @@ pub struct UiConfig {
     pub relay_key: i32,
     pub emote_key: i32,
     pub scale: f32,
+    /// The HUD was sized to the screen once (the first time in a world); after that only the player resizes it.
+    pub hud_fitted: bool,
     /// GLFW key that opens the Native menu in game (default Right Shift).
     pub menu_key: i32,
     pub music_volume: f32,
@@ -49,6 +51,7 @@ impl Default for UiConfig {
             relay_key: 89,
             emote_key: 66,
             scale: 1.0,
+            hud_fitted: false,
             menu_key: 344,
             music_volume: 0.7,
             music_shuffle: false,

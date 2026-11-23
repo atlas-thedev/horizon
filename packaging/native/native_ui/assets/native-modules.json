@@ -283,6 +283,24 @@
       "label": "Discord RPC",
       "icon": "broadcast",
       "codepoint": "F42E"
+    },
+    {
+      "id": "stopwatch",
+      "label": "Stopwatch",
+      "icon": "flag-checkered",
+      "codepoint": "F42F"
+    },
+    {
+      "id": "timer",
+      "label": "Timer",
+      "icon": "repeat",
+      "codepoint": "F430"
+    },
+    {
+      "id": "durability-alert",
+      "label": "Durability Alert",
+      "icon": "warning",
+      "codepoint": "F431"
     }
   ],
   "library": [

@@ -609,6 +609,18 @@
   {
    "id": "discord-rpc",
    "icon": "broadcast"
+  },
+  {
+   "id": "stopwatch",
+   "icon": "flag-checkered"
+  },
+  {
+   "id": "timer",
+   "icon": "repeat"
+  },
+  {
+   "id": "durability-alert",
+   "icon": "warning"
   }
  ]
 }

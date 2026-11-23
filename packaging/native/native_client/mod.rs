@@ -37,6 +37,7 @@ mod music_modules;
 mod music_view;
 mod module;
 mod modules;
+mod qol_modules;
 mod net;
 mod pause_view;
 mod overlay_modules;
@@ -459,6 +460,16 @@ impl Game<'_> {
             }
             let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
             let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
+            // The first time the HUD shows in a world it is sized to the screen (a big screen gets a bigger HUD) and
+            // saved; after that only the player resizes it (a corner in the Right Shift hub; Reset layout fits again).
+            state.modules.screen_fit = modules::screen_fit(batch.scale, scale);
+            if !state.cfg.hud_fitted && g.in_world {
+                let fit = state.modules.screen_fit;
+                if state.modules.had_saved_layout() || state.modules.fit_to_screen(fit) {
+                    state.cfg.hud_fitted = true;
+                    state.cfg.save();
+                }
+            }
             // a call accepted or started while Voice Chat was off switches it on (the keep-alive, push to talk)
             if voice::take_enable_request()
                 && let Some(m) = state.modules.get_mut("voice")

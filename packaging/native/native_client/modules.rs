@@ -14,6 +14,19 @@ pub struct Modules {
     pub all: Vec<Module>,
     file: Option<PathBuf>,
     dirty: Option<Instant>,
+    /// A native-modules.json was there at start: the player's own layout, never re-fitted on its own.
+    saved_layout: bool,
+    /// The HUD size that fits the screen right now ([`screen_fit`]), kept each frame for Reset layout; 0 unknown.
+    pub screen_fit: f32,
+}
+
+/// The HUD size that fits the screen: Native text about as tall as the game's own text at its GUI scale (which
+/// follows the window size), between 1x and 2x. `gui_scale` is the game's, `ui_scale` the Native UI's px per unit.
+pub fn screen_fit(gui_scale: f32, ui_scale: f32) -> f32 {
+    if !(gui_scale > 0.0 && ui_scale > 0.0) {
+        return 0.0;
+    }
+    ((0.6 * gui_scale / ui_scale * 20.0).round() / 20.0).clamp(1.0, 2.0)
 }
 
 /// Changes are written this long after the last one.
@@ -25,6 +38,7 @@ impl Modules {
         all.extend(super::hud_modules::all());
         all.extend(super::status_modules::all());
         all.extend(super::extra_modules::all());
+        all.extend(super::qol_modules::all());
         all.extend(super::gameplay_modules::all());
         all.extend(super::gameplay_modules::late());
         all.extend(super::overlay_modules::all());
@@ -39,7 +53,7 @@ impl Modules {
             "fps", "cps", "keystrokes", "coords", "direction", "clock", "memory", "ping", "server", "speed", "scoreboard", "bossbar",
             "togglesprint", "zoom", "fullbright", "bgfps", "effects", "armor", "inventory", "crosshair", "hitbox-colours",
             "critical-colours", "watermark", "nether-coords", "moon-phase", "day-night", "totem-counter", "item-counter", "playtime",
-            "reach", "combo", "cooldowns", "block-overlay", "low-fire", "damage-tint", "freelook", "no-hurt-cam", "motion-blur",
+            "reach", "combo", "cooldowns", "stopwatch", "timer", "durability-alert", "block-overlay", "low-fire", "damage-tint", "freelook", "no-hurt-cam", "motion-blur",
             "time-changer", "weather-changer", "voice", "voice-overlay", "now-playing", "discord-rpc", "emotes", "waypoints", "markers",
         ];
         let rank = |id: &str| ORDER.iter().position(|o| *o == id).unwrap_or(ORDER.len());
@@ -48,6 +62,8 @@ impl Modules {
             all,
             file: game_dir.map(|d| d.join("config").join("native-modules.json")),
             dirty: None,
+            saved_layout: false,
+            screen_fit: 0.0,
         };
         modules.load();
         modules
@@ -98,6 +114,24 @@ impl Modules {
         }
     }
 
+    pub fn had_saved_layout(&self) -> bool {
+        self.saved_layout
+    }
+
+    /// Sizes every HUD module to `fit` (see [`screen_fit`]); false (nothing changed) when it is unknown.
+    pub fn fit_to_screen(&mut self, fit: f32) -> bool {
+        if fit <= 0.0 {
+            return false;
+        }
+        for m in &mut self.all {
+            if let Some(s) = m.state.hud.as_mut().and_then(|h| h.get_mut(super::module::SCALE)) {
+                s.set_num(fit);
+            }
+        }
+        self.changed();
+        true
+    }
+
     pub fn reset_positions(&mut self) {
         for m in &mut self.all {
             if let Some(h) = m.state.hud.as_mut() {
@@ -117,6 +151,7 @@ impl Modules {
                 return;
             }
         };
+        self.saved_layout = true;
         let keys_v2 = root.get(KEYS_V2).is_some();
         for m in &mut self.all {
             let Some(o) = root.get(m.state.id).filter(|o| o.is_object()) else {
@@ -199,6 +234,30 @@ impl Modules {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hud_fits_the_screen_once_and_never_shrinks() {
+        // 1080p at the game's automatic GUI scale (4): Native UI 1.42 px per unit, a 1.7x HUD
+        assert_eq!(screen_fit(4.0, 1080.0 / 760.0), 1.7);
+        // a GUI scale picked smaller than the screen: never below the default size
+        assert_eq!(screen_fit(2.0, 1080.0 / 760.0), 1.0);
+        // 4K at its automatic GUI scale (9): capped at 2x
+        assert_eq!(screen_fit(9.0, 2160.0 / 760.0), 1.9);
+        assert_eq!(screen_fit(12.0, 1.0), 2.0);
+        // unknown
+        assert_eq!(screen_fit(0.0, 1.4), 0.0);
+
+        let dir = std::env::temp_dir().join(format!("native-modules-fit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut m = Modules::new(Some(dir.clone()));
+        assert!(!m.had_saved_layout());
+        assert!(m.fit_to_screen(1.7));
+        let fps = m.get("fps").and_then(|f| f.state.hud.as_ref()).map(|h| h.scale());
+        assert!(fps.is_some_and(|s| (s - 1.7).abs() < 1e-4), "{fps:?}");
+        m.save();
+        assert!(Modules::new(Some(dir.clone())).had_saved_layout());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn choices_survive_a_save_and_a_load() {
