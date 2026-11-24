@@ -35,8 +35,8 @@ What this fork changes (and nothing else):
   pictures, reactions) with message pop-ups, the pause menu and a music player
   (`packaging/native/native_client`, `native_ui`, `tools/native/native_ui.py`, `native_tweaks.py` and
   `native_client.py`). Each engine hook (`native_ui::tweaks`) is one line next to the code it overrides, and is
-  off until a module asks for it. The Native title screen (the menu on the left, you on a floating island
-  of the game's own blocks with your nametag, `title_view.rs`, `title_island.rs`) reads the game's textures through
+  off until a module asks for it. The Native title screen (the menu on the left, you standing in a block world
+  of the game's own blocks with your nametag, `title_view.rs`, `title_world.rs`) reads the game's textures through
   `native_client::set_resources`, handed over from `load_clouds`;
 - `.github/workflows/native-build.yml` builds the newest upstream Nightly with those changes and publishes
   the client as the release `native-<date>-<commit>`; `.github/workflows/native-check.yml` compiles the same

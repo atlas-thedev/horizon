@@ -21,7 +21,7 @@ pub struct PlayerPreview {
     arm_swing: f32,
     time: f32,
     white: Arc<Image>,
-    /// Something drawn under the player in the same view (the title screen's island): `(c, cx, cy, scale, yaw,
+    /// Something drawn under the player in the same view (none on the title screen now): `(c, cx, cy, scale, yaw,
     /// pitch)`, model y = 16 under the feet.
     pub stage: Option<fn(&mut Canvas, f32, f32, f32, f32, f32)>,
     /// Optional foreground pass drawn after the player (plants/decor closer to the camera than the player).
@@ -88,7 +88,7 @@ impl PlayerPreview {
         }
     }
 
-    /// The camera's tilt: negative looks up at the model (the wardrobe), positive down onto it (the title island).
+    /// The camera's tilt: negative looks up at the model (the wardrobe), positive down onto it (the title screen).
     pub fn set_pitch(&mut self, pitch: f32) {
         self.pitch = pitch;
     }

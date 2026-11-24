@@ -55,8 +55,8 @@ mod status;
 mod status_modules;
 mod svc;
 mod textfield;
-mod title_island;
 mod title_view;
+mod title_world;
 mod toasts;
 mod ui;
 mod uiconfig;
@@ -1379,7 +1379,7 @@ pub(super) fn native_title_wants_logo() -> bool {
     false
 }
 
-// ── the game's own textures (block textures for the title island), resource packs included ──
+// ── the game's own textures (block textures for the title world), resource packs included ──
 
 static RESOURCES: std::sync::Mutex<Option<horizon_assets::resource_source::ResourceSource>> = std::sync::Mutex::new(None);
 static RESOURCES_GENERATION: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

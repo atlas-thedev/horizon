@@ -1,8 +1,8 @@
 //! `TitleView`: the Native title screen, a modern take (the same as the Java
-//! mod's): the menu down the left (Play first, in the launcher's blue), you on
-//! a little floating island of real blocks in the middle with your nametag over
-//! your head, the quest and the sponsored card on the right when there is room,
-//! over the game's own panorama. Friends top-right, the announcement
+//! mod's): the menu down the left (Play first, in the launcher's blue), you
+//! standing in a whole block world (`title_world`) in the middle with your nametag
+//! over your head, the quest and the sponsored card on the right when there is
+//! room. Friends top-right, the announcement
 //! top-centre, the version and Mojang's line along the bottom.
 
 use super::ads::{self, Ad};
@@ -56,11 +56,12 @@ pub struct TitleInfo {
     pub player: String,
 }
 
-const PITCH: f32 = 0.3;
+/// The preview tilts down onto you as much as the world's camera does, so you stand in it.
+const PITCH: f32 = super::title_world::PITCH as f32;
 
 #[derive(Default)]
 pub struct TitleView {
-    /// You, standing on the floating island.
+    /// You, standing in the world (`title_world`).
     player: super::preview3d::PlayerPreview,
     /// The banner text closed with its X (this session), the quest card's quest and the picked reward.
     hidden_banner: Option<String>,
@@ -101,15 +102,20 @@ impl TitleView {
         1.0 - (1.0 - a).powi(3)
     }
 
-    /// The panorama shading, submitted before all foreground UI. The new title (`main`) keeps the world clear
-    /// where you stand, darker behind the menu, along the top and along the bottom (the island fades into it).
+    /// The background, submitted before all foreground UI: you in a whole block world (`title_world`: baked once off
+    /// the game thread, then a picture per frame) over the game's panorama, and its shading. The new title (`main`)
+    /// keeps the world clear where you stand, darker behind the menu, along the top and along the bottom (under the
+    /// cards and the footer).
     pub fn background(&self, c: &mut Canvas, main: bool) {
         let (w, h) = (c.width(), c.height());
+        if super::title_world::prepare(c, w, h) > 0.0 {
+            super::title_world::draw(c, 0.0, 0.0, w, h);
+        }
         if main {
             c.fill(0.0, 0.0, w, h, 0x1A000000);
             c.gradient_h(0.0, 0.0, (w * 0.55).min(680.0), h, 0xB3000000, 0x00000000);
             c.gradient_v(0.0, 0.0, w, 110.0, 0x59000000, 0x00000000);
-            c.gradient_v(0.0, h * 0.68, w, h * 0.32 + 1.0, 0x00000000, 0xE6000000);
+            c.gradient_v(0.0, h * 0.7, w, h * 0.3 + 1.0, 0x00000000, 0xB3000000);
             return;
         }
         c.fill(0.0, 0.0, w, h, 0x45000000);
@@ -142,19 +148,15 @@ impl TitleView {
         let stage_r = if cards { w_all - pad - cards_w - 12.0 } else { w_all - pad };
         let stage_w = stage_r - stage_x;
 
-        // You, on the island.
+        // You, standing on the world's ground (it was drawn for your feet to land here).
         if stage_w >= 200.0 {
-            let s = 9.5f32.min((h_all / 84.0).min(stage_w / 66.0));
-            let feet = h_all * 0.6 + (ui.now / 1700.0).sin() as f32 * 3.0; // floating, gently
+            let s = (super::title_world::player_height(h_all) / 32.0).min(stage_w / 66.0);
+            let feet = h_all * super::title_world::FEET;
             let (bw, bh) = (30.0 * s, 50.0 * s); // the preview frames the model in 30 x 50 model pixels
             let cx = stage_x + stage_w / 2.0;
-            let top = feet - 16.0 * PITCH.cos() * s - 3.0 * s - bh / 2.0;
+            let top = feet - 19.0 * s - bh / 2.0;
             let e = self.appear(ui, 3);
             c.push_alpha(e);
-            // A soft light behind, so the island reads over any background.
-            c.shadow(cx - 44.0 * s, feet - 34.0 * s, 88.0 * s, 60.0 * s, 44.0 * s, 90.0, 0x1CFFFFFF);
-            self.player.stage = Some(super::title_island::draw);
-            self.player.stage_front = Some(super::title_island::draw_front);
             self.player.set_pitch(PITCH);
             self.player.nametag = Some(info.player.clone()).filter(|n| !n.is_empty());
             let locker = super::wardrobe::snapshot();
