@@ -44,6 +44,10 @@ struct SessionState {
     status: Status,
     ticket: Option<String>,
     account: Option<Account>,
+    generation: u64,
+    active_uuid: Option<String>,
+    active_online: bool,
+    active_switched: bool,
     api: String,
     dir: Option<PathBuf>,
     stamp: Option<SystemTime>,
@@ -62,6 +66,10 @@ fn state() -> &'static (Mutex<SessionState>, Condvar) {
                 status: Status::Guest,
                 ticket: None,
                 account: None,
+                generation: 0,
+                active_uuid: None,
+                active_online: false,
+                active_switched: false,
                 api: DEFAULT_API.to_owned(),
                 dir: None,
                 stamp: None,
@@ -104,6 +112,42 @@ pub fn api() -> String {
 /// The Native account the ticket belongs to (`None` until it has been checked once).
 pub fn account() -> Option<Account> {
     lock().account.clone()
+}
+
+/// Monotonic counter bumped whenever the active session ticket or verified account changes.
+pub fn generation() -> u64 {
+    lock().generation
+}
+
+/// Records the active in-game account identity after a title-screen account switch.
+pub fn set_active_identity(uuid: Option<String>, online: bool) {
+    let mut s = lock();
+    s.active_uuid = uuid;
+    s.active_online = online;
+    s.active_switched = true;
+}
+
+pub fn active_identity() -> (bool, Option<String>, bool) {
+    let s = lock();
+    (s.active_switched, s.active_uuid.clone(), s.active_online)
+}
+
+/// Immediately re-reads the launcher's hand-off file after an in-game account switch.
+pub fn reload_handoff() {
+    let mut s = lock();
+    if s.standalone {
+        return;
+    }
+    let dir = s.dir.clone();
+    if let Some(dir) = dir.as_deref() {
+        s.stamp = stamp(dir);
+        let fresh = read_handoff(dir);
+        adopt(&mut s, fresh);
+    } else {
+        adopt(&mut s, None);
+    }
+    drop(s);
+    wake();
 }
 
 /// Only Native over https (or loopback http for development) may receive the ticket.
@@ -155,6 +199,8 @@ fn stamp(dir: &std::path::Path) -> Option<SystemTime> {
 }
 
 fn adopt(s: &mut SessionState, handoff: Option<Handoff>) {
+    s.account = None;
+    s.generation = s.generation.wrapping_add(1);
     match handoff {
         None => {
             s.ticket = None;
@@ -312,10 +358,15 @@ fn verify(used: &str, api: &str) {
         Ok(root) => {
             let a = root.get("account");
             let text = |k: &str| a.and_then(|a| a.get(k)).and_then(Value::as_str).map(str::to_owned);
-            s.account = Some(Account { id: text("id"), name: text("name"), uuid: text("uuid"), model: text("model") });
+            let next_acc = Account { id: text("id"), name: text("name"), uuid: text("uuid"), model: text("model") };
+            let changed = s.status != Status::SignedIn || s.account.as_ref() != Some(&next_acc);
+            s.account = Some(next_acc);
             s.verified_at = Some(Instant::now());
             s.failures = 0;
             s.status = Status::SignedIn;
+            if changed {
+                s.generation = s.generation.wrapping_add(1);
+            }
         }
         Err(HttpError::Unauthorized) => {
             drop(s);

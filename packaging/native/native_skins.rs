@@ -417,6 +417,17 @@ pub fn apply_snapshot(directory: &mut Directory, body: &str) -> Result<(), Strin
 }
 
 static DIRECTORY: OnceLock<RwLock<Directory>> = OnceLock::new();
+static LOCAL_PLAYER: OnceLock<RwLock<Option<String>>> = OnceLock::new();
+
+/// Remembers the local client's active player name so offline Native Client players still show the Native nametag icon.
+pub fn set_local_player(name: Option<&str>) {
+    let slot = LOCAL_PLAYER.get_or_init(|| RwLock::new(None));
+    let mut guard = slot.write().unwrap_or_else(|e| e.into_inner());
+    let next = name.map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    if *guard != next {
+        *guard = next;
+    }
+}
 
 /// The shared directory, filled by the sync thread (started on first use).
 pub fn directory() -> std::sync::RwLockReadGuard<'static, Directory> {
@@ -450,7 +461,18 @@ fn start() {
 fn mark_of(name: &str, id: Option<u128>) -> Option<bool> {
     let self_name = crate::discord_presence::native_account();
     let directory = shared().read().unwrap_or_else(|e| e.into_inner());
-    directory.mark(name, id, self_name.as_deref())
+    if let Some(plus) = directory.mark(name, id, self_name.as_deref()) {
+        return Some(plus);
+    }
+    let local = LOCAL_PLAYER
+        .get()
+        .and_then(|lock| lock.read().ok().and_then(|g| g.clone()));
+    if let Some(mine) = local.as_deref()
+        && key(mine) == key(name)
+    {
+        return Some(false);
+    }
+    None
 }
 
 /// Only Native over https (or loopback http for development) is asked for

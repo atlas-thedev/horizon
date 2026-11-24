@@ -145,6 +145,14 @@ impl Locker {
 
     #[allow(clippy::too_many_arguments)]
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, who: &str, page_at: f64, x: f32, y: f32, w: f32, h: f32, in_world: bool) -> LockerAct {
+        wardrobe::sync_session();
+        if !net::signed_in() {
+            self.try_on = None;
+            self.preview_skin_id = None;
+            card_shell(c, x, y, w, h);
+            session_lock(ui, c, "locker:lock", x + 16.0, y + 16.0, w - 32.0, h - 32.0);
+            return LockerAct::None;
+        }
         let l = wardrobe::snapshot();
         if !who.is_empty() && l.saved_skins.is_empty() && !l.skins_loading {
             wardrobe::refresh_skins(who, false);
@@ -239,7 +247,7 @@ impl Locker {
             return LockerAct::None;
         }
 
-        let rail_w = (bw * 0.27).clamp(92.0, 112.0);
+        let rail_w = (bw * 0.29).clamp(106.0, 130.0);
         self.draw_category_rail(ui, c, l, bx, by, rail_w, bh);
         c.fill(bx + rail_w + 8.0, by, 1.0, bh, theme::HAIRLINE);
         self.draw_cosmetics_grid(ui, c, l, bx + rail_w + 16.0, by, bw - rail_w - 16.0, bh, page_at);
@@ -249,14 +257,18 @@ impl Locker {
     #[allow(clippy::too_many_arguments)]
     fn draw_category_rail(&mut self, ui: &mut Ui, c: &mut Canvas, l: &wardrobe::Locker, x: f32, y: f32, w: f32, h: f32) {
         let mut ry = y;
-        let rh = ((h - 24.0) / SLOTS.len() as f32).min(34.0);
+        let gap = 5.0;
+        let rh = ((h - gap * (SLOTS.len() - 1) as f32) / SLOTS.len() as f32).min(36.0);
         let lh = c.line_height(font::SEMIBOLD, 11.5);
-        let clh = c.line_height(font::MEDIUM, 10.0);
+        let clh = c.line_height(font::SEMIBOLD, 9.5);
         for i in 0..SLOTS.len() {
             let count = wardrobe::owned_in(l, SLOTS[i]).len();
             let id = format!("locker:cat:{i}");
             let active = self.slot == i;
             let over = ui.hover(c, x, ry, w, rh);
+            if over {
+                ui.cursor_hand = true;
+            }
             if ui.clicked(c, &id, x, ry, w, rh) && self.slot != i {
                 self.slot = i;
                 self.try_on = None;
@@ -270,20 +282,40 @@ impl Locker {
             }
             let on = ui.anim_on(&format!("{id}#on"), active, 16.0);
             let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-            c.round(x, ry, w, rh, 9.0, theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv * 0.75), 0x1AFFFFFF, on));
-            if on > 0.01 {
-                c.outline(x, ry, w, rh, 9.0, 1.0, theme::alpha(theme::HAIRLINE_STRONG, on));
+            let accent = SLOT_COLORS[i];
+            let bg = theme::mix(theme::alpha(theme::SUBTLE_HOVER, hv * 0.72), theme::alpha(accent, 0.16), on);
+            c.round(x, ry, w, rh, 10.0, bg);
+            let edge = theme::mix(theme::alpha(theme::HAIRLINE, hv), theme::mix(theme::HAIRLINE_STRONG, theme::alpha(accent, 0.55), 0.65), on);
+            if hv > 0.01 || on > 0.01 {
+                c.outline(x, ry, w, rh, 10.0, 1.0, edge);
             }
-            c.circle(x + 12.0, ry + rh / 2.0, 3.5, SLOT_COLORS[i]);
+            if on > 0.02 {
+                c.round(x, ry + 7.0, 3.0, (rh - 14.0).max(8.0), 1.5, theme::alpha(accent, on));
+            }
+            // Crisp category icon badge (no dot)
+            let icon_s = (rh - 10.0).min(22.0);
+            let icon_x = x + 8.0;
+            let icon_y = ry + (rh - icon_s) / 2.0;
+            c.round(icon_x, icon_y, icon_s, icon_s, 6.5, theme::mix(theme::mix(0x14FFFFFF, 0x22FFFFFF, hv), theme::alpha(accent, 0.24), on));
+            let icon_fg = theme::mix(theme::mix(theme::TEXT_MUTED, theme::TEXT_STRONG, hv), accent, on);
+            slot_icon(c, SLOT_ICONS[i], (icon_s * 0.58).min(12.5), icon_x + icon_s / 2.0, icon_y + icon_s / 2.0, icon_fg);
+
             let fg = theme::mix(theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv), theme::TEXT_STRONG, on);
             let cnt = count.to_string();
-            let cw = c.text_width(font::MEDIUM, 10.0, &cnt);
-            let lbl = c.ellipsize(font::SEMIBOLD, 11.5, SLOT_LABELS[i], (w - 32.0 - cw).max(20.0));
-            c.text(font::SEMIBOLD, 11.5, &lbl, x + 22.0, ry + (rh - lh) / 2.0, fg);
+            let badge_w = if count > 0 { (c.text_width(font::SEMIBOLD, 9.5, &cnt) + 10.0).max(18.0) } else { 0.0 };
+            let text_x = icon_x + icon_s + 8.0;
+            let lbl_max = (w - (text_x - x) - if count > 0 { badge_w + 10.0 } else { 8.0 }).max(20.0);
+            let lbl = c.ellipsize(font::SEMIBOLD, 11.5, SLOT_LABELS[i], lbl_max);
+            c.text(font::SEMIBOLD, 11.5, &lbl, text_x, ry + (rh - lh) / 2.0, fg);
             if count > 0 {
-                c.text(font::MEDIUM, 10.0, &cnt, x + w - 8.0 - cw, ry + (rh - clh) / 2.0, if active { theme::TEXT_STRONG } else { theme::TEXT_MUTED });
+                let bh = 16.0;
+                let bx = x + w - 7.0 - badge_w;
+                let by = ry + (rh - bh) / 2.0;
+                c.round(bx, by, badge_w, bh, 8.0, theme::mix(theme::SUBTLE, accent, on));
+                let cw = c.text_width(font::SEMIBOLD, 9.5, &cnt);
+                c.text(font::SEMIBOLD, 9.5, &cnt, bx + (badge_w - cw) / 2.0, by + (bh - clh) / 2.0, theme::mix(theme::TEXT_SECONDARY, 0xFFFFFFFF, on));
             }
-            ry += rh + 4.0;
+            ry += rh + gap;
         }
     }
 

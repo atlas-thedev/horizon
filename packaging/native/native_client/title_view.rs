@@ -32,6 +32,8 @@ pub enum TitleAct {
     Accessibility,
     /// The vanilla title screen from now on.
     Classic,
+    /// Switch between "modern" (3D world + player) and "simple" (v2.5.75 centered) title layouts.
+    SetStyle(String),
     /// An ad's server.
     Join(String),
     /// One of the game's multiplayer list buttons (`multiplayer::Screen::click`), with the saved server selected.
@@ -55,6 +57,7 @@ pub struct TitleInfo {
     pub allows_multiplayer: bool,
     pub game_dir: Option<std::path::PathBuf>,
     pub player: String,
+    pub simple_style: bool,
 }
 
 /// The preview tilts down onto you as much as the world's camera does, so you stand in it.
@@ -63,6 +66,8 @@ const PITCH: f32 = super::title_world::PITCH as f32;
 #[derive(Default)]
 pub struct TitleView {
     accounts: super::title_accounts::TitleAccounts,
+    style_menu_open: bool,
+    style_menu_motion: f32,
     /// You, standing in the world (`title_world`).
     player: super::preview3d::PlayerPreview,
     /// The banner text closed with its X (this session), the quest card's quest and the picked reward.
@@ -99,7 +104,7 @@ impl TitleView {
     }
 
     pub fn accounts_open(&self) -> bool {
-        self.accounts.is_open()
+        self.accounts.is_open() || self.style_menu_open
     }
 
     /// The title came up: the rows rise in again.
@@ -120,8 +125,14 @@ impl TitleView {
     /// picture of the map, made once and kept in the game folder) over the game's panorama, and its shading. The new title (`main`)
     /// keeps the world clear where you stand, darker behind the menu, along the top and along the bottom (under the
     /// cards and the footer).
-    pub fn background(&self, c: &mut Canvas, main: bool) {
+    pub fn background(&self, c: &mut Canvas, main: bool, simple: bool) {
         let (w, h) = (c.width(), c.height());
+        if simple {
+            c.fill(0.0, 0.0, w, h, 0x33000000);
+            c.gradient_v(0.0, 0.0, w, 120.0, 0x7A000000, 0x00000000);
+            c.gradient_v(0.0, h * 0.55, w, h * 0.45 + 1.0, 0x00000000, 0xA6000000);
+            return;
+        }
         super::title_world::draw(c, 0.0, 0.0, w, h);
         if main {
             c.fill(0.0, 0.0, w, h, 0x1A000000);
@@ -137,10 +148,18 @@ impl TitleView {
 
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, info: &TitleInfo) -> Option<TitleAct> {
         self.opened(ui);
+        super::wardrobe::sync_session();
         let (w_all, h_all) = (c.width(), c.height());
-        let accounts_open = self.accounts.is_open();
+        let simple = info.simple_style;
+        if self.accounts.is_open() && self.style_menu_open {
+            self.style_menu_open = false;
+        }
+        if ui.interactive && self.style_menu_open && ui.key(ui::KEY_ESCAPE) {
+            self.style_menu_open = false;
+        }
+        let overlay_open = self.accounts.is_open() || self.style_menu_open;
         let interactive = ui.interactive;
-        if accounts_open {
+        if overlay_open {
             ui.interactive = false;
         }
         let inn = ui.anim("title#in", 1.0, 4.0);
@@ -155,46 +174,207 @@ impl TitleView {
         });
         let ads: Vec<Ad> = ads::list(info.game_dir.clone()).into_iter().filter(|a| !self.hidden_ads.contains(&a.id)).collect();
         let quests = home.as_ref().is_some_and(|d| !d.quests.is_empty());
+        let pad = if simple { 16.0 } else if w_all < 1000.0 { 24.0 } else { 44.0 };
+        let pill = self.appear(ui, 1);
 
-        // Three columns: the menu, you, the cards (only when there is room for all three).
-        let pad = if w_all < 1000.0 { 24.0 } else { 44.0 };
-        let pw = (w_all * 0.26).clamp(270.0, 340.0);
-        let cards_w = (w_all * 0.23).min(300.0);
-        let cards = (quests || !ads.is_empty()) && cards_w >= 230.0 && w_all - pad * 2.0 - pw - cards_w >= 360.0;
-        let stage_x = pad + pw + 12.0;
-        let stage_r = if cards { w_all - pad - cards_w - 12.0 } else { w_all - pad };
-        let stage_w = stage_r - stage_x;
+        if simple {
+            if let Some(a) = self.draw_simple_layout(ui, c, info, home.as_ref(), promo.as_ref(), &ads, w_all, h_all, pill) {
+                act = Some(a);
+            }
+        } else {
+            // Three columns: the menu, you, the cards (only when there is room for all three).
+            let pw = (w_all * 0.26).clamp(270.0, 340.0);
+            let cards_w = (w_all * 0.23).min(300.0);
+            let cards = (quests || !ads.is_empty()) && cards_w >= 230.0 && w_all - pad * 2.0 - pw - cards_w >= 360.0;
+            let stage_x = pad + pw + 12.0;
+            let stage_r = if cards { w_all - pad - cards_w - 12.0 } else { w_all - pad };
+            let stage_w = stage_r - stage_x;
 
-        // You, standing on the world's ground (it was drawn for your feet to land here).
-        if stage_w >= 200.0 {
-            let s = (super::title_world::player_height(h_all) / 32.0).min(stage_w / 66.0);
-            let feet = h_all * super::title_world::FEET;
-            let (bw, bh) = (30.0 * s, 50.0 * s); // the preview frames the model in 30 x 50 model pixels
-            let cx = stage_x + stage_w / 2.0;
-            let top = feet - 19.0 * s - bh / 2.0;
-            let e = self.appear(ui, 3);
-            c.push_alpha(e);
-            self.player.set_pitch(PITCH);
-            self.player.nametag = Some(info.player.clone()).filter(|n| !n.is_empty());
-            let locker = super::wardrobe::snapshot();
-            self.player.draw(ui, c, "title:you", cx - bw / 2.0, top + (1.0 - e) * 18.0, bw, bh, &locker, &info.player, None, None);
+            // You, standing on the world's ground (it was drawn for your feet to land here).
+            if stage_w >= 200.0 {
+                let s = (super::title_world::player_height(h_all) / 32.0).min(stage_w / 66.0);
+                let feet = h_all * super::title_world::FEET;
+                let (bw, bh) = (30.0 * s, 50.0 * s); // the preview frames the model in 30 x 50 model pixels
+                let cx = stage_x + stage_w / 2.0;
+                let top = feet - 19.0 * s - bh / 2.0;
+                let e = self.appear(ui, 3);
+                c.push_alpha(e);
+                self.player.set_pitch(PITCH);
+                self.player.nametag = Some(info.player.clone()).filter(|n| !n.is_empty());
+                let locker = super::wardrobe::snapshot();
+                self.player.draw(ui, c, "title:you", cx - bw / 2.0, top + (1.0 - e) * 18.0, bw, bh, &locker, &info.player, None, None);
+                c.pop_alpha();
+            }
+
+            // The menu.
+            if let Some(a) = self.menu(ui, c, info, home.as_ref(), promo.as_ref(), pad, pw, h_all) {
+                act = Some(a);
+            }
+
+            // Top-right: friends online (opens Relay).
+            c.push_alpha(pill);
+            if self.friends_pill(ui, c, w_all - pad + 8.0, 61.0) {
+                act = Some(TitleAct::Relay);
+            }
             c.pop_alpha();
-        }
+            // Top-centre: the sale (with its countdown) or the announcement.
+            if let Some(d) = home.as_ref()
+                && let Some(b) = d.banner.as_ref()
+                && self.hidden_banner.as_deref() != Some(b.text.as_str())
+            {
+                c.push_alpha(self.appear(ui, 0));
+                self.banner(ui, c, d, b, w_all, 14.0);
+                c.pop_alpha();
+            }
+            // Right: the sponsored card at the bottom, the quest card over it.
+            if cards {
+                let card_x = w_all - pad - cards_w;
+                let mut cy = h_all - 40.0;
+                let e = self.appear(ui, 5);
+                c.push_alpha(e);
+                if !ads.is_empty() {
+                    let ad_h = cards_w * 5.0 / 12.0 + 62.0;
+                    if cy - ad_h >= 64.0 {
+                        cy -= ad_h;
+                        if let Some(a) = self.ad_card(ui, c, &ads, card_x + (1.0 - e) * 20.0, cy, cards_w) {
+                            act = Some(a);
+                        }
+                        cy -= 12.0;
+                    }
+                }
+                if let Some(d) = home.as_ref().filter(|_| quests) {
+                    let qh = quest_height(cards_w);
+                    if cy - qh >= 64.0
+                        && let Some(a) = self.quest_card(ui, c, d, card_x + (1.0 - e) * 20.0, cy - qh, cards_w, qh)
+                    {
+                        act = Some(a);
+                    }
+                }
+                c.pop_alpha();
+            }
 
-        // The menu.
-        if let Some(a) = self.menu(ui, c, info, home.as_ref(), promo.as_ref(), pad, pw, h_all) {
+            // The footer, as vanilla: the version bottom-left, Mojang bottom-right.
+            let fy = h_all - 22.0;
+            let version = format!("Minecraft {}  \u{b7}  Native Client", horizon_core::VANILLA_VERSION);
+            c.text(font::MEDIUM, 11.0, &version, pad, fy, 0x99FFFFFF);
+            let copy = "Copyright Mojang AB. Do not distribute!";
+            let cwid = c.text_width(font::MEDIUM, 11.0, copy);
+            c.text(font::MEDIUM, 11.0, copy, w_all - pad - cwid, fy, 0x99FFFFFF);
+        }
+        c.pop_alpha();
+
+        // Top-right Native bar: Style dropdown (Modern / Simple / Vanilla) + Account switcher
+        let right_edge = if simple { w_all - 16.0 } else { w_all - pad + 8.0 };
+        let account_chip_w = (c.text_width(font::SEMIBOLD, 12.5, &info.player) + 65.0).clamp(118.0, 172.0);
+        ui.interactive = interactive && !self.accounts.is_open();
+        if let Some(style_act) = self.draw_style_dropdown(ui, c, right_edge - account_chip_w - 8.0, 16.0, simple, inn * pill) {
+            act = Some(style_act);
+        }
+        ui.interactive = interactive && !self.style_menu_open;
+        if let Some(grant) = self.accounts.draw(ui, c, right_edge, 16.0, &info.player, inn * pill) {
+            ui.interactive = interactive;
+            return Some(TitleAct::SwitchAccount(grant));
+        }
+        ui.interactive = interactive;
+        act
+    }
+
+    /// v2.5.75 Simple Native title layout: centered vanilla-style column over the game's panorama & logo, extras in corners.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_simple_layout(
+        &mut self,
+        ui: &mut Ui,
+        c: &mut Canvas,
+        info: &TitleInfo,
+        home: Option<&super::home::Doc>,
+        promo: Option<&super::home::Promo>,
+        ads: &[Ad],
+        w_all: f32,
+        h_all: f32,
+        pill: f32,
+    ) -> Option<TitleAct> {
+        let mut act = None;
+        let tr = |key: &str, fallback: &str| horizon_client::lang::get_or(key, fallback);
+        let mp = info.allows_multiplayer;
+
+        // Top-left: compact Native brand
+        c.icon(icons::for_module("watermark", u32::MAX), 24.0, 31.0, 29.0, 0xFFFFFFFF);
+        c.text(font::BOLD, 16.0, "Native", 52.0, 18.0, theme::TEXT_STRONG);
+
+        // Centered column (v2.5.75 proportions)
+        let (bw, bh, step) = (400.0f32.min(w_all - 120.0), 40.0f32, 48.0f32);
+        let half = (bw - 8.0) / 2.0;
+        let x = (w_all - bw) / 2.0;
+        let total = step * 4.0 + 12.0 + bh + if promo.is_some() { PROMO_H + 12.0 } else { 0.0 };
+        let mut y = 96.0f32.max((h_all / 4.0 + 96.0).min(h_all - 44.0 - total));
+
+        if self.simple_row_button(ui, c, 0, "menu:singleplayer", x, y, bw, bh, &tr("menu.singleplayer", "Singleplayer"), true) {
+            act = Some(TitleAct::Singleplayer);
+        }
+        y += step;
+        if self.simple_row_button(ui, c, 1, "menu:multiplayer", x, y, bw, bh, &tr("menu.multiplayer", "Multiplayer"), mp) {
+            act = Some(TitleAct::Multiplayer);
+        }
+        y += step;
+        if self.simple_row_button(ui, c, 2, "menu:realms", x, y, bw, bh, &tr("menu.online", "Minecraft Realms"), mp) {
+            act = Some(TitleAct::Realms);
+        }
+        y += step;
+        if self.simple_row_button(ui, c, 3, "menu:nativemods", x, y, bw, bh, "Native Mods", true) {
+            act = Some(TitleAct::NativeMods);
+        }
+        y += step + 12.0;
+
+        let e = self.appear(ui, 4);
+        c.push_alpha(e);
+        if button(ui, c, "menu:options", x, y, half, bh, &tr("menu.options", "Options..."), 0) {
+            act = Some(TitleAct::Options);
+        }
+        if button(ui, c, "menu:quit", x + half + 8.0, y, half, bh, &tr("menu.quit", "Quit Game"), 0) {
+            act = Some(TitleAct::Quit);
+        }
+        if button(ui, c, "menu:relay", x - bh - 8.0, y, bh, bh, "", theme::I_MESSAGE) {
+            act = Some(TitleAct::Relay);
+        }
+        if ui.hover(c, x - bh - 8.0, y, bh, bh) {
+            ui.tip("Relay: friends and chat");
+        }
+        let unread = relay::unread_total();
+        if unread > 0 {
+            badge(c, x - 2.0, y + 2.0, unread);
+        }
+        if button(ui, c, "menu:language", x - (bh + 8.0) * 2.0, y, bh, bh, "", theme::I_GLOBE) {
+            act = Some(TitleAct::Language);
+        }
+        if ui.hover(c, x - (bh + 8.0) * 2.0, y, bh, bh) {
+            ui.tip(&tr("options.language", "Language..."));
+        }
+        if button(ui, c, "menu:classic", x + bw + 8.0, y, bh, bh, "", theme::I_LAYERS) {
+            act = Some(TitleAct::Classic);
+        }
+        if ui.hover(c, x + bw + 8.0, y, bh, bh) {
+            ui.tip("Vanilla title screen");
+        }
+        if button(ui, c, "menu:accessibility", x + bw + 8.0 + bh + 8.0, y, bh, bh, "", theme::I_PERSON) {
+            act = Some(TitleAct::Accessibility);
+        }
+        if ui.hover(c, x + bw + 8.0 + bh + 8.0, y, bh, bh) {
+            ui.tip(&tr("options.accessibility", "Accessibility Settings..."));
+        }
+        if let (Some(p), Some(d)) = (promo, home)
+            && let Some(a) = self.promo_card(ui, c, p, d, x, y + bh + 12.0, bw, PROMO_H)
+        {
             act = Some(a);
         }
+        c.pop_alpha();
 
-        // Top-right: friends online (opens Relay).
-        let pill = self.appear(ui, 1);
+        // Top-right under the Native bar: friends online
         c.push_alpha(pill);
-        if self.friends_pill(ui, c, w_all - pad + 8.0, 61.0) {
+        if self.friends_pill(ui, c, w_all - 16.0, 61.0) {
             act = Some(TitleAct::Relay);
         }
         c.pop_alpha();
-        // Top-centre: the sale (with its countdown) or the announcement.
-        if let Some(d) = home.as_ref()
+        if let Some(d) = home
             && let Some(b) = d.banner.as_ref()
             && self.hidden_banner.as_deref() != Some(b.text.as_str())
         {
@@ -202,46 +382,151 @@ impl TitleView {
             self.banner(ui, c, d, b, w_all, 14.0);
             c.pop_alpha();
         }
-        // Right: the sponsored card at the bottom, the quest card over it.
-        if cards {
-            let card_x = w_all - pad - cards_w;
-            let mut cy = h_all - 40.0;
-            let e = self.appear(ui, 5);
-            c.push_alpha(e);
-            if !ads.is_empty() {
-                let ad_h = cards_w * 5.0 / 12.0 + 62.0;
-                if cy - ad_h >= 64.0 {
-                    cy -= ad_h;
-                    if let Some(a) = self.ad_card(ui, c, &ads, card_x + (1.0 - e) * 20.0, cy, cards_w) {
-                        act = Some(a);
-                    }
-                    cy -= 12.0;
-                }
-            }
-            if let Some(d) = home.as_ref().filter(|_| quests) {
-                let qh = quest_height(cards_w);
-                if cy - qh >= 64.0
-                    && let Some(a) = self.quest_card(ui, c, d, card_x + (1.0 - e) * 20.0, cy - qh, cards_w, qh)
-                {
+        // Bottom-left: quest card when there is room
+        let qside = (w_all - bw) / 2.0 - bh - 8.0 - 32.0;
+        let qw = 300.0f32.min(qside);
+        if let Some(d) = home
+            && !d.quests.is_empty()
+            && qw >= 230.0
+        {
+            let qh = quest_height(qw);
+            let qy = h_all - 36.0 - qh;
+            if qy >= 64.0 {
+                let e = self.appear(ui, 5);
+                c.push_alpha(e);
+                if let Some(a) = self.quest_card(ui, c, d, 16.0 - (1.0 - e) * 20.0, qy, qw, qh) {
                     act = Some(a);
                 }
+                c.pop_alpha();
             }
-            c.pop_alpha();
         }
-
-        // The footer, as vanilla: the version bottom-left, Mojang bottom-right.
+        // Bottom-right: ad card when there is room
+        let cw = 300.0f32.min(qside);
+        if !ads.is_empty() && cw >= 230.0 {
+            let ad_h = cw * 5.0 / 12.0 + 62.0;
+            let ay = h_all - 36.0 - ad_h;
+            if ay >= 64.0 {
+                let e = self.appear(ui, 5);
+                c.push_alpha(e);
+                if let Some(a) = self.ad_card(ui, c, ads, w_all - 16.0 - cw + (1.0 - e) * 20.0, ay, cw) {
+                    act = Some(a);
+                }
+                c.pop_alpha();
+            }
+        }
         let fy = h_all - 22.0;
         let version = format!("Minecraft {}  \u{b7}  Native Client", horizon_core::VANILLA_VERSION);
-        c.text(font::MEDIUM, 11.0, &version, pad, fy, 0x99FFFFFF);
+        c.text(font::MEDIUM, 11.0, &version, 16.0, fy, 0xB3FFFFFF);
         let copy = "Copyright Mojang AB. Do not distribute!";
         let cwid = c.text_width(font::MEDIUM, 11.0, copy);
-        c.text(font::MEDIUM, 11.0, copy, w_all - pad - cwid, fy, 0x99FFFFFF);
-        c.pop_alpha();
-        ui.interactive = interactive;
-        if let Some(grant) = self.accounts.draw(ui, c, w_all - pad + 8.0, 16.0, &info.player, inn * pill) {
-            return Some(TitleAct::SwitchAccount(grant));
-        }
+        c.text(font::MEDIUM, 11.0, copy, w_all - 16.0 - cwid, fy, 0xB3FFFFFF);
         act
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn simple_row_button(&self, ui: &mut Ui, c: &mut Canvas, index: usize, id: &str, x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
+        let e = self.appear(ui, index);
+        c.push_alpha(e * if enabled { 1.0 } else { 0.5 });
+        let was = ui.interactive;
+        ui.interactive = was && enabled;
+        let hit = button(ui, c, id, x, y + (1.0 - e) * 10.0, w, h, label, 0) && enabled;
+        ui.interactive = was;
+        c.pop_alpha();
+        hit
+    }
+
+    /// Sleek Native dropdown bar for switching Title Screen style: Modern / Simple (v2.5.75) / Vanilla.
+    fn draw_style_dropdown(&mut self, ui: &mut Ui, c: &mut Canvas, right: f32, top: f32, simple: bool, entrance: f32) -> Option<TitleAct> {
+        let chip_h = 36.0;
+        let label = if simple { "Simple" } else { "Modern" };
+        let chip_w = (c.text_width(font::SEMIBOLD, 12.5, label) + 54.0).max(100.0);
+        let x = right - chip_w;
+        let over_chip = ui.hover(c, x, top, chip_w, chip_h);
+        if over_chip {
+            ui.cursor_hand = true;
+        }
+        let hv = ui.anim_on("title:style#h", over_chip || self.style_menu_open, 16.0);
+        c.push_alpha(entrance);
+        c.round(x, top, chip_w, chip_h, 10.0, theme::mix(0xE9090A0C, 0xFA121316, hv));
+        c.outline(x, top, chip_w, chip_h, 10.0, 1.0, theme::mix(0x20FFFFFF, 0x36FFFFFF, hv));
+        c.icon(if simple { theme::I_LAYERS } else { theme::I_SPARKLES }, 14.0, x + 17.0, top + chip_h / 2.0, theme::TEXT_STRONG);
+        let lh = c.line_height(font::SEMIBOLD, 12.5);
+        c.text(font::SEMIBOLD, 12.5, label, x + 31.0, top + (chip_h - lh) / 2.0, theme::TEXT_STRONG);
+        c.icon(if self.style_menu_open { theme::I_CHEVRON_UP } else { theme::I_CHEVRON_DOWN }, 12.0, x + chip_w - 14.0, top + chip_h / 2.0, theme::TEXT_SECONDARY);
+        if over_chip && !self.style_menu_open {
+            ui.tip("Title screen style");
+        }
+        if ui.clicked(c, "title:style:chip", x, top, chip_w, chip_h) {
+            self.style_menu_open = !self.style_menu_open;
+        }
+        c.pop_alpha();
+
+        let target = if self.style_menu_open { 1.0 } else { 0.0 };
+        self.style_menu_motion += (target - self.style_menu_motion) * (1.0 - (-23.0 * ui.dt).exp());
+        if (self.style_menu_motion - target).abs() < 0.01 {
+            self.style_menu_motion = target;
+        }
+        if self.style_menu_motion <= 0.0 {
+            return None;
+        }
+
+        let w = 264.0;
+        let dx = (right - w).max(8.0);
+        let dy = top + chip_h + 7.0 - 8.0 * (1.0 - self.style_menu_motion);
+        let row_h = 48.0;
+        let dh = 40.0 + row_h * 3.0 + 10.0;
+        if ui.interactive && self.style_menu_open && ui.pressed && !over_chip && !ui.hover(c, dx, dy, w, dh) {
+            self.style_menu_open = false;
+            return None;
+        }
+
+        let mut act = None;
+        c.push_alpha(self.style_menu_motion);
+        c.shadow(dx, dy + 4.0, w, dh, 13.0, 21.0, 0xA4000000);
+        c.round(dx, dy, w, dh, 13.0, 0xFC08090B);
+        c.outline(dx, dy, w, dh, 13.0, 1.0, theme::HAIRLINE_STRONG);
+        c.text(font::SEMIBOLD, 11.5, "Title screen layout", dx + 14.0, dy + 12.0, theme::TEXT_SECONDARY);
+        let (rx, rw) = (dx + 8.0, w - 16.0);
+        let mut ry = dy + 36.0;
+
+        if self.style_option_row(ui, c, "title:style:modern", rx, ry, rw, row_h - 4.0, theme::I_SPARKLES, "Modern", "3D world & character stage", !simple) {
+            self.style_menu_open = false;
+            act = Some(TitleAct::SetStyle("modern".to_owned()));
+        }
+        ry += row_h;
+        if self.style_option_row(ui, c, "title:style:simple", rx, ry, rw, row_h - 4.0, theme::I_LAYERS, "Simple", "Clean classic centered menu", simple) {
+            self.style_menu_open = false;
+            act = Some(TitleAct::SetStyle("simple".to_owned()));
+        }
+        ry += row_h;
+        if self.style_option_row(ui, c, "title:style:vanilla", rx, ry, rw, row_h - 4.0, theme::I_GAMEPAD, "Vanilla", "Original Minecraft look", false) {
+            self.style_menu_open = false;
+            act = Some(TitleAct::Classic);
+        }
+        c.pop_alpha();
+        act
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn style_option_row(&self, ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32, icon: u32, title: &str, desc: &str, active: bool) -> bool {
+        let over = ui.hover(c, x, y, w, h);
+        if over {
+            ui.cursor_hand = true;
+        }
+        let hv = ui.anim_on(&format!("{id}#h"), over, 18.0);
+        c.round(x, y, w, h, 9.0, theme::mix(if active { 0x16FFFFFF } else { 0x00000000 }, 0x22FFFFFF, hv));
+        if active {
+            c.outline(x, y, w, h, 9.0, 1.0, theme::HAIRLINE_STRONG);
+        }
+        c.round(x + 8.0, y + (h - 28.0) / 2.0, 28.0, 28.0, 7.5, if active { 0x283B8CF0 } else { 0x14FFFFFF });
+        c.icon(icon, 14.0, x + 22.0, y + h / 2.0, if active { 0xFF60A5FA } else { theme::TEXT_STRONG });
+        c.text(font::SEMIBOLD, 12.5, title, x + 44.0, y + 6.0, theme::TEXT_STRONG);
+        let fit = c.ellipsize(font::REGULAR, 10.5, desc, w - 74.0);
+        c.text(font::REGULAR, 10.5, &fit, x + 44.0, y + 23.0, theme::TEXT_SECONDARY);
+        if active {
+            c.icon(theme::I_CHECK, 13.0, x + w - 14.0, y + h / 2.0, 0xFF60A5FA);
+        }
+        ui.clicked(c, id, x, y, w, h)
     }
 
     /// The menu down the left: the brand, Play, the other ways in, then the small buttons and the promo.

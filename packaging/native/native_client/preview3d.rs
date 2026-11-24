@@ -41,18 +41,64 @@ impl Default for PlayerPreview {
     }
 }
 
-/// The skin the Native directory has for `name`: its image once loaded, whether it is still coming, and the arm width.
-fn skin_of(name: &str) -> (Option<Arc<Image>>, bool, Option<bool>) {
-    let (hash, base, slim) = {
-        let dir = horizon_client::native_skins::directory();
-        match dir.entry(name) {
-            Some(e) => (e.skin.clone(), dir.texture_base().to_owned(), Some(e.slim)),
-            None => (None, String::new(), None),
-        }
+fn is_signed_in_as(who: &str) -> bool {
+    if !net::signed_in() {
+        return false;
+    }
+    let Some(acc) = net::account() else {
+        return false;
     };
-    let Some(hash) = hash else { return (None, false, slim) };
-    let base = if base.is_empty() { wardrobe::base() } else { base };
-    match net::image(&net::hash_url(&base, &hash), 2 * 1024 * 1024) {
+    if who.is_empty() || acc.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(who)) {
+        return true;
+    }
+    let (switched, active_uuid, _) = net::active_identity();
+    switched
+        && active_uuid.as_deref().zip(acc.uuid.as_deref()).is_some_and(|(u1, u2)| {
+            u1.replace('-', "").eq_ignore_ascii_case(&u2.replace('-', ""))
+        })
+}
+
+/// The skin for `name`: Native directory (only when signed into Native), else Mojang for online accounts, else default.
+fn skin_of(name: &str, native_signed: bool) -> (Option<Arc<Image>>, bool, Option<bool>) {
+    if native_signed {
+        let lookup = net::account().and_then(|a| a.name);
+        let (hash, base, slim) = {
+            let dir = horizon_client::native_skins::directory();
+            let entry = dir.entry(name).or_else(|| lookup.as_deref().and_then(|n| dir.entry(n)));
+            match entry {
+                Some(e) => (e.skin.clone(), dir.texture_base().to_owned(), Some(e.slim)),
+                None => (None, String::new(), None),
+            }
+        };
+        if let Some(hash) = hash {
+            let base = if base.is_empty() { wardrobe::base() } else { base };
+            return match net::image(&net::hash_url(&base, &hash), 2 * 1024 * 1024) {
+                Pic::Ready(img) => (Some(img), false, slim),
+                Pic::Loading => (None, true, slim),
+                Pic::Failed => (None, false, slim),
+            };
+        }
+        if let Some(uuid) = net::account().and_then(|a| a.uuid).filter(|u| !u.is_empty()) {
+            return mojang_skin_image(&uuid, slim);
+        }
+        return (None, false, slim);
+    }
+    if net::status() == net::Status::Checking {
+        return (None, true, None);
+    }
+    let (switched, active_uuid, active_online) = net::active_identity();
+    if switched && active_online
+        && let Some(uuid) = active_uuid.filter(|u| !u.is_empty())
+    {
+        return mojang_skin_image(&uuid, None);
+    }
+    (None, false, Some(false))
+}
+
+fn mojang_skin_image(uuid: &str, slim: Option<bool>) -> (Option<Arc<Image>>, bool, Option<bool>) {
+    let clean = uuid.replace('-', "").to_lowercase();
+    let url = format!("https://mc-heads.net/skin/{clean}");
+    match net::image(&url, 2 * 1024 * 1024) {
         Pic::Ready(img) => (Some(img), false, slim),
         Pic::Loading => (None, true, slim),
         Pic::Failed => (None, false, slim),
@@ -174,11 +220,13 @@ impl PlayerPreview {
             feet = y + h / 2.0 + 3.0 * scale + 16.0 * self.pitch.cos() * scale;
         }
         c.shadow(cx - 9.0 * scale, feet - 1.5 * scale, 18.0 * scale, 3.0 * scale, 1.5 * scale, 10.0, 0x66000000);
+        wardrobe::sync_session();
+        let native_signed = is_signed_in_as(who);
         // The skin.
         let (skin, pending, slim) = if let Some((ref img, s)) = self.override_skin {
             (Some(img.clone()), false, Some(s))
         } else {
-            skin_of(who)
+            skin_of(who, native_signed)
         };
         if let Some(slim) = slim {
             self.slim = slim;
@@ -190,12 +238,13 @@ impl PlayerPreview {
             }
             return;
         }
-        // The cape: the store cape worn (or the one being hovered).
+        // The cape: the store cape worn (or the one being hovered), only for signed-in Native accounts.
         let mut cape: Option<Arc<Image>> = None;
         let (mut cape_frames, mut cape_frame) = (1u32, 0u32);
         let cape_item = match hover {
             Some(i) if i.is_cape() => Some(i.clone()),
-            _ => wardrobe::item(l, l.equipped.as_deref()),
+            _ if native_signed => wardrobe::item(l, l.equipped.as_deref()),
+            _ => None,
         };
         if bare != Some("capes")
             && let Some(item) = &cape_item
@@ -212,25 +261,27 @@ impl PlayerPreview {
         }
         // A back item (wings, blades, backpacks) takes the cape's place, like in game.
         let hover_back = hover.is_some_and(|h| !h.is_cape() && h.group() == "back");
-        let back_worn = bare != Some("back") && (l.wearing.contains_key("back") || hover_back);
+        let back_worn = bare != Some("back") && ((native_signed && l.wearing.contains_key("back")) || hover_back);
         if back_worn && !hover.is_some_and(Item::is_cape) {
             cape = None;
         }
-        // The cosmetics.
+        // The cosmetics (only for signed-in Native accounts, or explicit try-on hover).
         let mut worn: Vec<Item> = Vec::new();
-        for (slot, id) in &l.wearing {
-            if Some(slot.as_str()) == bare {
-                continue;
+        if native_signed {
+            for (slot, id) in &l.wearing {
+                if Some(slot.as_str()) == bare {
+                    continue;
+                }
+                let item = match hover {
+                    Some(h) if !h.is_cape() && h.group() == slot => Some(h.clone()),
+                    _ => wardrobe::item(l, Some(id)),
+                };
+                worn.extend(item);
             }
-            let item = match hover {
-                Some(h) if !h.is_cape() && h.group() == slot => Some(h.clone()),
-                _ => wardrobe::item(l, Some(id)),
-            };
-            worn.extend(item);
         }
         if let Some(h) = hover
             && !h.is_cape()
-            && !l.wearing.contains_key(h.group())
+            && (!native_signed || !l.wearing.contains_key(h.group()))
         {
             worn.push(h.clone());
         }
@@ -423,7 +474,7 @@ pub fn wheel_skin(name: &str) -> (Arc<Image>, bool) {
     use std::sync::{Mutex, OnceLock};
     static URLS: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
     static SMALL: OnceLock<Mutex<HashMap<u64, Arc<Image>>>> = OnceLock::new();
-    let (skin, _, directory_slim) = skin_of(name);
+    let (skin, _, directory_slim) = skin_of(name, is_signed_in_as(name));
     let local = wheel_local_look(name);
     let slim = directory_slim.or_else(|| local.as_ref().map(|(_, slim)| *slim))
         .or_else(|| net::account().and_then(|a| a.model).map(|m| m.eq_ignore_ascii_case("slim"))).unwrap_or(false);

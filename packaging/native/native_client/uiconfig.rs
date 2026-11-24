@@ -8,9 +8,21 @@ use std::path::{Path, PathBuf};
 #[serde(rename_all = "camelCase", default)]
 pub struct UiConfig {
     pub custom_title: bool,
+    /// Title screen layout: "modern" (3D world + player stage) or "simple" (centered v2.5.75 menu).
+    pub title_style: String,
     /// The Native multiplayer screen instead of vanilla's.
     pub custom_servers: bool,
     pub custom_pause: bool,
+    /// Pause menu layout: "modern" (Feather/Lunar glass card) or "compact" (minimal floating buttons).
+    pub pause_style: String,
+    /// Show server/world status header on the pause menu.
+    pub pause_show_status: bool,
+    /// Show Native quick-action strip (HUD Editor, Locker) on the pause menu.
+    pub pause_show_quick: bool,
+    /// Automatically include extra mod buttons on the pause menu.
+    pub pause_show_mod_buttons: bool,
+    /// Backdrop darkness behind the pause menu (0.20 .. 0.90).
+    pub pause_backdrop_dim: f32,
     pub notifications: bool,
     pub discord_rpc: Option<bool>,
     pub discord_hide_server: Option<bool>,
@@ -41,8 +53,14 @@ impl Default for UiConfig {
     fn default() -> Self {
         UiConfig {
             custom_title: true,
+            title_style: "modern".to_owned(),
             custom_servers: true,
             custom_pause: true,
+            pause_style: "modern".to_owned(),
+            pause_show_status: true,
+            pause_show_quick: true,
+            pause_show_mod_buttons: true,
+            pause_backdrop_dim: 0.58,
             notifications: true,
             discord_rpc: None,
             discord_hide_server: None,
@@ -75,6 +93,15 @@ impl UiConfig {
             .unwrap_or_default();
         if !(0.5..=2.5).contains(&cfg.scale) {
             cfg.scale = 1.0;
+        }
+        if cfg.title_style != "simple" {
+            cfg.title_style = "modern".to_owned();
+        }
+        if cfg.pause_style != "compact" {
+            cfg.pause_style = "modern".to_owned();
+        }
+        if !(0.2..=0.9).contains(&cfg.pause_backdrop_dim) {
+            cfg.pause_backdrop_dim = 0.58;
         }
         if !(0.0..=1.0).contains(&cfg.music_volume) {
             cfg.music_volume = 0.7;

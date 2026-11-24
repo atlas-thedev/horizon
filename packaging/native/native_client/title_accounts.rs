@@ -978,6 +978,11 @@ impl TitleAccounts {
                     Action::Applied(_) => {
                         self.selected = None;
                         self.status = tr("switched");
+                        if self.bridge.is_some() {
+                            super::net::reload_handoff();
+                        }
+                        super::wardrobe::reset();
+                        super::relay::reset_for_account_switch();
                     }
                     Action::MicrosoftStart if self.microsoft_form => {
                         self.microsoft_code = reply.code.unwrap_or_default();

@@ -1712,14 +1712,44 @@ fn prefetch(key: &str) {
 
 // ── live stream ──────────────────────────────────────────────────────────
 
+/// Clears cached identity, friends and groups when switching accounts in-game.
+pub fn reset_for_account_switch() {
+    let mut s = lock();
+    s.me_id = None;
+    s.me_name = None;
+    s.me_skin = None;
+    s.friends.clear();
+    s.groups.clear();
+    s.received.clear();
+    s.sent.clear();
+    s.blocked.clear();
+    s.requests = 0;
+    s.friends_loaded = false;
+    s.groups_loaded = false;
+    s.requests_loaded = false;
+    s.blocked_loaded = false;
+    s.link = if net::ticket().is_none() { Link::NoAccount } else { Link::Connecting };
+}
+
 fn stream_loop() {
     let mut backoff = Duration::from_secs(2);
     let mut loaded = false;
+    let mut last_gen = net::generation();
     loop {
+        let cur_gen = net::generation();
+        if cur_gen != last_gen {
+            last_gen = cur_gen;
+            loaded = false;
+            reset_for_account_switch();
+        }
         // Not signed in (guest, checking, expired): wait for the session instead of hammering Native.
         if !net::signed_in() {
             if net::ticket().is_none() {
-                lock().link = Link::NoAccount;
+                let mut s = lock();
+                s.link = Link::NoAccount;
+                s.me_id = None;
+                s.me_name = None;
+                s.me_skin = None;
             }
             loaded = false;
             std::thread::sleep(Duration::from_millis(1500));

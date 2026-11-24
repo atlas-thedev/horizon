@@ -40,17 +40,44 @@ fn key_of(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)) | 1 << 63
 }
 
-/// The signed-in player's own skin reference (store hash or "mj:uuid"), `None` when it is not known yet.
+/// The current player's own skin reference (store hash or "mj:uuid"), `None` for offline/default Steve.
 pub fn own(name: &str) -> Option<String> {
-    if !name.is_empty()
-        && let Some(hash) = horizon_client::native_skins::directory().entry(name).and_then(|e| e.skin.clone())
+    let signed_in = net::signed_in();
+    let acc = signed_in.then(net::account).flatten();
+    let (switched, active_uuid, active_online) = net::active_identity();
+    let matches_signed_in = signed_in
+        && acc.as_ref().is_some_and(|a| {
+            name.is_empty()
+                || a.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name))
+                || (switched
+                    && active_uuid.as_deref().zip(a.uuid.as_deref()).is_some_and(|(u1, u2)| {
+                        u1.replace('-', "").eq_ignore_ascii_case(&u2.replace('-', ""))
+                    }))
+        });
+    if matches_signed_in {
+        if !name.is_empty()
+            && let Some(hash) = horizon_client::native_skins::directory().entry(name).and_then(|e| e.skin.clone())
+        {
+            return Some(hash);
+        }
+        if let Some(aname) = acc.as_ref().and_then(|a| a.name.as_deref())
+            && let Some(hash) = horizon_client::native_skins::directory().entry(aname).and_then(|e| e.skin.clone())
+        {
+            return Some(hash);
+        }
+        if let Some(skin) = relay::snapshot().me_skin {
+            return Some(skin);
+        }
+        if let Some(u) = acc.and_then(|a| a.uuid) {
+            return Some(format!("mj:{}", u.replace('-', "").to_lowercase()));
+        }
+    }
+    if switched && active_online
+        && let Some(u) = active_uuid
     {
-        return Some(hash);
+        return Some(format!("mj:{}", u.replace('-', "").to_lowercase()));
     }
-    if let Some(skin) = relay::snapshot().me_skin {
-        return Some(skin);
-    }
-    net::account().and_then(|a| a.uuid).map(|u| format!("mj:{}", u.replace('-', "").to_lowercase()))
+    None
 }
 
 /// Steve's face, drawn.

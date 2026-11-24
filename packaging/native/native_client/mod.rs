@@ -187,7 +187,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             toggles_before: None,
             freelook_switched: false,
             relay: relay_view::RelayView::new(),
-            pause: pause_view::PauseView,
+            pause: pause_view::PauseView::default(),
             pause_was: false,
             relay_open: false,
             emote_wheel: emote_wheel::Wheel::default(),
@@ -353,7 +353,13 @@ impl Game<'_> {
             } else {
                 None
             },
-            player_name: self.options.player_name(),
+            player_name: {
+                let pname = self.options.player_name();
+                if !pname.is_empty() {
+                    horizon_client::native_skins::set_local_player(Some(&pname));
+                }
+                pname
+            },
             scoreboard_team: if in_world {
                 let pname = self.options.player_name();
                 self.score.board.players_team(&pname).map(|t| t.name.clone())
@@ -588,7 +594,7 @@ impl Game<'_> {
                     state.pause.opened(&mut state.ui);
                     state.pause_was = true;
                 }
-                pause_action = state.pause.draw(&mut state.ui, c, info);
+                pause_action = state.pause.draw(&mut state.ui, c, info, &mut state.cfg);
                 state.ui.tooltips(c);
                 state.ui.end();
             } else if open {
@@ -1262,6 +1268,14 @@ impl Game<'_> {
 
     fn native_pause_info(&self) -> pause_view::PauseInfo {
         let single = !self.external_server();
+        let player = self.options.player_name();
+        horizon_client::native_skins::set_local_player(Some(&player));
+        let server = if single {
+            String::new()
+        } else {
+            self.server_address().map(str::to_owned).unwrap_or_default()
+        };
+        let ping = if single { -1 } else { self.own_latency().unwrap_or(-1) };
         pause_view::PauseInfo {
             title: self.translate("menu.game", "Game Menu"),
             back: self.translate("menu.returnToGame", "Back to Game"),
@@ -1276,6 +1290,9 @@ impl Game<'_> {
             },
             single,
             unread: relay::unread_total(),
+            server,
+            ping,
+            player,
         }
     }
 
@@ -1283,14 +1300,14 @@ impl Game<'_> {
     fn native_pause_do(&mut self, action: pause_view::PauseAction) {
         use pause_view::PauseAction as P;
         let id = match action {
-            P::None => return,
+            P::None | P::ClassicPause => return,
             P::Resume => 0,
             P::Advancements => 4,
             P::Stats => 3,
             P::Options => 1,
             P::WorldOptions => 9,
             P::Leave => 2,
-            P::Relay | P::Menu | P::Cosmetics => {
+            P::Relay | P::Menu | P::Cosmetics | P::HudEditor | P::Settings => {
                 // The pause menu gives way to the Native screen (closing it returns to the game).
                 self.pause_focus = None;
                 self.screen = Screen::Playing;
@@ -1307,11 +1324,19 @@ impl Game<'_> {
                             }
                             P::Menu => {
                                 s.relay_open = false;
-                                s.apply(&menu::Action::OpenMenu(0));
+                                s.apply(&menu::Action::OpenMenu(menu::TAB_MODS));
+                            }
+                            P::HudEditor => {
+                                s.relay_open = false;
+                                s.apply(&menu::Action::EditHud);
+                            }
+                            P::Settings => {
+                                s.relay_open = false;
+                                s.apply(&menu::Action::OpenMenu(menu::TAB_SETTINGS));
                             }
                             _ => {
                                 s.relay_open = false;
-                                s.apply(&menu::Action::OpenMenu(1));
+                                s.apply(&menu::Action::OpenMenu(menu::TAB_LOCKER));
                             }
                         }
                     });
@@ -1343,7 +1368,13 @@ impl Game<'_> {
             }
             WindowEvent::MouseWheel { .. } => true,
             WindowEvent::KeyboardInput { event: key, .. } => {
-                !matches!(key.physical_key, PhysicalKey::Code(winit::keyboard::KeyCode::Escape))
+                if matches!(key.physical_key, PhysicalKey::Code(winit::keyboard::KeyCode::Escape)) {
+                    if key.state == ElementState::Pressed && !key.repeat {
+                        return with_state(|s| s.pause.escape());
+                    }
+                    return false;
+                }
+                true
             }
             _ => false,
         }
@@ -1376,9 +1407,9 @@ pub(super) fn native_title_active(title: &horizon_client::title::Title) -> bool 
     })
 }
 
-/// The new title screen has its own brand in its menu: the game's Minecraft logo is not drawn over it.
+/// The Modern title screen has its own brand in its menu; Simple (v2.5.75) shows the game's Minecraft logo above the column.
 pub(super) fn native_title_wants_logo() -> bool {
-    false
+    with_state(|s| s.cfg.title_style == "simple")
 }
 
 // ── the game's own textures (block textures for the title world), resource packs included ──
@@ -1430,7 +1461,7 @@ pub(super) fn native_title_background(batch: &mut HudBatch) {
         let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
         let c = &mut state.canvas;
         c.begin(fb[0], fb[1], scale);
-        state.title.background(c, state.title_main);
+        state.title.background(c, state.title_main, state.cfg.title_style == "simple");
         c.finish(batch);
     });
 }
@@ -1466,7 +1497,13 @@ pub(super) fn native_title_frame(
             state.title_overlay = 0;
         }
         let mut deferred = None;
-        let info = title_view::TitleInfo { allows_multiplayer, game_dir: game_dir(), player: player.to_owned() };
+        horizon_client::native_skins::set_local_player(Some(player));
+        let info = title_view::TitleInfo {
+            allows_multiplayer,
+            game_dir: game_dir(),
+            player: player.to_owned(),
+            simple_style: state.cfg.title_style == "simple",
+        };
         let overlay = if dialog.is_some() { 5 } else if servers.is_some() { 4 } else { state.title_overlay };
         if dialog.is_none() {
             state.servers_dialog.closed();
@@ -1548,6 +1585,10 @@ pub(super) fn native_title_frame(
                 }
                 Some(title_view::TitleAct::Classic) => {
                     state.cfg.custom_title = false;
+                    state.cfg.save();
+                }
+                Some(title_view::TitleAct::SetStyle(style)) => {
+                    state.cfg.title_style = if style == "simple" { "simple".to_owned() } else { "modern".to_owned() };
                     state.cfg.save();
                 }
                 Some(other) => state.title_pending = Some(other),
@@ -1708,6 +1749,8 @@ pub(super) fn native_title_account(options: &mut super::Options) {
     }
     let online = grant.online.then(|| horizon_client::auth::AuthSession::new(&grant.name, uuid, &grant.access_token));
     horizon_client::auth::replace_current(online);
+    net::set_active_identity(Some(grant.uuid.clone()), grant.online);
+    horizon_client::native_skins::set_local_player(Some(&grant.name));
     options.set_native_player_name(grant.name);
     with_state(|s| s.title.account_applied(grant.id));
 }
@@ -1788,7 +1831,7 @@ pub(super) fn native_title_apply(title: &mut horizon_client::title::Title, act: 
             with_state(|s| s.servers_classic = true);
             None
         }
-        TitleAct::NativeMods | TitleAct::Relay | TitleAct::Classic | TitleAct::SwitchAccount(_) => None,
+        TitleAct::NativeMods | TitleAct::Relay | TitleAct::Classic | TitleAct::SetStyle(_) | TitleAct::SwitchAccount(_) => None,
     }
 }
 

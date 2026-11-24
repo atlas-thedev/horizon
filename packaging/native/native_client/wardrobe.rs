@@ -146,6 +146,7 @@ pub struct Locker {
     skins_for_user: Option<String>,
     skins_loaded_at: Option<Instant>,
     loaded_at: Option<Instant>,
+    session_gen: u64,
 }
 
 fn locker() -> &'static Mutex<Locker> {
@@ -169,8 +170,44 @@ fn locker() -> &'static Mutex<Locker> {
             skins_for_user: None,
             skins_loaded_at: None,
             loaded_at: None,
+            session_gen: u64::MAX,
         })
     })
+}
+
+/// Clears all per-account cosmetics, capes, dyes and saved skins after switching accounts or signing out.
+pub fn reset() {
+    let mut l = lock();
+    l.session_gen = net::generation();
+    l.owned.clear();
+    l.equipped = None;
+    l.wearing.clear();
+    l.sides.clear();
+    l.dyes.clear();
+    l.saved_skins.clear();
+    l.active_skin_hash = None;
+    l.skins_for_user = None;
+    l.skins_loading = false;
+    l.skin_busy = None;
+    l.skin_notice = None;
+    l.skins_loaded_at = None;
+    l.loaded_at = None;
+    l.busy = None;
+    l.error = None;
+    l.state = if net::signed_in() { State::Idle } else { State::NoAccount };
+}
+
+/// Keeps wardrobe state aligned with the active Native session, reloading when a new account signs in.
+pub fn sync_session() {
+    let sgen = net::generation();
+    let changed = lock().session_gen != sgen;
+    if !changed {
+        return;
+    }
+    reset();
+    if net::signed_in() {
+        refresh(true);
+    }
 }
 
 fn lock() -> MutexGuard<'static, Locker> {
@@ -309,8 +346,14 @@ fn save_dyes(dyes: &HashMap<String, String>) {
 
 /// Loads (or reloads when older than 30 s) the catalogue and the locker.
 pub fn refresh(force: bool) {
+    let gen_at_start = net::generation();
     {
         let mut l = lock();
+        if l.session_gen != gen_at_start {
+            drop(l);
+            reset();
+            l = lock();
+        }
         let fresh = l.loaded_at.is_some_and(|t| t.elapsed() < Duration::from_secs(30));
         if l.state == State::Loading || (!force && l.state == State::Ready && fresh) {
             return;
@@ -319,7 +362,7 @@ pub fn refresh(force: bool) {
             l.state = State::Loading;
         }
     }
-    let _ = std::thread::Builder::new().name("Native wardrobe".into()).spawn(|| {
+    let _ = std::thread::Builder::new().name("Native wardrobe".into()).spawn(move || {
         let _io = io_lock();
         let api = net::api();
         let result = (|| -> Result<(), HttpError> {
@@ -339,6 +382,9 @@ pub fn refresh(force: bool) {
                 return Ok(());
             };
             let me = net::get_json(&format!("{api}/v1/store/me"), Some(&ticket))?;
+            if net::generation() != gen_at_start || net::ticket().as_deref() != Some(ticket.as_str()) {
+                return Ok(());
+            }
             let mut l = lock();
             apply(&mut l, &me);
             l.loaded_at = Some(Instant::now());
@@ -563,16 +609,26 @@ fn enc_seg(s: &str) -> String {
 
 /// Loads saved skins from disk immediately and refreshes from `/v1/profiles/<username>` in the background.
 pub fn refresh_skins(username: &str, force: bool) {
+    if !net::signed_in() {
+        let mut l = lock();
+        l.saved_skins.clear();
+        l.active_skin_hash = None;
+        l.skins_for_user = None;
+        l.skins_loading = false;
+        return;
+    }
     let user = username.trim().to_owned();
     if user.is_empty() {
         return;
     }
+    let gen_at_start = net::generation();
     let mut force = force;
     {
         let mut l = lock();
         if !l.skins_for_user.as_deref().is_some_and(|u| u.eq_ignore_ascii_case(&user)) {
             l.skins_for_user = Some(user.clone());
             l.saved_skins.clear();
+            l.active_skin_hash = None;
             if let Some(f) = skins_cache_file(&user)
                 && let Ok(txt) = std::fs::read_to_string(&f)
                 && let Ok(root) = serde_json::from_str::<Value>(&txt)
@@ -595,7 +651,15 @@ pub fn refresh_skins(username: &str, force: bool) {
     }
     let _ = std::thread::Builder::new().name("Native skins".into()).spawn(move || {
         let api = net::api();
+        if net::generation() != gen_at_start || !net::signed_in() {
+            lock().skins_loading = false;
+            return;
+        }
         if let Ok(root) = net::get_json(&format!("{api}/v1/profiles/{}", enc_seg(&user)), None) {
+            if net::generation() != gen_at_start || !net::signed_in() {
+                lock().skins_loading = false;
+                return;
+            }
             let prof = root.get("profile").filter(|p| p.is_object()).unwrap_or(&root);
             let mut list = parse_saved_skins(prof);
             let cur_from_prof = prof
