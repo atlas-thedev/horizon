@@ -91,7 +91,7 @@ impl PauseView {
             if button(ui, c, "pause:lan", x + half + gap, y, half, bh, &info.world) {
                 action = PauseAction::WorldOptions;
             }
-        } else if button(ui, c, "pause:locker", x + half + gap, y, half, bh, "Cosmetics") {
+        } else if button(ui, c, "pause:locker", x + half + gap, y, half, bh, "Locker") {
             action = PauseAction::Cosmetics;
         }
         y += step;

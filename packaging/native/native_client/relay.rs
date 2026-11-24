@@ -224,6 +224,8 @@ pub struct Conversation {
     pub messages: Vec<Message>,
     pub loading: bool,
     pub loaded: bool,
+    /// True once synced with the live server this session (disk hydration sets `loaded` immediately while `synced` stays false).
+    pub synced: bool,
     pub has_more: bool,
     pub error: Option<String>,
 }
@@ -309,6 +311,8 @@ struct Shared {
     group_creating: bool,
     group_create_error: Option<String>,
     created_group_key: Option<String>,
+    disk_loaded_account: Option<String>,
+    disk_hydrated: HashSet<String>,
 }
 
 fn shared() -> &'static Mutex<Shared> {
@@ -345,6 +349,8 @@ fn shared() -> &'static Mutex<Shared> {
             group_creating: false,
             group_create_error: None,
             created_group_key: None,
+            disk_loaded_account: None,
+            disk_hydrated: HashSet::new(),
         })
     })
 }
@@ -415,6 +421,7 @@ pub fn start() {
             s.link = Link::NoAccount;
         }
     }
+    ensure_disk_loaded();
     let _ = std::thread::Builder::new().name("Native relay stream".into()).spawn(stream_loop);
 }
 
@@ -804,8 +811,10 @@ fn clear_unread(s: &mut Shared, key: &str) {
     }
 }
 
-/// Opens a conversation: loads the latest page and marks it read.
+/// Opens a conversation: hydrates instantly from disk cache, then fetches the latest page and marks it read.
 pub fn open(key: &str) {
+    ensure_disk_loaded();
+    hydrate_conversation(key);
     let skip = {
         let mut s = lock();
         s.viewing = Some(key.to_owned());
@@ -822,23 +831,35 @@ pub fn open(key: &str) {
     spawn(move || {
         let path = format!("{}?limit=60", messages_path(&conversation(&key)));
         let result = get(&path);
+        let mut to_warm = Vec::new();
+        let mut should_save = false;
         with_conv(&key, |s, c| {
             match result {
                 Ok(page) => {
                     let latest = parse_messages(s, page.get("messages"));
                     let more = bool_of(&page, "hasMore");
-                    // Merge instead of replacing: reopening the chat used to drop the older pages already read, a message
-                    // that arrived while the page loaded and our own pending sends.
                     let kept_older = !latest.is_empty() && c.messages.first().is_some_and(|m| m.created_at < latest[0].created_at);
                     c.has_more = if kept_older { c.has_more } else { more };
                     c.messages = merge_latest(&c.messages, latest);
                     c.loaded = true;
+                    c.synced = true;
                     c.error = None;
+                    to_warm = c.messages.clone();
+                    should_save = true;
                 }
-                Err(_) => c.error = Some("Could not load messages.".to_owned()),
+                Err(_) => {
+                    if c.messages.is_empty() {
+                        c.error = Some("Could not load messages.".to_owned());
+                    }
+                }
             }
             c.loading = false;
         });
+        if should_save {
+            warm_media(&to_warm);
+            save_conversation_async(&key);
+            save_index_async();
+        }
     });
 }
 
@@ -855,20 +876,28 @@ pub fn load_older(key: &str) {
     let key = key.to_owned();
     spawn(move || {
         let result = get(&format!("{path}?limit=60&markRead=0&before={before}"));
+        let mut should_save = false;
+        let mut to_warm = Vec::new();
         with_conv(&key, |s, c| {
             match result {
                 Ok(page) => {
                     let older = parse_messages(s, page.get("messages"));
                     let have: HashSet<String> = c.messages.iter().map(|m| m.id.clone()).collect();
                     let mut merged: Vec<Message> = older.into_iter().filter(|m| !have.contains(&m.id)).collect();
+                    to_warm = merged.clone();
                     merged.append(&mut c.messages);
                     c.messages = merged;
                     c.has_more = bool_of(&page, "hasMore");
+                    should_save = true;
                 }
                 Err(_) => c.error = Some("Could not load older messages.".to_owned()),
             }
             c.loading = false;
         });
+        if should_save {
+            warm_media(&to_warm);
+            save_conversation_async(&key);
+        }
     });
 }
 
@@ -878,6 +907,7 @@ fn add_pending(key: &str, m: Message) {
 
 /// Puts the server's copy where the pending one was.
 fn replace_pending(key: &str, temp_id: &str, mut sent: Message) {
+    let media_url = sent.media_url.clone();
     with_conv(key, |_, c| {
         let have = c.messages.iter().any(|m| m.id == sent.id);
         let mut next = Vec::with_capacity(c.messages.len());
@@ -899,7 +929,13 @@ fn replace_pending(key: &str, temp_id: &str, mut sent: Message) {
             next.push(sent);
         }
         c.messages = next;
+        c.loaded = true;
     });
+    if let Some(u) = media_url {
+        let _ = super::chat_media::get(&u, &net::api());
+    }
+    save_conversation_async(key);
+    save_index_async();
 }
 
 fn fail(key: &str, temp_id: &str) {
@@ -1010,11 +1046,17 @@ pub fn send_gif(key: &str, url: &str, title: &str) {
 }
 
 fn change(key: &str, id: &str, with: impl FnOnce(&Message) -> Message) {
-    with_conv(key, |_, c| {
+    let changed = with_conv(key, |_, c| {
         if let Some(m) = c.messages.iter_mut().find(|m| m.id == id) {
             *m = with(m);
+            true
+        } else {
+            false
         }
     });
+    if changed {
+        save_conversation_async(key);
+    }
 }
 
 /// Toggles your reaction on a message (the server flips it); shows at once, then takes the server's list.
@@ -1128,6 +1170,7 @@ pub fn set_pinned(key: &str, pinned: bool) {
         }
     }
     send_prefs(key, json!({ "pinned": pinned }));
+    save_index_async();
 }
 
 /// Sets (or, when empty, removes) the nickname of a friend.
@@ -1141,6 +1184,7 @@ pub fn set_nickname(friend_id: &str, nickname: &str) {
         sort_friends(&mut s.friends);
     }
     send_prefs(&format!("dm:{friend_id}"), json!({ "nickname": nick }));
+    save_index_async();
 }
 
 pub fn group_creating() -> bool {
@@ -1192,6 +1236,8 @@ pub fn create_group(name: &str, member_ids: Vec<String>) {
                     sort_groups(&mut s.groups);
                     s.groups_loaded = true;
                     s.created_group_key = Some(key);
+                    drop(s);
+                    save_index_async();
                 } else {
                     s.group_create_error = Some("Could not create group.".to_owned());
                 }
@@ -1506,6 +1552,7 @@ pub fn send_image(key: &str, bytes: Vec<u8>, mime: &str, caption: &str, reply_to
         let data = format!("data:{mime};base64,{}", base64(&bytes));
         let result = post("/v1/social/relay/upload", &json!({ "data": data, "name": name })).and_then(|res| {
             let url = str_of(&res, "url").ok_or_else(|| HttpError::Other("no url".into()))?;
+            super::chat_media::remember(&url, &net::api(), bytes.clone());
             let mut body = json!({ "content": text, "mediaUrl": url, "mediaName": name, "mediaKind": "image", "isMedia": true });
             if let Some(id) = &reply_id {
                 body["replyTo"] = json!(id);
@@ -1580,8 +1627,10 @@ fn load_friends() {
                 .map_or(0, |a| a.len() as i32);
             s.friends_loaded = true;
             s.link = Link::Online;
-            let first: Vec<String> = s.friends.iter().take(3).map(|f| format!("dm:{}", f.id)).collect();
+            let first: Vec<String> = s.friends.iter().take(5).map(|f| format!("dm:{}", f.id)).collect();
             drop(s);
+            ensure_disk_loaded();
+            save_index_async();
             for key in first {
                 prefetch(&key);
             }
@@ -1615,8 +1664,9 @@ fn load_groups() {
         sort_groups(&mut list);
         s.groups = list;
         s.groups_loaded = true;
-        let first: Vec<String> = s.groups.iter().take(3).map(|g| format!("g:{}", g.id)).collect();
+        let first: Vec<String> = s.groups.iter().take(5).map(|g| format!("g:{}", g.id)).collect();
         drop(s);
+        save_index_async();
         for key in first {
             prefetch(&key);
         }
@@ -1625,26 +1675,37 @@ fn load_groups() {
 
 /// Warms a chat's latest page in the background (doesn't mark it read) so it opens instantly.
 fn prefetch(key: &str) {
-    let skip = with_conv(key, |_, c| c.loaded || c.loading);
+    hydrate_conversation(key);
+    let skip = with_conv(key, |_, c| c.synced || c.loading);
     if skip || net::ticket().is_none() {
         return;
     }
     let key = key.to_owned();
     spawn(move || {
         let c = conversation(&key);
-        if c.loaded || c.loading {
+        if c.synced || c.loading {
             return;
         }
         if let Ok(page) = get(&format!("{}?limit=60&markRead=0", messages_path(&c))) {
+            let mut to_warm = Vec::new();
+            let mut should_save = false;
             with_conv(&key, |s, c| {
-                if c.loaded {
+                if c.synced {
                     return;
                 }
                 let latest = parse_messages(s, page.get("messages"));
+                let kept_older = !latest.is_empty() && c.messages.first().is_some_and(|m| m.created_at < latest[0].created_at);
+                c.has_more = if kept_older { c.has_more } else { bool_of(&page, "hasMore") };
                 c.messages = merge_latest(&c.messages, latest);
-                c.has_more = bool_of(&page, "hasMore");
                 c.loaded = true;
+                c.synced = true;
+                to_warm = c.messages.clone();
+                should_save = true;
             });
+            if should_save {
+                warm_media(&to_warm);
+                save_conversation_async(&key);
+            }
         }
     });
 }
@@ -1666,6 +1727,7 @@ fn stream_loop() {
         }
         if !loaded {
             loaded = true;
+            ensure_disk_loaded();
             {
                 let mut s = lock();
                 if s.link == Link::NoAccount {
@@ -1791,20 +1853,27 @@ fn handle(kind: &str, p: &Value) {
         "message:updated" | "group:message:updated" => {
             if let Some(m) = p.get("message") {
                 let id = str_of(m, "id").unwrap_or_default();
-                let mut s = lock();
-                let keys: Vec<String> = s.conversations.keys().cloned().collect();
-                for key in keys {
-                    let Some(mut c) = s.conversations.remove(&key) else { continue };
-                    if let Some(i) = c.messages.iter().position(|x| x.id == id) {
-                        let old = c.messages[i].clone();
-                        let mut fresh = parse_message(&s, m);
-                        if fresh.local_key.is_none() {
-                            fresh.local_key = old.local_key.clone();
+                let mut touched = Vec::new();
+                {
+                    let mut s = lock();
+                    let keys: Vec<String> = s.conversations.keys().cloned().collect();
+                    for key in keys {
+                        let Some(mut c) = s.conversations.remove(&key) else { continue };
+                        if let Some(i) = c.messages.iter().position(|x| x.id == id) {
+                            let old = c.messages[i].clone();
+                            let mut fresh = parse_message(&s, m);
+                            if fresh.local_key.is_none() {
+                                fresh.local_key = old.local_key.clone();
+                            }
+                            fresh.read = fresh.read || old.read;
+                            c.messages[i] = fresh;
+                            touched.push(key.clone());
                         }
-                        fresh.read = fresh.read || old.read;
-                        c.messages[i] = fresh;
+                        s.conversations.insert(key, c);
                     }
-                    s.conversations.insert(key, c);
+                }
+                for k in touched {
+                    save_conversation_async(&k);
                 }
             }
         }
@@ -1842,11 +1911,24 @@ fn handle(kind: &str, p: &Value) {
                 .flatten()
                 .filter_map(|e| e.as_str().map(str::to_owned))
                 .collect();
-            let mut s = lock();
-            for c in s.conversations.values_mut().filter(|c| !c.is_group()) {
-                for m in c.messages.iter_mut().filter(|m| ids.contains(&m.id)) {
-                    m.read = true;
+            let mut touched = Vec::new();
+            {
+                let mut s = lock();
+                for c in s.conversations.values_mut().filter(|c| !c.is_group()) {
+                    let mut hit = false;
+                    for m in c.messages.iter_mut().filter(|m| ids.contains(&m.id)) {
+                        if !m.read {
+                            m.read = true;
+                            hit = true;
+                        }
+                    }
+                    if hit {
+                        touched.push(c.key.clone());
+                    }
                 }
+            }
+            for k in touched {
+                save_conversation_async(&k);
             }
         }
         "typing" => {
@@ -1904,44 +1986,52 @@ fn request_notice(action: Option<&str>, actor: Option<&str>, actor_name: Option<
 }
 
 fn incoming(key: &str, m: &Value, sender: &str) {
+    hydrate_conversation(key);
     let mut s = lock();
     let mut c = s.conversations.remove(key).unwrap_or_else(|| Conversation { key: key.to_owned(), ..Conversation::default() });
     let msg = parse_message(&s, m);
     s.typing.remove(&format!("{key}|{sender}"));
     let mine = s.me_id.as_deref() == Some(sender);
-    if c.loaded {
-        if c.messages.iter().any(|x| x.id == msg.id) {
-            // Delivered twice (stream + catch-up): already shown and counted.
-            s.conversations.insert(key.to_owned(), c);
-            return;
-        }
-        let media = msg.media_url.is_some();
-        let mut next = Vec::with_capacity(c.messages.len() + 1);
-        let mut replaced = false;
-        for x in c.messages.drain(..) {
-            // A pending copy of our own message is replaced by the real one, in place (keeps its local picture).
-            if !replaced && mine && x.pending && x.content == msg.content && media == (x.media_url.is_some() || x.local_key.is_some()) {
-                replaced = true;
-                let mut real = msg.clone();
-                if real.local_key.is_none() {
-                    real.local_key = x.local_key.clone();
-                }
-                next.push(real);
-                continue;
-            }
-            next.push(x);
-        }
-        if !replaced {
-            next.push(msg.clone());
-        }
-        c.messages = next;
+    if c.messages.iter().any(|x| x.id == msg.id) {
+        // Delivered twice (stream + catch-up): already shown and counted.
+        s.conversations.insert(key.to_owned(), c);
+        return;
     }
+    let media = msg.media_url.is_some();
+    let mut next = Vec::with_capacity(c.messages.len() + 1);
+    let mut replaced = false;
+    for x in c.messages.drain(..) {
+        // A pending copy of our own message is replaced by the real one, in place (keeps its local picture).
+        if !replaced && mine && x.pending && x.content == msg.content && media == (x.media_url.is_some() || x.local_key.is_some()) {
+            replaced = true;
+            let mut real = msg.clone();
+            if real.local_key.is_none() {
+                real.local_key = x.local_key.clone();
+            }
+            next.push(real);
+            continue;
+        }
+        next.push(x);
+    }
+    if !replaced {
+        next.push(msg.clone());
+    }
+    c.messages = next;
+    c.loaded = true;
     s.conversations.insert(key.to_owned(), c);
+    let media_url = (!msg.deleted).then(|| msg.media_url.clone()).flatten();
     if mine {
         bump(&mut s, key, msg.created_at);
+        drop(s);
+        if let Some(u) = media_url {
+            let _ = super::chat_media::get(&u, &net::api());
+        }
+        save_conversation_async(key);
+        save_index_async();
         return;
     }
     let watching = s.viewing.as_deref() == Some(key);
+    let mut mark_read = false;
     if let Some(gid) = key.strip_prefix("g:") {
         let mut hit: Option<Group> = None;
         for g in s.groups.iter_mut().filter(|g| g.id == gid) {
@@ -1953,8 +2043,7 @@ fn incoming(key: &str, m: &Value, sender: &str) {
         }
         sort_groups(&mut s.groups);
         if watching {
-            drop(s);
-            mark_read_later(key);
+            mark_read = true;
         } else if !msg.system {
             let skin = s.friends.iter().find(|f| f.id == sender).and_then(|f| f.skin.clone());
             s.notices.push_back(Notice {
@@ -1975,8 +2064,7 @@ fn incoming(key: &str, m: &Value, sender: &str) {
         }
         sort_friends(&mut s.friends);
         if watching {
-            drop(s);
-            mark_read_later(key);
+            mark_read = true;
         } else {
             s.notices.push_back(Notice {
                 conv_key: Some(key.to_owned()),
@@ -1988,6 +2076,366 @@ fn incoming(key: &str, m: &Value, sender: &str) {
             });
         }
     }
+    drop(s);
+    if mark_read {
+        mark_read_later(key);
+    }
+    if let Some(u) = media_url {
+        let _ = super::chat_media::get(&u, &net::api());
+    }
+    save_conversation_async(key);
+    save_index_async();
+}
+
+// ── local disk cache (instant load of chats, friends, groups & media) ────
+
+const MAX_CACHED_MESSAGES: usize = 200;
+
+fn safe_key(s: &str) -> String {
+    s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
+}
+
+fn cache_account_key(s: &Shared) -> Option<String> {
+    let raw = s
+        .me_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            net::account().and_then(|a| {
+                a.id.filter(|v| !v.is_empty()).or_else(|| a.name.filter(|v| !v.is_empty()))
+            })
+        })?;
+    Some(safe_key(&raw))
+}
+
+fn cache_dir_for(account_key: &str) -> Option<std::path::PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    super::game_dir().map(|d| d.join(".native").join("relay-cache").join(account_key))
+}
+
+fn conv_file_name(key: &str) -> String {
+    format!("conv-{}.json", safe_key(key))
+}
+
+fn warm_media(messages: &[Message]) {
+    if cfg!(test) {
+        return;
+    }
+    let api = net::api();
+    let mut warmed = 0usize;
+    for m in messages.iter().rev() {
+        if warmed >= 16 {
+            break;
+        }
+        if !m.deleted
+            && let Some(u) = &m.media_url
+        {
+            let _ = super::chat_media::get(u, &api);
+            warmed += 1;
+        }
+    }
+}
+
+fn ensure_disk_loaded() {
+    let (acc, dir) = {
+        let s = lock();
+        let Some(acc) = cache_account_key(&s) else { return };
+        if s.disk_loaded_account.as_deref() == Some(acc.as_str()) {
+            return;
+        }
+        let Some(dir) = cache_dir_for(&acc) else { return };
+        (acc, dir)
+    };
+    let idx = dir.join("index.json");
+    let text = std::fs::read_to_string(&idx).ok().filter(|t| t.len() < 4 * 1024 * 1024);
+    let mut s = lock();
+    if s.disk_loaded_account.as_deref() == Some(acc.as_str()) {
+        return;
+    }
+    s.disk_loaded_account = Some(acc);
+    let Some(root) = text.and_then(|t| serde_json::from_str::<Value>(&t).ok()) else {
+        return;
+    };
+    if s.me_id.is_none() {
+        s.me_id = str_of(&root, "meId");
+    }
+    if s.me_name.is_none() {
+        s.me_name = str_of(&root, "meName");
+    }
+    if s.me_skin.is_none() {
+        s.me_skin = str_of(&root, "meSkin");
+    }
+    if !s.friends_loaded
+        && let Some(arr) = root.get("friends").and_then(Value::as_array)
+    {
+        let mut list: Vec<Friend> = arr
+            .iter()
+            .filter_map(|f| {
+                let id = str_of(f, "id")?;
+                Some(Friend {
+                    id,
+                    name: str_of(f, "name").unwrap_or_default(),
+                    nickname: str_of(f, "nickname").filter(|n| !n.is_empty()),
+                    status: "offline".to_owned(),
+                    activity: String::new(),
+                    server_address: String::new(),
+                    skin: str_of(f, "skin"),
+                    online: false,
+                    unread: int_of(f, "unread") as i32,
+                    pinned: bool_of(f, "pinned"),
+                    last_seen: int_of(f, "lastSeen"),
+                    last_msg: int_of(f, "lastMsg"),
+                })
+            })
+            .collect();
+        if !list.is_empty() {
+            sort_friends(&mut list);
+            s.friends = list;
+            s.friends_loaded = true;
+        }
+    }
+    if !s.groups_loaded
+        && let Some(arr) = root.get("groups").and_then(Value::as_array)
+    {
+        let mut list: Vec<Group> = arr
+            .iter()
+            .filter_map(|g| {
+                let id = str_of(g, "id")?;
+                let member_list = g
+                    .get("members")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|m| Some((str_of(m, "id")?, str_of(m, "name").unwrap_or_else(|| "Member".to_owned()))))
+                    .collect();
+                Some(Group {
+                    id,
+                    name: str_of(g, "name").unwrap_or_default(),
+                    last_text: str_of(g, "lastText"),
+                    last_sender: str_of(g, "lastSender"),
+                    last_at: int_of(g, "lastAt"),
+                    unread: int_of(g, "unread") as i32,
+                    members: int_of(g, "memberCount") as i32,
+                    member_list,
+                    role: str_of(g, "role").unwrap_or_else(|| "member".to_owned()),
+                    pinned: bool_of(g, "pinned"),
+                })
+            })
+            .collect();
+        if !list.is_empty() {
+            sort_groups(&mut list);
+            s.groups = list;
+            s.groups_loaded = true;
+        }
+    }
+}
+
+fn serialize_message(m: &Message) -> Value {
+    let mut o = json!({
+        "id": m.id,
+        "senderId": m.sender_id,
+        "senderName": m.sender_name,
+        "content": m.content,
+        "createdAt": m.created_at,
+    });
+    if m.system {
+        o["system"] = json!(true);
+    }
+    if m.deleted {
+        o["deleted"] = json!(true);
+    }
+    if let Some(u) = &m.media_url {
+        o["mediaUrl"] = json!(u);
+    }
+    if let Some(n) = &m.media_name {
+        o["mediaName"] = json!(n);
+    }
+    if m.edited {
+        o["edited"] = json!(true);
+    }
+    if m.read {
+        o["read"] = json!(true);
+    }
+    if let Some(r) = &m.reply {
+        o["reply"] = json!({
+            "id": r.id,
+            "senderName": r.sender_name,
+            "content": r.content,
+            "media": r.media,
+            "deleted": r.deleted,
+        });
+    }
+    if !m.reactions.is_empty() {
+        let rx: Vec<Value> = m.reactions.iter().map(|(u, e)| json!({ "u": u, "e": e })).collect();
+        o["reactions"] = Value::Array(rx);
+    }
+    o
+}
+
+fn deserialize_message(o: &Value) -> Option<Message> {
+    let id = str_of(o, "id").filter(|s| !s.is_empty())?;
+    let reply = o.get("reply").filter(|r| r.is_object()).map(|r| Reply {
+        id: str_of(r, "id").unwrap_or_default(),
+        sender_name: str_of(r, "senderName").unwrap_or_default(),
+        content: str_of(r, "content").unwrap_or_default(),
+        media: bool_of(r, "media"),
+        deleted: bool_of(r, "deleted"),
+    });
+    let reactions = o
+        .get("reactions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|r| Some((str_of(r, "u").unwrap_or_default(), str_of(r, "e")?)))
+        .collect();
+    Some(Message {
+        id,
+        sender_id: str_of(o, "senderId").unwrap_or_default(),
+        sender_name: str_of(o, "senderName").unwrap_or_default(),
+        content: str_of(o, "content").unwrap_or_default(),
+        created_at: int_of(o, "createdAt"),
+        pending: false,
+        failed: false,
+        system: bool_of(o, "system"),
+        deleted: bool_of(o, "deleted"),
+        media_url: str_of(o, "mediaUrl"),
+        media_name: str_of(o, "mediaName"),
+        local_key: None,
+        reply,
+        reactions,
+        edited: bool_of(o, "edited"),
+        read: bool_of(o, "read"),
+    })
+}
+
+fn hydrate_conversation(key: &str) {
+    let file = {
+        let mut s = lock();
+        if s.disk_hydrated.contains(key) {
+            return;
+        }
+        let Some(acc) = cache_account_key(&s) else { return };
+        let Some(dir) = cache_dir_for(&acc) else { return };
+        s.disk_hydrated.insert(key.to_owned());
+        dir.join(conv_file_name(key))
+    };
+    let Some(text) = std::fs::read_to_string(&file).ok().filter(|t| t.len() < 8 * 1024 * 1024) else {
+        return;
+    };
+    let Ok(root) = serde_json::from_str::<Value>(&text) else { return };
+    let cached: Vec<Message> = root
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(deserialize_message)
+        .collect();
+    let has_more = bool_of(&root, "hasMore");
+    let to_warm = with_conv(key, |_, c| {
+        if !c.loaded && !cached.is_empty() {
+            c.messages = if c.messages.is_empty() { cached.clone() } else { merge_latest(&cached, c.messages.clone()) };
+            c.has_more = has_more;
+            c.loaded = true;
+            c.error = None;
+            return c.messages.clone();
+        }
+        Vec::new()
+    });
+    if !to_warm.is_empty() {
+        warm_media(&to_warm);
+    }
+}
+
+fn atomic_write(path: &std::path::Path, data: &[u8]) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, data).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+fn save_index_async() {
+    if cfg!(test) {
+        return;
+    }
+    let payload = {
+        let s = lock();
+        let Some(acc) = cache_account_key(&s) else { return };
+        let Some(dir) = cache_dir_for(&acc) else { return };
+        let friends: Vec<Value> = s
+            .friends
+            .iter()
+            .map(|f| {
+                json!({
+                    "id": f.id,
+                    "name": f.name,
+                    "nickname": f.nickname,
+                    "skin": f.skin,
+                    "unread": f.unread,
+                    "pinned": f.pinned,
+                    "lastSeen": f.last_seen,
+                    "lastMsg": f.last_msg,
+                })
+            })
+            .collect();
+        let groups: Vec<Value> = s
+            .groups
+            .iter()
+            .map(|g| {
+                let members: Vec<Value> = g.member_list.iter().map(|(id, name)| json!({ "id": id, "name": name })).collect();
+                json!({
+                    "id": g.id,
+                    "name": g.name,
+                    "lastText": g.last_text,
+                    "lastSender": g.last_sender,
+                    "lastAt": g.last_at,
+                    "unread": g.unread,
+                    "memberCount": g.members,
+                    "role": g.role,
+                    "pinned": g.pinned,
+                    "members": members,
+                })
+            })
+            .collect();
+        let root = json!({
+            "version": 1,
+            "meId": s.me_id,
+            "meName": s.me_name,
+            "meSkin": s.me_skin,
+            "friends": friends,
+            "groups": groups,
+        });
+        (dir.join("index.json"), root.to_string())
+    };
+    spawn(move || atomic_write(&payload.0, payload.1.as_bytes()));
+}
+
+fn save_conversation_async(key: &str) {
+    if cfg!(test) {
+        return;
+    }
+    let payload = {
+        let s = lock();
+        let Some(acc) = cache_account_key(&s) else { return };
+        let Some(dir) = cache_dir_for(&acc) else { return };
+        let Some(c) = s.conversations.get(key) else { return };
+        let saved: Vec<&Message> = c.messages.iter().filter(|m| !m.pending && !m.failed && !m.id.starts_with("local-")).collect();
+        let start = saved.len().saturating_sub(MAX_CACHED_MESSAGES);
+        let msgs: Vec<Value> = saved[start..].iter().map(|m| serialize_message(m)).collect();
+        let root = json!({
+            "version": 1,
+            "key": c.key,
+            "hasMore": c.has_more,
+            "messages": msgs,
+        });
+        (dir.join(conv_file_name(key)), root.to_string())
+    };
+    spawn(move || atomic_write(&payload.0, payload.1.as_bytes()));
 }
 
 #[cfg(test)]
@@ -2049,5 +2497,26 @@ mod tests {
         assert_eq!((g.members, g.unread, g.last_at), (3, 2, 5));
         assert!(g.can_moderate());
         assert_eq!(g.member_list[1].1, "Bob");
+    }
+
+    #[test]
+    fn cached_messages_round_trip_with_media_replies_and_reactions() {
+        let orig = Message {
+            id: "m42".into(),
+            sender_id: "u1".into(),
+            sender_name: "Alex".into(),
+            content: "check this gif".into(),
+            created_at: 1_793_887_380_000,
+            media_url: Some("https://media.giphy.com/media/abc/giphy.gif".into()),
+            media_name: Some("cat.gif".into()),
+            reply: Some(Reply { id: "m41".into(), sender_name: "Sam".into(), content: "send it".into(), media: false, deleted: false }),
+            reactions: vec![("u2".into(), "fire".into())],
+            edited: true,
+            read: true,
+            ..Message::default()
+        };
+        let raw = serialize_message(&orig);
+        let back = deserialize_message(&raw).expect("deserialized");
+        assert_eq!(back, orig);
     }
 }

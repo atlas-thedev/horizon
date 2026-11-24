@@ -193,8 +193,17 @@ struct Quad {
     argb: u32,
 }
 
-/// Draws the island in the player's projection: (cx, cy, scale, yaw, pitch) as `PlayerPreview` uses them.
+/// Draws the island behind/under the player in the player's projection.
 pub fn draw(c: &mut Canvas, cx: f32, cy: f32, scale: f32, yaw: f32, pitch: f32) {
+    draw_layer(c, cx, cy, scale, yaw, pitch, false);
+}
+
+/// Draws the above-ground plants and bush closer to the camera than the player, after the player is drawn.
+pub fn draw_front(c: &mut Canvas, cx: f32, cy: f32, scale: f32, yaw: f32, pitch: f32) {
+    draw_layer(c, cx, cy, scale, yaw, pitch, true);
+}
+
+fn draw_layer(c: &mut Canvas, cx: f32, cy: f32, scale: f32, yaw: f32, pitch: f32, front: bool) {
     let (cyw, syw, cp, sp) = (yaw.cos(), yaw.sin(), pitch.cos(), pitch.sin());
     // view = Rx(pitch) * Ry(yaw), the same as Boxes
     let view = [cyw, 0.0, syw, sp * syw, cp, -sp * cyw, -cp * syw, sp, cp * cyw];
@@ -216,6 +225,10 @@ pub fn draw(c: &mut Canvas, cx: f32, cy: f32, scale: f32, yaw: f32, pitch: f32) 
         quads.push(q);
     };
     for &(block, i, j, k) in &is.blocks {
+        let in_front = j < 0 && (view[6] * i as f32 + view[8] * k as f32) < 0.0;
+        if in_front != front {
+            continue;
+        }
         for f in 0..6 {
             let n = NORMAL[f];
             let nb = is.at.get(&(i + n[0], j + n[1], k + n[2])).copied().unwrap_or(0);
@@ -232,12 +245,19 @@ pub fn draw(c: &mut Canvas, cx: f32, cy: f32, scale: f32, yaw: f32, pitch: f32) 
         }
     }
     for &(t, i, j, k) in &is.plants {
+        let in_front = j < 0 && (view[6] * i as f32 + view[8] * k as f32) < 0.0;
+        if in_front != front {
+            continue;
+        }
         // two crossed planes through the block's middle, both sides drawn
         let (x0, y0, z0, s, inset) = (i as f32 * 16.0 - 8.0, 16.0 + j as f32 * 16.0, k as f32 * 16.0 - 8.0, 16.0, 2.4);
         let a = [inset, 0.0, inset, s - inset, 0.0, s - inset, s - inset, s, s - inset, inset, s, inset];
         let d = [s - inset, 0.0, inset, inset, 0.0, s - inset, inset, s, s - inset, s - inset, s, inset];
         add(&a, x0, y0, z0, 1.0, t, 0.95);
         add(&d, x0, y0, z0, 1.0, t, 0.95);
+    }
+    if quads.is_empty() {
+        return;
     }
     // farthest first
     quads.sort_by(|a, b| b.z.partial_cmp(&a.z).unwrap_or(std::cmp::Ordering::Equal));

@@ -228,13 +228,16 @@ impl Widgets {
         if wait {
             for (code, _) in ui.keys.clone() {
                 if code == ui::KEY_ESCAPE {
-                    continue;
+                    self.listening = None;
+                    wait = false;
+                    break;
                 }
-                out = if code == ui::KEY_BACKSPACE { -1 } else { code };
+                out = if code == ui::KEY_BACKSPACE || code == ui::KEY_DELETE { -1 } else { code };
                 self.listening = None;
                 wait = false;
                 break;
             }
+            ui.keys.clear();
         }
         let over = ui.hover(c, x, y, w, h);
         if ui.clicked(c, id, x, y, w, h) {

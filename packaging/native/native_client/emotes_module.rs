@@ -56,6 +56,32 @@ pub fn wheel_key(modules: &Modules) -> i32 {
         .map_or(-1, Setting::as_key)
 }
 
+/// The configured wheel key regardless of whether the Emotes module is currently toggled on (for Settings -> Controls).
+pub fn raw_wheel_key(modules: &Modules, cfg: &UiConfig) -> i32 {
+    modules
+        .get("emotes")
+        .and_then(|m| m.state.setting("wheel"))
+        .map_or(cfg.emote_key, Setting::as_key)
+}
+
+/// Keeps `emotes.wheel` (in `native-modules.json`) and `cfg.emote_key` (in `native-ui.json`) in sync.
+pub fn set_wheel_key(modules: &mut Modules, cfg: &mut UiConfig, key: i32) -> bool {
+    let mut changed = false;
+    if let Some(setting) = modules
+        .get_mut("emotes")
+        .and_then(|m| m.state.settings.iter_mut().find(|s| s.id == "wheel"))
+        && setting.as_key() != key
+    {
+        setting.set_key(key);
+        changed = true;
+    }
+    if cfg.emote_key != key {
+        cfg.emote_key = key;
+        changed = true;
+    }
+    changed
+}
+
 pub fn conflict(modules: &Modules, binding: &Setting, cfg: &UiConfig) -> Option<String> {
     let Kind::Binding { key, modifiers } = binding.kind else {
         return None;
@@ -126,7 +152,14 @@ pub fn input(
     if !allowed {
         return None;
     }
-    if key >= 0 && key == wheel_key(modules) && modifiers & 15 == 0 && pressed && !repeat {
+    let self_mod = match key {
+        340 | 344 => 1,
+        341 | 345 => 2,
+        342 | 346 => 4,
+        343 | 347 => 8,
+        _ => 0,
+    };
+    if key >= 0 && key == wheel_key(modules) && (modifiers & !self_mod) & 15 == 0 && pressed && !repeat {
         return Some(Input::Wheel);
     }
     quick_slot(modules, cfg, key, modifiers).map(|index| Input::Slot {
@@ -249,5 +282,38 @@ mod tests {
         assert_eq!(quick_slot(&loaded, &UiConfig::default(), 80, 3), Some(0));
         assert_eq!(quick_slot(&loaded, &UiConfig::default(), 50, 4), None);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn changing_wheel_key_unbinds_b_syncs_config_and_allows_modifiers() {
+        let dir =
+            std::env::temp_dir().join(format!("native-emote-rebind-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut modules = Modules::new(Some(dir.clone()));
+        let mut cfg = UiConfig::load(Some(&dir));
+        assert_eq!(wheel_key(&modules), 66);
+        assert_eq!(input(&modules, &cfg, 66, 0, true, false, true), Some(Input::Wheel));
+
+        assert!(set_wheel_key(&mut modules, &mut cfg, 71)); // G
+        modules.save();
+        cfg.save();
+
+        let reloaded = Modules::new(Some(dir.clone()));
+        let reloaded_cfg = UiConfig::load(Some(&dir));
+        assert_eq!(wheel_key(&reloaded), 71);
+        assert_eq!(reloaded_cfg.emote_key, 71);
+        assert_eq!(input(&reloaded, &reloaded_cfg, 66, 0, true, false, true), None);
+        assert_eq!(input(&reloaded, &reloaded_cfg, 71, 0, true, false, true), Some(Input::Wheel));
+
+        // Binding a modifier key itself (LAlt = 342, alt bit = 4) still triggers cleanly.
+        assert!(set_wheel_key(&mut modules, &mut cfg, 342));
+        assert_eq!(input(&modules, &cfg, 342, 4, true, false, true), Some(Input::Wheel));
+        assert_eq!(input(&modules, &cfg, 66, 0, true, false, true), None);
+
+        // Unbinding (-1) disables the wheel key completely.
+        assert!(set_wheel_key(&mut modules, &mut cfg, -1));
+        assert_eq!(input(&modules, &cfg, 66, 0, true, false, true), None);
+        assert_eq!(input(&modules, &cfg, 342, 4, true, false, true), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

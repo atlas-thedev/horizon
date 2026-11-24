@@ -1439,6 +1439,7 @@ pub(super) fn native_title_frame(
         let events = std::mem::take(&mut state.events);
         state.ui.clip_in = clip;
         state.ui.begin(&events, scale);
+        state.modules.tick();
         if !state.title_was {
             state.title_was = true;
             state.title_overlay = 0;

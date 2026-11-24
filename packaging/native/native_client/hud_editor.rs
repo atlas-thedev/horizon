@@ -536,7 +536,7 @@ impl HudEditor {
         }
         // Round shortcuts.
         let tile_icons = [theme::I_PLUS, theme::I_SETTINGS, theme::I_SHIRT, theme::I_MESSAGE, icons::MUSIC, theme::I_RESET];
-        let tips = ["HUD modules", "Settings", "Cosmetics", "Relay chat", "Music", "Reset layout and fit to screen"];
+        let tips = ["HUD modules", "Settings", "Locker", "Relay chat", "Music", "Reset layout and fit to screen"];
         let (d, gap) = (40.0, 8.0);
         let row_w = tile_icons.len() as f32 * d + (tile_icons.len() - 1) as f32 * gap;
         let (rx, ry) = (w_all / 2.0 - row_w / 2.0, by + bh + 16.0);

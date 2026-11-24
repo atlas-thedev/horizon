@@ -24,8 +24,15 @@ pub struct PlayerPreview {
     /// Something drawn under the player in the same view (the title screen's island): `(c, cx, cy, scale, yaw,
     /// pitch)`, model y = 16 under the feet.
     pub stage: Option<fn(&mut Canvas, f32, f32, f32, f32, f32)>,
+    /// Optional foreground pass drawn after the player (plants/decor closer to the camera than the player).
+    pub stage_front: Option<fn(&mut Canvas, f32, f32, f32, f32, f32)>,
     /// A Minecraft nametag over the head (the title screen).
     pub nametag: Option<String>,
+    /// Optional zoom multiplier and pause toggle for the Locker stage controls.
+    pub zoom: f32,
+    pub paused: bool,
+    /// Optional temporary skin override (when previewing or switching a saved skin in Locker).
+    pub override_skin: Option<(Arc<Image>, bool)>,
 }
 
 impl Default for PlayerPreview {
@@ -73,7 +80,11 @@ impl PlayerPreview {
             time: 0.0,
             white: Image::new(2, 2, vec![0xFFFFFFFF; 4]),
             stage: None,
+            stage_front: None,
             nametag: None,
+            zoom: 1.0,
+            paused: false,
+            override_skin: None,
         }
     }
 
@@ -85,6 +96,21 @@ impl PlayerPreview {
     pub fn reset_view(&mut self) {
         self.yaw = -0.45;
         self.vel = 0.0;
+        self.zoom = 1.0;
+    }
+
+    pub fn face_back(&mut self) {
+        self.yaw = std::f32::consts::PI - 0.35;
+        self.vel = 0.0;
+    }
+
+    pub fn face_front(&mut self) {
+        self.yaw = -0.45;
+        self.vel = 0.0;
+    }
+
+    pub fn zoom_by(&mut self, factor: f32) {
+        self.zoom = (self.zoom * factor).clamp(0.65, 1.65);
     }
 
     /// push + move into a vanilla bone's space (pivot and idle pose).
@@ -133,13 +159,15 @@ impl PlayerPreview {
         if over {
             ui.cursor_hand = true;
         }
-        self.time += ui.dt;
-        if ui.now - self.last_drag > 2500.0 {
-            self.yaw += (self.time * 0.7).sin() * 0.0025;
+        if !self.paused {
+            self.time += ui.dt;
+            if ui.now - self.last_drag > 2500.0 {
+                self.yaw += (self.time * 0.7).sin() * 0.0025;
+            }
         }
         // Floor glow.
         let cx = x + w / 2.0;
-        let scale = (h / 50.0).min(w / 30.0);
+        let scale = (h / 50.0).min(w / 30.0) * self.zoom.max(0.5);
         let mut feet = y + h / 2.0 + 19.0 * scale;
         if let Some(stage) = self.stage {
             stage(c, cx, y + h / 2.0 + 3.0 * scale, scale, self.yaw, self.pitch);
@@ -147,7 +175,11 @@ impl PlayerPreview {
         }
         c.shadow(cx - 9.0 * scale, feet - 1.5 * scale, 18.0 * scale, 3.0 * scale, 1.5 * scale, 10.0, 0x66000000);
         // The skin.
-        let (skin, pending, slim) = skin_of(who);
+        let (skin, pending, slim) = if let Some((ref img, s)) = self.override_skin {
+            (Some(img.clone()), false, Some(s))
+        } else {
+            skin_of(who)
+        };
         if let Some(slim) = slim {
             self.slim = slim;
         }
@@ -320,6 +352,9 @@ impl PlayerPreview {
             });
         }
         self.b.end(c);
+        if let Some(stage_front) = self.stage_front {
+            stage_front(c, cx, y + h / 2.0 + 3.0 * scale, scale, self.yaw, self.pitch);
+        }
         if let Some(name) = self.nametag.as_deref().filter(|n| !n.is_empty()) {
             // Over the head like in game: model y = -16 is the top of the head, the tag sits a little above it.
             let bottom = y + h / 2.0 + 3.0 * scale + (-16.0 - 7.0) * self.pitch.cos() * scale;
@@ -592,4 +627,67 @@ fn name_tag(c: &mut Canvas, name: &str, cx: f32, bottom: f32, unit: f32) {
         tx += mark_w;
     }
     super::mc_font::draw(c, name, tx, y + pad, unit, 0xFFFFFFFF, false, false);
+}
+
+/// Renders an upper-body 3D portrait of a Minecraft skin inside `[x, y, w, h]` (for Locker saved skin cards).
+pub fn draw_skin_portrait(c: &mut Canvas, skin: &Arc<Image>, slim: bool, x: f32, y: f32, w: f32, h: f32) {
+    let legacy = skin.height * 2 == skin.width;
+    let th = if legacy { 32 } else { 64 };
+    let scale = (w / 18.0).min(h / 21.0);
+    let cx = x + w / 2.0;
+    let cy = y + h * 0.56;
+    let mut b = Boxes::new();
+    b.begin(cx, cy, scale, -0.38, -0.08);
+    // Head
+    b.push();
+    b.cube(skin, 64, th, [-4.0, -8.0, -4.0], [8.0, 8.0, 8.0], [0.0, 0.0], 0.0, false, 0xFFFFFFFF);
+    b.cube(skin, 64, th, [-4.0, -8.0, -4.0], [8.0, 8.0, 8.0], [32.0, 0.0], 0.5, false, 0xFFFFFFFF);
+    b.pop();
+    // Body
+    b.push();
+    b.cube(skin, 64, th, [-4.0, 0.0, -2.0], [8.0, 12.0, 4.0], [16.0, 16.0], 0.0, false, 0xFFFFFFFF);
+    if !legacy {
+        b.cube(skin, 64, th, [-4.0, 0.0, -2.0], [8.0, 12.0, 4.0], [16.0, 32.0], 0.25, false, 0xFFFFFFFF);
+    }
+    b.pop();
+    let aw = if slim { 3.0 } else { 4.0 };
+    let ay = if slim { 2.5 } else { 2.0 };
+    // Right arm
+    b.push();
+    b.translate(-5.0, ay, 0.0);
+    b.rotate(0.0, 0.0, 0.06);
+    b.cube(skin, 64, th, [-aw + 1.0, -2.0, -2.0], [aw, 12.0, 4.0], [40.0, 16.0], 0.0, false, 0xFFFFFFFF);
+    if !legacy {
+        b.cube(skin, 64, th, [-aw + 1.0, -2.0, -2.0], [aw, 12.0, 4.0], [40.0, 32.0], 0.25, false, 0xFFFFFFFF);
+    }
+    b.pop();
+    // Left arm
+    b.push();
+    b.translate(5.0, ay, 0.0);
+    b.rotate(0.0, 0.0, -0.06);
+    if legacy {
+        b.cube(skin, 64, th, [-1.0, -2.0, -2.0], [aw, 12.0, 4.0], [40.0, 16.0], 0.0, true, 0xFFFFFFFF);
+    } else {
+        b.cube(skin, 64, th, [-1.0, -2.0, -2.0], [aw, 12.0, 4.0], [32.0, 48.0], 0.0, false, 0xFFFFFFFF);
+        b.cube(skin, 64, th, [-1.0, -2.0, -2.0], [aw, 12.0, 4.0], [48.0, 48.0], 0.25, false, 0xFFFFFFFF);
+    }
+    b.pop();
+    // Legs
+    b.push();
+    b.translate(-1.9, 12.0, 0.0);
+    b.cube(skin, 64, th, [-2.0, 0.0, -2.0], [4.0, 12.0, 4.0], [0.0, 16.0], 0.0, false, 0xFFFFFFFF);
+    if !legacy {
+        b.cube(skin, 64, th, [-2.0, 0.0, -2.0], [4.0, 12.0, 4.0], [0.0, 32.0], 0.25, false, 0xFFFFFFFF);
+    }
+    b.pop();
+    b.push();
+    b.translate(1.9, 12.0, 0.0);
+    if legacy {
+        b.cube(skin, 64, th, [-2.0, 0.0, -2.0], [4.0, 12.0, 4.0], [0.0, 16.0], 0.0, true, 0xFFFFFFFF);
+    } else {
+        b.cube(skin, 64, th, [-2.0, 0.0, -2.0], [4.0, 12.0, 4.0], [16.0, 48.0], 0.0, false, 0xFFFFFFFF);
+        b.cube(skin, 64, th, [-2.0, 0.0, -2.0], [4.0, 12.0, 4.0], [0.0, 48.0], 0.25, false, 0xFFFFFFFF);
+    }
+    b.pop();
+    b.end(c);
 }

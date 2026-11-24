@@ -68,6 +68,95 @@ fn locals() -> &'static Mutex<HashMap<String, Arc<Media>>> {
 }
 
 static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+static DISK_WRITES: AtomicUsize = AtomicUsize::new(0);
+const MAX_DISK_FILES: usize = 250;
+
+fn media_dir() -> Option<std::path::PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    super::game_dir().map(|d| d.join(".native").join("relay-media"))
+}
+
+fn normalize_target(url: &str, api: &str) -> String {
+    let mut target = url.to_owned();
+    if target.contains("giphy.com") {
+        target = target.replace("/giphy.gif", "/200w.gif");
+    }
+    if target.starts_with('/') && !api.is_empty() {
+        target = format!("{}{target}", api.trim_end_matches('/'));
+    }
+    target
+}
+
+fn disk_file(target: &str) -> Option<std::path::PathBuf> {
+    use sha2::{Digest, Sha256};
+    let dir = media_dir()?;
+    let hash = format!("{:x}", Sha256::digest(target.as_bytes()));
+    Some(dir.join(format!("{hash}.bin")))
+}
+
+fn read_disk(target: &str) -> Option<Vec<u8>> {
+    let path = disk_file(target)?;
+    let meta = std::fs::metadata(&path).ok()?;
+    if meta.len() == 0 || meta.len() > 10 * 1024 * 1024 {
+        return None;
+    }
+    std::fs::read(&path).ok()
+}
+
+fn write_disk(target: &str, bytes: &[u8]) {
+    if bytes.is_empty() || bytes.len() > 10 * 1024 * 1024 {
+        return;
+    }
+    let Some(path) = disk_file(target) else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = path.with_extension("bin.tmp");
+    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, &path).is_ok() {
+        if DISK_WRITES.fetch_add(1, Ordering::Relaxed).is_multiple_of(20)
+            && let Some(dir) = path.parent()
+        {
+            prune_disk(dir);
+        }
+    } else {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+fn prune_disk(dir: &std::path::Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = rd
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("bin") {
+                return None;
+            }
+            let t = e.metadata().ok()?.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            Some((t, p))
+        })
+        .collect();
+    if files.len() <= MAX_DISK_FILES {
+        return;
+    }
+    files.sort_by_key(|(t, _)| *t);
+    for (_, p) in files.iter().take(files.len() - MAX_DISK_FILES) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+/// Persists bytes of an uploaded picture under its server URL so reopening never re-downloads it.
+pub fn remember(url: &str, api: &str, bytes: Vec<u8>) {
+    if url.is_empty() || bytes.is_empty() || !allowed(url, api) {
+        return;
+    }
+    let target = normalize_target(url, api);
+    let _ = std::thread::Builder::new().name("Native media save".into()).spawn(move || {
+        write_disk(&target, &bytes);
+    });
+}
 
 /// Only Native uploads and Giphy are ever fetched.
 pub fn allowed(url: &str, api: &str) -> bool {
@@ -147,19 +236,40 @@ pub fn get(url: &str, api: &str) -> Option<Arc<Media>> {
     c.map.insert(url.to_owned(), Slot::Loading);
     c.order.push_back(url.to_owned());
     drop(c);
-    let mut target = url.to_owned();
-    if target.contains("giphy.com") {
-        target = target.replace("/giphy.gif", "/200w.gif");
-    }
-    if target.starts_with('/') && !api.is_empty() {
-        target = format!("{}{target}", api.trim_end_matches('/'));
-    }
+    let target = normalize_target(url, api);
     IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
     let url = url.to_owned();
     let spawned = std::thread::Builder::new().name("Native media".into()).spawn({
         let url = url.clone();
         move || {
-            let media = net::get_bytes(&target, None, 10 * 1024 * 1024).map(|b| decode(&b)).unwrap_or_else(|_| Media::failed());
+            let media = if let Some(cached) = read_disk(&target) {
+                let m = decode(&cached);
+                if !m.failed {
+                    m
+                } else {
+                    match net::get_bytes(&target, None, 10 * 1024 * 1024) {
+                        Ok(b) => {
+                            let m = decode(&b);
+                            if !m.failed {
+                                write_disk(&target, &b);
+                            }
+                            m
+                        }
+                        Err(_) => Media::failed(),
+                    }
+                }
+            } else {
+                match net::get_bytes(&target, None, 10 * 1024 * 1024) {
+                    Ok(b) => {
+                        let m = decode(&b);
+                        if !m.failed {
+                            write_disk(&target, &b);
+                        }
+                        m
+                    }
+                    Err(_) => Media::failed(),
+                }
+            };
             cache().lock().unwrap_or_else(|e| e.into_inner()).map.insert(url, Slot::Ready(Arc::new(media)));
             IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
         }

@@ -5,8 +5,7 @@
 
 use super::module::{GameView, Module, label};
 use super::modules::Modules;
-use super::emotes_view::{EmotesAct, EmotesView};
-use super::locker::Locker;
+use super::locker::{Locker, LockerAct};
 use super::screenshots::Screenshots;
 use super::music_view::MusicView;
 use super::scroll::Scroll;
@@ -21,10 +20,11 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub const TABS: [&str; 7] = ["Mods", "Cosmetics", "Emotes", "Settings", "Screenshots", "Music", "Waypoints"];
-/// The order the rail shows the tabs in (Waypoints next to Emotes; the TAB_* numbers stay as they were).
-const RAIL_ORDER: [usize; 7] = [0, 1, 2, 6, 3, 4, 5];
+pub const TABS: [&str; 7] = ["Mods", "Locker", "Emotes", "Settings", "Screenshots", "Music", "Waypoints"];
+/// The order the rail shows the tabs in (Emotes & Cosmetics are unified inside Locker; the TAB_* numbers stay stable).
+const RAIL_ORDER: [usize; 6] = [0, 1, 6, 3, 4, 5];
 pub const TAB_MODS: usize = 0;
+pub const TAB_LOCKER: usize = 1;
 pub const TAB_COSMETICS: usize = 1;
 pub const TAB_EMOTES: usize = 2;
 pub const TAB_SETTINGS: usize = 3;
@@ -294,7 +294,6 @@ pub struct Menu {
     shots: Screenshots,
     music: MusicView,
     locker: Locker,
-    emotes: EmotesView,
     waypoints: super::waypoints_view::WaypointsView,
     /// The menu is over a world (the Emotes page can play an emote there).
     in_world: bool,
@@ -307,6 +306,7 @@ pub struct Menu {
     s_scale: Setting,
     s_menu: Setting,
     s_chat: Setting,
+    s_emote: Setting,
     s_play: Setting,
     s_next: Setting,
     s_prev: Setting,
@@ -361,7 +361,6 @@ impl Menu {
             shots: Screenshots::new(),
             music: MusicView::new(),
             locker: Locker::new(),
-            emotes: EmotesView::new(),
             waypoints: super::waypoints_view::WaypointsView::new(),
             in_world: false,
             who: String::new(),
@@ -372,6 +371,7 @@ impl Menu {
             s_scale: Setting::num("scale", "UI size", 1.0, 0.75, 1.5, 0.05, "x"),
             s_menu: Setting::key("menukey", "Menu key", 344),
             s_chat: Setting::key("chatkey", "Chat key", 89),
+            s_emote: Setting::key("emotekey", "Emote wheel", 66),
             s_play: Setting::key("musicplay", "Music: play / pause", -1),
             s_next: Setting::key("musicnext", "Music: next song", -1),
             s_prev: Setting::key("musicprev", "Music: previous song", -1),
@@ -403,7 +403,7 @@ impl Menu {
             ui.focus = None;
             return true;
         }
-        if self.tab == TAB_COSMETICS && self.locker.escape(ui) {
+        if self.tab == TAB_LOCKER && self.locker.escape(ui) {
             return true;
         }
         if self.search.focused(ui) {
@@ -415,9 +415,6 @@ impl Menu {
         }
         if self.confirm_reset {
             self.confirm_reset = false;
-            return true;
-        }
-        if self.tab == TAB_EMOTES && self.emotes.escape(ui) {
             return true;
         }
         if self.tab == TAB_SHOTS && self.shots.escape() {
@@ -469,6 +466,11 @@ impl Menu {
     }
 
     fn set_tab(&mut self, t: usize, now: f64) {
+        let mut t = t;
+        if t == TAB_EMOTES {
+            t = TAB_LOCKER;
+            self.locker.open_emotes(now);
+        }
         if self.tab == t {
             return;
         }
@@ -476,11 +478,8 @@ impl Menu {
         if t == TAB_SHOTS {
             self.shots.stale();
         }
-        if t == TAB_COSMETICS {
+        if t == TAB_LOCKER {
             self.locker.opened();
-        }
-        if t == TAB_EMOTES {
-            self.emotes.opened(now);
         }
         if t == TAB_WAYPOINTS {
             self.waypoints.opened();
@@ -527,18 +526,12 @@ impl Menu {
         let tab_icons =
             [theme::I_NAV_MODS, theme::I_NAV_LOCKER, theme::I_SMILE, theme::I_NAV_SETTINGS, icons::CAMERA, icons::MUSIC, theme::I_MAP_PIN];
         // every tab and the close tile fit, however short the window is
-        let step = (RAIL + 8.0).min((wh - 74.0 - 16.0 - RAIL - 8.0) / TABS.len() as f32);
+        let step = (RAIL + 8.0).min((wh - 74.0 - 16.0 - RAIL - 8.0) / RAIL_ORDER.len() as f32);
         let size = (step - 6.0).clamp(30.0, RAIL);
         let tx = x0 + (rw - size) / 2.0;
         for i in RAIL_ORDER {
-            let art = if i == TAB_EMOTES { self.art_emotes.clone() } else { None };
-            if rail_tile_sized(ui, c, &format!("menu:tab:{i}"), tx, ty, size, if art.is_some() { 0 } else { tab_icons[i] }, TABS[i], self.tab == i) {
+            if rail_tile_sized(ui, c, &format!("menu:tab:{i}"), tx, ty, size, tab_icons[i], TABS[i], self.tab == i) {
                 self.set_tab(i, ui.now);
-            }
-            if let Some(img) = art {
-                let is = 32.0 * size / RAIL;
-                let a = if self.tab == i { 1.0 } else { 0.78 };
-                c.image(&img, tx + (size - is) / 2.0, ty + (size - is) / 2.0, is, is, [0.0, 0.0, 1.0, 1.0], theme::alpha(0xFFFFFFFF, a));
             }
             ty += step;
         }
@@ -609,9 +602,9 @@ impl Menu {
                     c.pop_alpha();
                 }
             }
-            TAB_COSMETICS | TAB_EMOTES | TAB_SHOTS | TAB_MUSIC | TAB_WAYPOINTS => {
+            TAB_LOCKER | TAB_SHOTS | TAB_MUSIC | TAB_WAYPOINTS => {
                 header(c, TABS[self.tab], mx, py, hh);
-                if self.tab == TAB_COSMETICS {
+                if self.tab == TAB_LOCKER {
                     let store = "Get more in the Native Store";
                     let sw = c.text_width(font::MEDIUM, 11.5, store);
                     c.icon(theme::I_STORE, 14.0, mx + mw - 20.0 - sw - 12.0, py + hh / 2.0, theme::TEXT_MUTED);
@@ -639,7 +632,7 @@ impl Menu {
         action
     }
 
-    /// The tabs another part of the port draws (cosmetics, screenshots, music).
+    /// The tabs another part of the port draws (locker, screenshots, music, waypoints).
     fn other_tab(&mut self, ui: &mut Ui, c: &mut Canvas, cfg: &mut UiConfig, x: f32, y: f32, w: f32, h: f32) -> Action {
         if self.tab == TAB_MUSIC {
             self.music.draw(ui, c, cfg, x, y, w, h);
@@ -649,18 +642,17 @@ impl Menu {
             self.shots.draw(ui, c, self.game_dir.as_deref(), x, y, w, h);
             return Action::None;
         }
-        if self.tab == TAB_COSMETICS {
-            self.locker.draw(ui, c, &self.who, self.page_at, x, y, w, h);
-            return Action::None;
+        if self.tab == TAB_LOCKER {
+            let who = self.who.clone();
+            return if matches!(self.locker.draw(ui, c, &who, self.page_at, x, y, w, h, self.in_world), LockerAct::Close) {
+                Action::Close
+            } else {
+                Action::None
+            };
         }
         if self.tab == TAB_WAYPOINTS {
             self.waypoints.draw(ui, c, x, y, w, h);
             return Action::None;
-        }
-        if self.tab == TAB_EMOTES {
-            // an emote played in the world: close the menu so it can be seen
-            let who = self.who.clone();
-            return if matches!(self.emotes.draw(ui, c, &who, x, y, w, h, self.in_world), EmotesAct::Close) { Action::Close } else { Action::None };
         }
         empty(c, x, y, w, h.min(260.0), theme::I_SPARKLES, "Coming soon", "This page is still being ported to the Rust Edition.");
         Action::None
@@ -1043,7 +1035,7 @@ impl Menu {
 
     /// A mod's settings on a dedicated full page: header with back button, enable switch, live preview, settings, and appearance.
     #[allow(clippy::too_many_arguments)]
-    fn mod_page(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &UiConfig, id: &str, x: f32, y: f32, w: f32, h: f32) -> Action {
+    fn mod_page(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &mut UiConfig, id: &str, x: f32, y: f32, w: f32, h: f32) -> Action {
         let Some(mi) = mods.all.iter().position(|m| m.state.id == id) else {
             self.selected = None;
             return Action::None;
@@ -1111,7 +1103,16 @@ impl Menu {
         let reset_x = cur_right - 10.0 - reset_w;
         if ui.button(c, "menu:page:reset", reset_x, state_y, reset_w, state_h, "Reset Settings", theme::I_RESET, ui::BTN_GHOST) {
             mods.all[mi].reset_settings();
-            mods.changed();
+            if mods.all[mi].state.id == "emotes" {
+                let k = super::emotes_module::raw_wheel_key(mods, cfg);
+                if cfg.emote_key != k {
+                    cfg.emote_key = k;
+                    cfg.save();
+                }
+                mods.save();
+            } else {
+                mods.changed();
+            }
         }
 
         // Content: settings on the left, a tall live preview on the right (stacked on narrow windows).
@@ -1183,7 +1184,7 @@ impl Menu {
 
     /// What the module does, then its options in foldable sections (like a game client's module screen).
     #[allow(clippy::too_many_arguments)]
-    fn settings_panel(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &UiConfig, mi: usize, x: f32, y: f32, w: f32, h: f32) {
+    fn settings_panel(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &mut UiConfig, mi: usize, x: f32, y: f32, w: f32, h: f32) {
         c.round(x, y, w, h, 12.0, CARD);
         c.outline(x, y, w, h, 12.0, 1.0, theme::HAIRLINE);
         let pad = 18.0;
@@ -1211,16 +1212,29 @@ impl Menu {
 
     /// One foldable group: a header row (chevron, title, option count) and, when open, the option rows. Returns the y below it.
     #[allow(clippy::too_many_arguments)]
-    fn section(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &UiConfig, mi: usize, title: &str, part: Part, x: f32, y: f32, w: f32) -> f32 {
+    fn section(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &mut UiConfig, mi: usize, title: &str, part: Part, x: f32, y: f32, w: f32) -> f32 {
+        let mod_id = mods.all[mi].state.id;
+        let is_emotes = mod_id == "emotes";
         let rows: Vec<usize> = match part {
+            Part::Keybind if is_emotes => mods.all[mi]
+                .state
+                .settings
+                .iter()
+                .position(|s| s.id == "wheel")
+                .into_iter()
+                .collect(),
             Part::Keybind => vec![0],
+            Part::Options if is_emotes => mods.all[mi]
+                .shown_settings()
+                .into_iter()
+                .filter(|&i| mods.all[mi].state.settings[i].id != "wheel")
+                .collect(),
             Part::Options => mods.all[mi].shown_settings(),
             Part::Appearance => mods.all[mi].shown_appearance(),
         };
         if rows.is_empty() {
             return y;
         }
-        let mod_id = mods.all[mi].state.id;
         let key = format!("{mod_id}:{title}");
         let open = !self.folded.contains(&key);
         let (pad, hh) = (18.0, 34.0);
@@ -1260,24 +1274,40 @@ impl Menu {
                 c.fill(rx, y, rw, 1.0, theme::HAIRLINE);
             }
             let current = match part {
+                Part::Keybind if is_emotes => mods.all[mi].state.settings.get(*si),
                 Part::Keybind => Some(&mods.all[mi].state.toggle_key),
                 Part::Options => mods.all[mi].state.settings.get(*si),
                 Part::Appearance => None,
             };
             let warning = current.and_then(|s| super::emotes_module::conflict(mods, s, cfg));
-            let m = &mut mods.all[mi];
-            let s = match part {
-                Part::Keybind => &mut m.state.toggle_key,
-                Part::Options => &mut m.state.settings[*si],
-                Part::Appearance => match m.state.hud.as_mut() {
-                    Some(h) => &mut h.appearance[*si],
-                    None => continue,
-                },
+            let (changed, save_now, synced_wheel, rh) = {
+                let m = &mut mods.all[mi];
+                let s = match part {
+                    Part::Keybind if is_emotes => &mut m.state.settings[*si],
+                    Part::Keybind => &mut m.state.toggle_key,
+                    Part::Options => &mut m.state.settings[*si],
+                    Part::Appearance => match m.state.hud.as_mut() {
+                        Some(h) => &mut h.appearance[*si],
+                        None => continue,
+                    },
+                };
+                let sid = s.id;
+                let rid = format!("menu:set:{mod_id}:{sid}");
+                let rh = Widgets::row_height(s);
+                let ch = self.widgets.row(ui, c, &rid, rx, y, rw, s, warning.as_deref());
+                let save_now = ch && matches!(s.kind, Kind::Key { .. } | Kind::Binding { .. });
+                let synced_wheel = (ch && is_emotes && sid == "wheel").then(|| s.as_key());
+                (ch, save_now, synced_wheel, rh)
             };
-            let sid = s.id;
-            let rid = format!("menu:set:{mod_id}:{sid}");
-            let rh = Widgets::row_height(s);
-            if self.widgets.row(ui, c, &rid, rx, y, rw, s, warning.as_deref()) {
+            if let Some(wheel) = synced_wheel {
+                if cfg.emote_key != wheel {
+                    cfg.emote_key = wheel;
+                    cfg.save();
+                }
+            }
+            if save_now {
+                mods.save();
+            } else if changed {
                 mods.changed();
             }
             y += rh;
@@ -1298,8 +1328,10 @@ impl Menu {
         if !scale_held && !self.scale_dragged {
             self.s_scale.set_num(cfg.scale);
         }
+        let wheel_before = super::emotes_module::raw_wheel_key(mods, cfg);
         self.s_menu.set_key(cfg.menu_key);
         self.s_chat.set_key(cfg.relay_key);
+        self.s_emote.set_key(wheel_before);
         self.s_play.set_key(cfg.music_play_key);
         self.s_next.set_key(cfg.music_next_key);
         self.s_prev.set_key(cfg.music_prev_key);
@@ -1373,6 +1405,16 @@ impl Menu {
             cfg.relay_key = self.s_chat.as_key();
             save = true;
         }
+        let wheel_now = super::emotes_module::raw_wheel_key(mods, cfg);
+        if self.s_emote.as_key() != wheel_before {
+            if super::emotes_module::set_wheel_key(mods, cfg, self.s_emote.as_key()) {
+                mods.save();
+                save = true;
+            }
+        } else if wheel_now != wheel_before && cfg.emote_key != wheel_now {
+            cfg.emote_key = wheel_now;
+            save = true;
+        }
         if self.s_play.as_key() != cfg.music_play_key
             || self.s_next.as_key() != cfg.music_next_key
             || self.s_prev.as_key() != cfg.music_prev_key
@@ -1394,7 +1436,7 @@ impl Menu {
         let head = 62.0;
         let rows: Vec<&mut Setting> = match which {
             Group::General => vec![&mut self.s_title, &mut self.s_notify, &mut self.s_activity, &mut self.s_scale],
-            Group::Keys => vec![&mut self.s_menu, &mut self.s_chat, &mut self.s_play, &mut self.s_next, &mut self.s_prev],
+            Group::Keys => vec![&mut self.s_menu, &mut self.s_chat, &mut self.s_emote, &mut self.s_play, &mut self.s_next, &mut self.s_prev],
         };
         let rh: f32 = rows.iter().map(|s| Widgets::row_height(s)).sum();
         let h = head + rh + 8.0;

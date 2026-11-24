@@ -198,6 +198,11 @@ impl EmotesView {
         let (skin, slim) = preview3d::wheel_skin(if name.is_empty() { who } else { &name });
         let is_plus = me["isPlus"].as_bool().unwrap_or(false);
 
+        // Activate drag before drawing slots so drop-target highlighting is instant and fast flick-drags still register on release.
+        if self.drag_id.is_some() && !self.dragging && (ui.mx - self.drag_x).abs() + (ui.my - self.drag_y).abs() > 6.0 {
+            self.dragging = true;
+        }
+
         // 2. Right column (~244 px): 2x4 vertical wheel slots panel + Play/Replay + Page footer
         let right_w = (w * 0.27).clamp(218.0, 256.0);
         let rx = x + w - right_w;
@@ -658,7 +663,7 @@ impl EmotesView {
     #[allow(clippy::too_many_arguments)]
     fn drag(&mut self, ui: &mut Ui, c: &mut Canvas, items: &[Emote], pages: &[WheelPage], over_grid: bool, skin: &Arc<Image>, slim: bool) {
         let Some(drag_id) = self.drag_id.clone() else { return };
-        if !self.dragging && ui.down && (ui.mx - self.drag_x).abs() + (ui.my - self.drag_y).abs() > 6.0 {
+        if !self.dragging && (ui.mx - self.drag_x).abs() + (ui.my - self.drag_y).abs() > 6.0 {
             self.dragging = true;
         }
         let it = find(items, Some(&drag_id)).cloned();

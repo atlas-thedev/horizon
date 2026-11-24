@@ -180,6 +180,9 @@ impl Modules {
                     }
                 }
             }
+            if m.state.id == "emotes" {
+                m.state.toggle_key.reset();
+            }
         }
         if !keys_v2 {
             self.migrate_keys();

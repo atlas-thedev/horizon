@@ -154,6 +154,7 @@ impl TitleView {
             // A soft light behind, so the island reads over any background.
             c.shadow(cx - 44.0 * s, feet - 34.0 * s, 88.0 * s, 60.0 * s, 44.0 * s, 90.0, 0x1CFFFFFF);
             self.player.stage = Some(super::title_island::draw);
+            self.player.stage_front = Some(super::title_island::draw_front);
             self.player.set_pitch(PITCH);
             self.player.nametag = Some(info.player.clone()).filter(|n| !n.is_empty());
             let locker = super::wardrobe::snapshot();
@@ -251,7 +252,7 @@ impl TitleView {
             act = Some(TitleAct::Realms);
         }
         y += rh + gap;
-        if self.list_row(ui, c, 4, "menu:nativemods", x, y, w, rh, "Native Mods", theme::I_SPARKLES, true) {
+        if self.list_row(ui, c, 4, "menu:nativemods", x, y, w, rh, "Native Mods", icons::for_module("watermark", theme::I_SPARKLES), true) {
             act = Some(TitleAct::NativeMods);
         }
         y += rh + 6.0;
