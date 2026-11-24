@@ -83,7 +83,11 @@ jobs:
       - name: Upstream source of that Nightly
         if: steps.need.outputs.build == 'true'
         run: |
-          git clone --filter=blob:none "https://github.com/$UPSTREAM.git" src
+          if ! GIT_TERMINAL_PROMPT=0 git clone --filter=blob:none "https://github.com/$UPSTREAM.git" src; then
+            echo "Upstream $UPSTREAM unavailable; falling back to $GITHUB_REPOSITORY"
+            rm -rf src
+            GIT_TERMINAL_PROMPT=0 git clone --filter=blob:none "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" src
+          fi
           cd src
           git checkout "nightly-source/${{ steps.up.outputs.date }}-${{ steps.up.outputs.short }}" 2> /dev/null || git checkout "${{ steps.up.outputs.short }}"
       - name: Rebrand, set the launch screen and the Java Edition icon
