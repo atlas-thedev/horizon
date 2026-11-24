@@ -102,13 +102,13 @@ impl TitleView {
         1.0 - (1.0 - a).powi(3)
     }
 
-    /// The background, submitted before all foreground UI: you in a whole block world (`title_world`: baked once off
-    /// the game thread, then a picture per frame) over the game's panorama, and its shading. The new title (`main`)
+    /// The background, submitted before all foreground UI: you in a whole block world (`title_world`: one still
+    /// picture of the map, made once and kept in the game folder) over the game's panorama, and its shading. The new title (`main`)
     /// keeps the world clear where you stand, darker behind the menu, along the top and along the bottom (under the
     /// cards and the footer).
     pub fn background(&self, c: &mut Canvas, main: bool) {
         let (w, h) = (c.width(), c.height());
-        if super::title_world::prepare(c, w, h) > 0.0 {
+        if super::title_world::prepare() > 0.0 {
             super::title_world::draw(c, 0.0, 0.0, w, h);
         }
         if main {

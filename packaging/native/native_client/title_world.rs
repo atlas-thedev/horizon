@@ -3,11 +3,11 @@
 //! mod's `TitleWorld`.
 //!
 //! Nothing of the world is drawn per frame. On a few background threads the land is generated and ray-traced ONCE
-//! into a picture the size of the screen (the game's block textures, resource packs included, with its flat shading,
+//! into one wide picture of the map (the game's block textures, resource packs included, with its flat shading,
 //! corner ambient occlusion, water, plants, clouds, fog and a sky for the time of day), seen from just behind you, so
-//! its ground lands right under your feet. Every frame after that the title screen draws just that picture: one
-//! textured quad, breathing slowly around your feet. It is baked again only when the clock moves to another sky (day,
-//! sunset, night), the resources change or the screen changes size.
+//! its ground lands right under your feet, and saved in the game folder. After that the title screen only loads that
+//! one picture and draws it, still, scaled to cover the window: one textured quad. A new one is made only for another
+//! sky (day, sunset, night) or other resources.
 
 use horizon_client::native_ui::{Canvas, Image};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -528,9 +528,16 @@ const CLOUD_Y: f64 = G0 as f64 + 34.0;
 const AO: [f64; 4] = [0.5, 0.68, 0.84, 1.0];
 const PLANT_INSET: f64 = 0.15;
 
-/// How tall your preview is drawn on a screen this tall (UI units): the title screen's own sizing.
+/// The one picture of the map: wide enough (7:3) to cover any usual window, scaled to it on screen, so it never has
+/// to be made again when the window changes size.
+pub const PICTURE_W: usize = 2240;
+pub const PICTURE_H: usize = 960;
+/// Your size it is made for, as a fraction of the screen height (the title screen draws you about this tall).
+pub const PLAYER: f32 = 0.33;
+
+/// How tall your preview is drawn on a screen this tall (UI units): the size the picture is made for.
 pub fn player_height(screen_h: f32) -> f32 {
-    32.0 * (screen_h / 84.0).min(9.5)
+    PLAYER * screen_h
 }
 
 /// The camera: you stand on the flat top of the hill in the middle of the land, the camera a few blocks behind and
@@ -991,14 +998,6 @@ impl<'a> Baker<'a> {
     }
 }
 
-/// The picture for a framebuffer this big: its own size, at most 1080 pixels tall (it is soft-scaled up).
-pub fn picture_size(fb_w: i32, fb_h: i32) -> (usize, usize) {
-    let k = (1080.0 / f64::from(fb_h.max(1))).min(1.0);
-    let w = (f64::from(fb_w) * k).round().clamp(16.0, 4096.0) as usize;
-    let h = (f64::from(fb_h) * k).round().max(16.0) as usize;
-    (w, h)
-}
-
 /// Bakes a picture on `threads` threads (the background bake and the tests).
 pub fn bake(land: &Land, tiles: &Tiles, sky: &Sky, view: &View, threads: usize) -> Arc<Image> {
     let (w, h) = (view.w, view.h);
@@ -1029,10 +1028,9 @@ pub fn bake(land: &Land, tiles: &Tiles, sky: &Sky, view: &View, threads: usize) 
 
 // ── on the title screen ────────────────────────────────────────────────
 
-/// The world breathes: a slow zoom of a few percent around your feet, so they stay planted on the ground.
-const BREATH: f64 = 0.03;
-const BREATH_S: f64 = 28.0;
-const FADE_MS: f64 = 700.0;
+const FADE_MS: f64 = 500.0;
+/// Bumped when the picture would come out different for the same world, sky and textures.
+const FORMAT: u32 = 1;
 
 #[derive(Default)]
 struct Shown {
@@ -1042,17 +1040,11 @@ struct Shown {
     baking: Option<String>,
     failed: Option<String>,
     at: Option<Instant>,
-    land: Option<Arc<Land>>,
 }
 
 fn shown() -> &'static Mutex<Shown> {
     static SHOWN: OnceLock<Mutex<Shown>> = OnceLock::new();
     SHOWN.get_or_init(Mutex::default)
-}
-
-fn start() -> Instant {
-    static START: OnceLock<Instant> = OnceLock::new();
-    *START.get_or_init(Instant::now)
 }
 
 /// The instance's name (its game folder), so this is the same world as the launcher's Home for it.
@@ -1073,36 +1065,41 @@ fn clock_sky() -> &'static Sky {
     sky_at((day / 60) as u32, (day % 60) as u32)
 }
 
-/// Starts the bake when the sky, the resources or the screen size asks for a new picture and returns how far the
-/// baked world has faded in: 0 = nothing to draw yet (the panorama behind shows), 1 = it covers everything behind it.
-pub fn prepare(c: &Canvas, w: f32, h: f32) -> f32 {
+/// Starts loading (or, the first time, making) the picture when the sky or the resources ask for another one, and
+/// returns how far it has faded in: 0 = nothing to draw yet (the panorama behind shows), 1 = it covers everything
+/// behind it. Cheap: called every frame.
+pub fn prepare() -> f32 {
     let sky = clock_sky();
-    let (pw, ph) = picture_size(c.px(w), c.px(h));
-    let player = (player_height(h) / h * 100.0).round() / 100.0;
     let name = seed_name();
-    let key = format!("{name}|{}|{}|{pw}x{ph}|{player}", sky.id, super::resources_generation());
+    let key = format!("{name}|{}|{}", sky.id, super::resources_generation());
     let mut s = shown().lock().unwrap_or_else(|e| e.into_inner());
     if s.key != key && s.baking.is_none() && s.failed.as_deref() != Some(key.as_str()) {
         s.baking = Some(key.clone());
-        let land = s.land.clone();
         let spawned = std::thread::Builder::new().name("Native title world".into()).spawn(move || {
             let result = std::panic::catch_unwind(|| {
-                let seed = seed_of(name);
-                let land = land.filter(|l| l.seed == seed).unwrap_or_else(|| Arc::new(stand_on(generate(seed))));
                 let tiles = load_tiles(&|n| super::game_texture(n));
-                let threads = std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(2).clamp(1, 4));
-                let view = View::new(&land, pw, ph, f64::from(FEET), f64::from(player));
-                (bake(&land, &tiles, sky, &view, threads), land)
+                let file = cache_file(name, sky, &tiles);
+                if let Some(img) = file.as_deref().and_then(load) {
+                    return img;
+                }
+                // the first time for this world, sky and textures: make it (gently: one or two threads)
+                let land = stand_on(generate(seed_of(name)));
+                let view = View::new(&land, PICTURE_W, PICTURE_H, f64::from(FEET), f64::from(PLAYER));
+                let threads = std::thread::available_parallelism().map_or(1, |n| (n.get() / 4).clamp(1, 2));
+                let img = bake(&land, &tiles, sky, &view, threads);
+                if let Some(file) = &file {
+                    save(file, &img);
+                }
+                img
             });
             let mut s = shown().lock().unwrap_or_else(|e| e.into_inner());
             s.baking = None;
             match result {
-                Ok((img, land)) => {
+                Ok(img) => {
                     s.previous = s.img.take();
                     s.img = Some(img);
                     s.at = None;
                     s.key = key;
-                    s.land = Some(land);
                 }
                 Err(_) => s.failed = Some(key),
             }
@@ -1121,7 +1118,7 @@ pub fn prepare(c: &Canvas, w: f32, h: f32) -> f32 {
     (at.elapsed().as_secs_f64() * 1000.0 / FADE_MS).min(1.0) as f32
 }
 
-/// Draws the baked world (after [`prepare`]) over the box, a new one fading in over an old one.
+/// Draws the picture (after [`prepare`]) over the box, a new one fading in over an old one.
 pub fn draw(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
     let (img, old, k) = {
         let mut s = shown().lock().unwrap_or_else(|e| e.into_inner());
@@ -1133,18 +1130,69 @@ pub fn draw(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
         (img, s.previous.clone(), k)
     };
     if let Some(old) = &old {
-        picture(c, old, x, y, w, h, 0xFFFFFFFF);
+        cover(c, old, x, y, w, h, 0xFFFFFFFF);
     }
-    picture(c, &img, x, y, w, h, horizon_client::native_ui::theme::alpha(0xFFFFFFFF, k));
+    cover(c, &img, x, y, w, h, horizon_client::native_ui::theme::alpha(0xFFFFFFFF, k));
 }
 
-/// The picture over the box, zoomed in and out a little around your feet.
-fn picture(c: &mut Canvas, img: &Arc<Image>, x: f32, y: f32, w: f32, h: f32, argb: u32) {
-    let phase = start().elapsed().as_secs_f64() / BREATH_S * 2.0 * std::f64::consts::PI;
-    let zoom = (1.0 + BREATH * (1.0 - phase.cos()) / 2.0) as f32;
-    let (u0, u1) = (0.5 - 0.5 / zoom, 0.5 + 0.5 / zoom);
-    let (v0, v1) = (FEET - FEET / zoom, FEET + (1.0 - FEET) / zoom);
-    c.image(img, x, y, w, h, [u0, v0, u1, v1], argb);
+/// The picture covering the box, its ground row under your feet (`FEET` of the height) whatever the size.
+fn cover(c: &mut Canvas, img: &Arc<Image>, x: f32, y: f32, w: f32, h: f32, argb: u32) {
+    let scale = (w / img.width as f32).max(h / img.height as f32);
+    let (uw, vh) = (w / (img.width as f32 * scale), h / (img.height as f32 * scale));
+    let (u0, v0) = (0.5 - uw / 2.0, FEET - FEET * vh);
+    c.image(img, x, y, w, h, [u0, v0, u0 + uw, v0 + vh], argb);
+}
+
+/// Where the picture for this world, sky and these textures is kept: `<game dir>/.native/title-world/`.
+fn cache_file(name: &str, sky: &Sky, tiles: &Tiles) -> Option<std::path::PathBuf> {
+    let dir = super::game_dir()?;
+    let hash = tiles.iter().flatten().fold(2166136261u32, |h, &px| (h ^ px).wrapping_mul(16777619));
+    Some(dir.join(".native").join("title-world").join(format!("{}-{}-{hash:x}-{FORMAT}.bin", seed_of(name), sky.id)))
+}
+
+/// The saved picture: "NTW1", width, height (little-endian), then its ARGB pixels zlib-compressed. The same file as
+/// the Java mod's.
+pub fn load(file: &std::path::Path) -> Option<Arc<Image>> {
+    let all = std::fs::read(file).ok()?;
+    if all.len() < 12 || all.len() > 64 << 20 {
+        return None;
+    }
+    let word = |i: usize| u32::from_le_bytes([all[i], all[i + 1], all[i + 2], all[i + 3]]);
+    let (w, h) = (word(4) as usize, word(8) as usize);
+    if word(0) != 0x3157544E || w == 0 || h == 0 || w > 4096 || h > 4096 {
+        return None;
+    }
+    let raw = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&all[12..], w * h * 4).ok()?;
+    if raw.len() != w * h * 4 {
+        return None;
+    }
+    let px = raw.chunks_exact(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    Some(Image::new(w as u32, h as u32, px))
+}
+
+pub fn save(file: &std::path::Path, img: &Image) {
+    let Some(dir) = file.parent() else { return };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    if let Ok(old) = std::fs::read_dir(dir) {
+        let old: Vec<_> = old.flatten().collect();
+        if old.len() > 12 {
+            for f in old {
+                let _ = std::fs::remove_file(f.path()); // other worlds, skies and packs: made again when needed
+            }
+        }
+    }
+    let raw: Vec<u8> = img.argb.iter().flat_map(|px| px.to_le_bytes()).collect();
+    let mut out = Vec::with_capacity(raw.len() / 2);
+    out.extend_from_slice(&0x3157544Eu32.to_le_bytes());
+    out.extend_from_slice(&img.width.to_le_bytes());
+    out.extend_from_slice(&img.height.to_le_bytes());
+    out.extend_from_slice(&miniz_oxide::deflate::compress_to_vec_zlib(&raw, 1));
+    let tmp = file.with_extension("tmp");
+    if std::fs::write(&tmp, out).is_ok() {
+        let _ = std::fs::rename(&tmp, file);
+    }
 }
 
 #[cfg(test)]
@@ -1174,15 +1222,21 @@ mod tests {
     fn bakes_you_standing_in_the_world() {
         let land = stand_on(generate(seed_of("native")));
         let tiles = load_tiles(&|_| None);
-        let (w, h) = picture_size(960, 540);
-        let view = View::new(&land, w, h, f64::from(FEET), f64::from(player_height(540.0) / 540.0));
+        let (w, h) = (PICTURE_W / 2, PICTURE_H / 2);
+        let view = View::new(&land, w, h, f64::from(FEET), f64::from(PLAYER));
         // the camera is behind you and above the ground you stand on
         assert!(view.origin[1] > f64::from(G0) && view.origin[1] < f64::from(G0) + 4.0, "camera height {}", view.origin[1]);
         let a = bake(&land, &tiles, &DAY, &view, 4);
         let b = bake(&land, &tiles, &DAY, &view, 1);
-        assert_eq!((a.width, a.height), (960, 540));
+        assert_eq!((a.width as usize, a.height as usize), (w, h));
         assert!(a.argb == b.argb, "the same picture on any number of threads");
-        let feet = a.argb[((540.0 * FEET) as usize + 3) * 960 + 480];
+        let feet = a.argb[((h as f32 * FEET) as usize + 3) * w + w / 2];
+        // kept in the game folder and loaded back exactly
+        let file = std::env::temp_dir().join(format!("title-world-test-{}.bin", std::process::id()));
+        save(&file, &a);
+        let back = load(&file).expect("loads back");
+        let _ = std::fs::remove_file(&file);
+        assert!(back.argb == a.argb);
         let ch = |c: u32, s: u32| (c >> s) & 255;
         assert!(ch(feet, 8) > ch(feet, 16) && ch(feet, 8) > ch(feet, 0), "grass under your feet: {feet:08x}");
     }
