@@ -1162,7 +1162,9 @@ pub fn load(file: &std::path::Path) -> Option<Arc<Image>> {
     if word(0) != 0x3157544E || w == 0 || h == 0 || w > 4096 || h > 4096 {
         return None;
     }
-    let raw = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&all[12..], w * h * 4).ok()?;
+    let mut raw = Vec::with_capacity(w * h * 4);
+    let limit = (w * h * 4) as u64 + 1;
+    std::io::Read::read_to_end(&mut std::io::Read::take(flate2::read::ZlibDecoder::new(&all[12..]), limit), &mut raw).ok()?;
     if raw.len() != w * h * 4 {
         return None;
     }
@@ -1188,7 +1190,11 @@ pub fn save(file: &std::path::Path, img: &Image) {
     out.extend_from_slice(&0x3157544Eu32.to_le_bytes());
     out.extend_from_slice(&img.width.to_le_bytes());
     out.extend_from_slice(&img.height.to_le_bytes());
-    out.extend_from_slice(&miniz_oxide::deflate::compress_to_vec_zlib(&raw, 1));
+    let mut zip = flate2::write::ZlibEncoder::new(out, flate2::Compression::fast());
+    if std::io::Write::write_all(&mut zip, &raw).is_err() {
+        return;
+    }
+    let Ok(out) = zip.finish() else { return };
     let tmp = file.with_extension("tmp");
     if std::fs::write(&tmp, out).is_ok() {
         let _ = std::fs::rename(&tmp, file);
