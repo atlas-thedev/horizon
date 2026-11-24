@@ -1,10 +1,9 @@
-//! `TitleView`: the Native title screen, vanilla's layout over the version
-//! artwork with Native's extras in the corners: one centred column
-//! (Singleplayer, Multiplayer, Realms, Native Mods), then Options and Quit
-//! Game side by side with a small button on each side (Relay on the left, the
-//! classic title on the right), the brand top-left, friends top-right, the
-//! sponsored card bottom-right, the version bottom-left and Mojang's line
-//! bottom-right.
+//! `TitleView`: the Native title screen, a modern take (the same as the Java
+//! mod's): the menu down the left (Play first, in the launcher's blue), you on
+//! a little floating island of real blocks in the middle with your nametag over
+//! your head, the quest and the sponsored card on the right when there is room,
+//! over the game's own panorama. Friends top-right, the announcement
+//! top-centre, the version and Mojang's line along the bottom.
 
 use super::ads::{self, Ad};
 use super::avatars;
@@ -57,8 +56,12 @@ pub struct TitleInfo {
     pub player: String,
 }
 
+const PITCH: f32 = 0.3;
+
 #[derive(Default)]
 pub struct TitleView {
+    /// You, standing on the floating island.
+    player: super::preview3d::PlayerPreview,
     /// The banner text closed with its X (this session), the quest card's quest and the picked reward.
     hidden_banner: Option<String>,
     quest_index: usize,
@@ -98,21 +101,17 @@ impl TitleView {
         1.0 - (1.0 - a).powi(3)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn row_button(&self, ui: &mut Ui, c: &mut Canvas, index: usize, id: &str, x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
-        let e = self.appear(ui, index);
-        c.push_alpha(e * if enabled { 1.0 } else { 0.5 });
-        let was = ui.interactive;
-        ui.interactive = was && enabled;
-        let hit = button(ui, c, id, x, y + (1.0 - e) * 10.0, w, h, label, 0);
-        ui.interactive = was;
-        c.pop_alpha();
-        hit && enabled
-    }
-
-    /// The panorama shading, submitted before the Minecraft logo and all foreground UI.
-    pub fn background(&self, c: &mut Canvas) {
+    /// The panorama shading, submitted before all foreground UI. The new title (`main`) keeps the world clear
+    /// where you stand, darker behind the menu, along the top and along the bottom (the island fades into it).
+    pub fn background(&self, c: &mut Canvas, main: bool) {
         let (w, h) = (c.width(), c.height());
+        if main {
+            c.fill(0.0, 0.0, w, h, 0x1A000000);
+            c.gradient_h(0.0, 0.0, (w * 0.55).min(680.0), h, 0xB3000000, 0x00000000);
+            c.gradient_v(0.0, 0.0, w, 110.0, 0x59000000, 0x00000000);
+            c.gradient_v(0.0, h * 0.68, w, h * 0.32 + 1.0, 0x00000000, 0xE6000000);
+            return;
+        }
         c.fill(0.0, 0.0, w, h, 0x45000000);
         c.gradient_v(0.0, 0.0, w, 120.0, 0x7A000000, 0x00000000);
         c.gradient_v(0.0, h * 0.55, w, h * 0.45, 0x00000000, 0xA6000000);
@@ -124,15 +123,6 @@ impl TitleView {
         let inn = ui.anim("title#in", 1.0, 4.0);
         c.push_alpha(inn);
         let mut act = None;
-
-        // Top-left: the Native brand, small, so the logo spot in the middle stays the game's.
-        c.icon(icons::for_module("watermark", u32::MAX), 26.0, 18.0 + 13.0, 16.0 + 13.0, 0xFFFFFFFF);
-        c.text(font::BOLD, 16.0, "Native", 52.0, 18.0, theme::TEXT_STRONG);
-
-        // The column, where vanilla puts it (a quarter down plus two rows).
-        let (bw, bh, step) = ((w_all - 120.0).min(400.0), 40.0f32, 48.0f32);
-        let half = (bw - 8.0) / 2.0;
-        let x = (w_all - bw) / 2.0;
         let home = super::home::get();
         let promo = home.as_ref().and_then(|d| {
             d.promos
@@ -140,79 +130,46 @@ impl TitleView {
                 .find(|p| !(d.discord_linked && p.buttons.first().is_some_and(|b| b.action == "discord-link")))
                 .cloned()
         });
-        let total = step * 4.0 + 12.0 + bh + if promo.is_some() { PROMO_H + 12.0 } else { 0.0 };
-        let mut y = 96.0f32.max((h_all / 4.0 + 96.0).min(h_all - 44.0 - total));
-        let mp = info.allows_multiplayer;
-        if self.row_button(ui, c, 0, "menu:singleplayer", x, y, bw, bh, &horizon_client::lang::get_or("menu.singleplayer", "Singleplayer"), true) {
-            act = Some(TitleAct::Singleplayer);
-        }
-        y += step;
-        if self.row_button(ui, c, 1, "menu:multiplayer", x, y, bw, bh, &horizon_client::lang::get_or("menu.multiplayer", "Multiplayer"), mp) {
-            act = Some(TitleAct::Multiplayer);
-        }
-        y += step;
-        if self.row_button(ui, c, 2, "menu:realms", x, y, bw, bh, &horizon_client::lang::get_or("menu.online", "Minecraft Realms"), mp) {
-            act = Some(TitleAct::Realms);
-        }
-        y += step;
-        if self.row_button(ui, c, 3, "menu:nativemods", x, y, bw, bh, "Native Mods", true) {
-            act = Some(TitleAct::NativeMods);
-        }
-        y += step + 12.0;
+        let ads: Vec<Ad> = ads::list(info.game_dir.clone()).into_iter().filter(|a| !self.hidden_ads.contains(&a.id)).collect();
+        let quests = home.as_ref().is_some_and(|d| !d.quests.is_empty());
 
-        let appear = self.appear(ui, 4);
-        c.push_alpha(appear);
-        if button(ui, c, "menu:options", x, y, half, bh, &horizon_client::lang::get_or("menu.options", "Options..."), 0) {
-            act = Some(TitleAct::Options);
+        // Three columns: the menu, you, the cards (only when there is room for all three).
+        let pad = if w_all < 1000.0 { 24.0 } else { 44.0 };
+        let pw = (w_all * 0.26).clamp(270.0, 340.0);
+        let cards_w = (w_all * 0.23).min(300.0);
+        let cards = (quests || !ads.is_empty()) && cards_w >= 230.0 && w_all - pad * 2.0 - pw - cards_w >= 360.0;
+        let stage_x = pad + pw + 12.0;
+        let stage_r = if cards { w_all - pad - cards_w - 12.0 } else { w_all - pad };
+        let stage_w = stage_r - stage_x;
+
+        // You, on the island.
+        if stage_w >= 200.0 {
+            let s = 9.5f32.min((h_all / 84.0).min(stage_w / 66.0));
+            let feet = h_all * 0.6 + (ui.now / 1700.0).sin() as f32 * 3.0; // floating, gently
+            let (bw, bh) = (30.0 * s, 50.0 * s); // the preview frames the model in 30 x 50 model pixels
+            let cx = stage_x + stage_w / 2.0;
+            let top = feet - 16.0 * PITCH.cos() * s - 3.0 * s - bh / 2.0;
+            let e = self.appear(ui, 3);
+            c.push_alpha(e);
+            // A soft light behind, so the island reads over any background.
+            c.shadow(cx - 44.0 * s, feet - 34.0 * s, 88.0 * s, 60.0 * s, 44.0 * s, 90.0, 0x1CFFFFFF);
+            self.player.stage = Some(super::title_island::draw);
+            self.player.set_pitch(PITCH);
+            self.player.nametag = Some(info.player.clone()).filter(|n| !n.is_empty());
+            let locker = super::wardrobe::snapshot();
+            self.player.draw(ui, c, "title:you", cx - bw / 2.0, top + (1.0 - e) * 18.0, bw, bh, &locker, &info.player, None, None);
+            c.pop_alpha();
         }
-        // Like vanilla: Quit Game quits, no confirmation.
-        if button(ui, c, "menu:quit", x + half + 8.0, y, half, bh, &horizon_client::lang::get_or("menu.quit", "Quit Game"), 0) {
-            act = Some(TitleAct::Quit);
-        }
-        // The small square buttons beside the row, where vanilla has language and accessibility.
-        if button(ui, c, "menu:relay", x - bh - 8.0, y, bh, bh, "", theme::I_MESSAGE) {
-            act = Some(TitleAct::Relay);
-        }
-        if ui.hover(c, x - bh - 8.0, y, bh, bh) {
-            ui.tip("Relay: friends and chat");
-        }
-        // Vanilla's language and accessibility squares, left of Relay (the Java mod shows vanilla's own two here).
-        let lang_x = x - 3.0 * (bh + 8.0);
-        let access_x = x - 2.0 * (bh + 8.0);
-        if button(ui, c, "menu:language", lang_x, y, bh, bh, "", theme::I_GLOBE) {
-            act = Some(TitleAct::Language);
-        }
-        if ui.hover(c, lang_x, y, bh, bh) {
-            ui.tip(&horizon_client::lang::get_or("options.language", "Language..."));
-        }
-        if button(ui, c, "menu:accessibility", access_x, y, bh, bh, "", theme::I_PERSON) {
-            act = Some(TitleAct::Accessibility);
-        }
-        if ui.hover(c, access_x, y, bh, bh) {
-            ui.tip(&horizon_client::lang::get_or("options.accessibility", "Accessibility Settings..."));
-        }
-        let unread = relay::unread_total();
-        if unread > 0 {
-            badge(c, x - 8.0 + 6.0, y + 2.0, unread);
-        }
-        if button(ui, c, "menu:classic", x + bw + 8.0, y, bh, bh, "", theme::I_LAYERS) {
-            act = Some(TitleAct::Classic);
-        }
-        if ui.hover(c, x + bw + 8.0, y, bh, bh) {
-            ui.tip("Classic title screen");
-        }
-        // The title promo (Link your Discord, an event...) under Options / Quit.
-        if let (Some(p), Some(d)) = (promo.as_ref(), home.as_ref())
-            && let Some(a) = self.promo_card(ui, c, p, d, x, y + bh + 12.0, bw, PROMO_H)
-        {
+
+        // The menu.
+        if let Some(a) = self.menu(ui, c, info, home.as_ref(), promo.as_ref(), pad, pw, h_all) {
             act = Some(a);
         }
-        c.pop_alpha();
 
         // Top-right: friends online (opens Relay).
         let pill = self.appear(ui, 1);
         c.push_alpha(pill);
-        if self.friends_pill(ui, c, w_all - 16.0, 14.0) {
+        if self.friends_pill(ui, c, w_all - pad + 8.0, 16.0) {
             act = Some(TitleAct::Relay);
         }
         c.pop_alpha();
@@ -225,49 +182,184 @@ impl TitleView {
             self.banner(ui, c, d, b, w_all, 14.0);
             c.pop_alpha();
         }
-        // Bottom-left: the quest card, when there is room beside the column.
-        let qw = ((w_all - bw) / 2.0 - bh - 8.0 - 32.0).min(300.0);
-        if let Some(d) = home.as_ref().filter(|d| !d.quests.is_empty())
-            && qw >= 230.0
-        {
-            let qh = quest_height(qw);
-            let qy = h_all - 36.0 - qh;
-            if qy >= 64.0 {
-                let e = self.appear(ui, 5);
-                c.push_alpha(e);
-                if let Some(a) = self.quest_card(ui, c, d, 16.0 - (1.0 - e) * 20.0, qy, qw, qh) {
+        // Right: the sponsored card at the bottom, the quest card over it.
+        if cards {
+            let card_x = w_all - pad - cards_w;
+            let mut cy = h_all - 40.0;
+            let e = self.appear(ui, 5);
+            c.push_alpha(e);
+            if !ads.is_empty() {
+                let ad_h = cards_w * 5.0 / 12.0 + 62.0;
+                if cy - ad_h >= 64.0 {
+                    cy -= ad_h;
+                    if let Some(a) = self.ad_card(ui, c, &ads, card_x + (1.0 - e) * 20.0, cy, cards_w) {
+                        act = Some(a);
+                    }
+                    cy -= 12.0;
+                }
+            }
+            if let Some(d) = home.as_ref().filter(|_| quests) {
+                let qh = quest_height(cards_w);
+                if cy - qh >= 64.0
+                    && let Some(a) = self.quest_card(ui, c, d, card_x + (1.0 - e) * 20.0, cy - qh, cards_w, qh)
+                {
                     act = Some(a);
                 }
-                c.pop_alpha();
             }
-        }
-
-        // Bottom-right: the sponsored card, when there is room beside the column.
-        let ads: Vec<Ad> = ads::list(info.game_dir.clone()).into_iter().filter(|a| !self.hidden_ads.contains(&a.id)).collect();
-        let side = (w_all - bw) / 2.0 - bh - 8.0 - 32.0;
-        let cw = side.min(300.0);
-        if !ads.is_empty() && cw >= 230.0 {
-            let ad_h = cw * 5.0 / 12.0 + 62.0;
-            let ay = h_all - 36.0 - ad_h;
-            if ay >= 64.0 {
-                let e = self.appear(ui, 5);
-                c.push_alpha(e);
-                if let Some(a) = self.ad_card(ui, c, &ads, w_all - 16.0 - cw + (1.0 - e) * 20.0, ay, cw) {
-                    act = Some(a);
-                }
-                c.pop_alpha();
-            }
+            c.pop_alpha();
         }
 
         // The footer, as vanilla: the version bottom-left, Mojang bottom-right.
         let fy = h_all - 22.0;
         let version = format!("Minecraft {}  \u{b7}  Native Client", horizon_core::VANILLA_VERSION);
-        c.text(font::MEDIUM, 11.0, &version, 16.0, fy, 0xB3FFFFFF);
+        c.text(font::MEDIUM, 11.0, &version, pad, fy, 0x99FFFFFF);
         let copy = "Copyright Mojang AB. Do not distribute!";
         let cwid = c.text_width(font::MEDIUM, 11.0, copy);
-        c.text(font::MEDIUM, 11.0, copy, w_all - 16.0 - cwid, fy, 0xB3FFFFFF);
+        c.text(font::MEDIUM, 11.0, copy, w_all - pad - cwid, fy, 0x99FFFFFF);
         c.pop_alpha();
         act
+    }
+
+    /// The menu down the left: the brand, Play, the other ways in, then the small buttons and the promo.
+    #[allow(clippy::too_many_arguments)]
+    fn menu(&mut self, ui: &mut Ui, c: &mut Canvas, info: &TitleInfo, home: Option<&super::home::Doc>, promo: Option<&super::home::Promo>, x: f32, w: f32, h_all: f32) -> Option<TitleAct> {
+        let mut act = None;
+        let (rh, gap, sq) = (46.0f32, 8.0f32, 40.0f32);
+        let total = 50.0 + 28.0 + 56.0 + gap + (rh + gap) * 3.0 + 6.0 + 15.0 + sq + 10.0 + if promo.is_some() { PROMO_H + 12.0 } else { 0.0 };
+        let mut y = 24.0f32.max((h_all * 0.2).min((h_all - 40.0 - total) / 2.0));
+        let mp = info.allows_multiplayer;
+        let tr = |key: &str, fallback: &str| horizon_client::lang::get_or(key, fallback);
+
+        // The brand.
+        let e0 = self.appear(ui, 0);
+        c.push_alpha(e0);
+        c.icon(icons::for_module("watermark", u32::MAX), 40.0, x + 21.0, y + 23.0, 0xFFFFFFFF);
+        c.text(font::BOLD, 26.0, "Native", x + 54.0, y - 2.0, theme::TEXT_STRONG);
+        c.text(font::MEDIUM, 12.5, &format!("Minecraft {}", horizon_core::VANILLA_VERSION), x + 55.0, y + 30.0, 0xB3FFFFFF);
+        c.pop_alpha();
+        y += 78.0;
+
+        if self.primary(ui, c, 1, "menu:singleplayer", x, y, w, 56.0, &tr("menu.singleplayer", "Singleplayer")) {
+            act = Some(TitleAct::Singleplayer);
+        }
+        y += 56.0 + gap;
+        if self.list_row(ui, c, 2, "menu:multiplayer", x, y, w, rh, &tr("menu.multiplayer", "Multiplayer"), theme::I_SERVER, mp) {
+            act = Some(TitleAct::Multiplayer);
+        }
+        y += rh + gap;
+        if self.list_row(ui, c, 3, "menu:realms", x, y, w, rh, &tr("menu.online", "Minecraft Realms"), theme::I_CLOUD, mp) {
+            act = Some(TitleAct::Realms);
+        }
+        y += rh + gap;
+        if self.list_row(ui, c, 4, "menu:nativemods", x, y, w, rh, "Native Mods", theme::I_SPARKLES, true) {
+            act = Some(TitleAct::NativeMods);
+        }
+        y += rh + 6.0;
+
+        // A hairline, then the small row: Options, Language, Accessibility, Relay, the classic title, Quit.
+        let e = self.appear(ui, 5);
+        c.push_alpha(e);
+        c.fill(x + 4.0, y + 7.0, w - 8.0, 1.0, theme::HAIRLINE);
+        y += 15.0;
+        let opt_w = w - (sq + gap) * 5.0;
+        let options = tr("menu.options", "Options...");
+        let label = if opt_w >= 120.0 { options.as_str() } else { "" };
+        if button(ui, c, "menu:options", x, y, opt_w, sq, label, theme::I_SETTINGS) {
+            act = Some(TitleAct::Options);
+        }
+        if label.is_empty() && ui.hover(c, x, y, opt_w, sq) {
+            ui.tip(&options);
+        }
+        let mut ix = x + opt_w + gap;
+        let squares: [(&str, u32, String, TitleAct); 5] = [
+            ("menu:language", theme::I_GLOBE, tr("options.language", "Language..."), TitleAct::Language),
+            ("menu:accessibility", theme::I_PERSON, tr("options.accessibility", "Accessibility Settings..."), TitleAct::Accessibility),
+            ("menu:relay", theme::I_MESSAGE, "Relay: friends and chat".to_owned(), TitleAct::Relay),
+            ("menu:classic", theme::I_LAYERS, "Classic title screen".to_owned(), TitleAct::Classic),
+            // Like vanilla: Quit Game quits, no confirmation.
+            ("menu:quit", theme::I_POWER, tr("menu.quit", "Quit Game"), TitleAct::Quit),
+        ];
+        for (id, icon, tip, a) in squares {
+            if button(ui, c, id, ix, y, sq, sq, "", icon) {
+                act = Some(a.clone());
+            }
+            if ui.hover(c, ix, y, sq, sq) {
+                ui.tip(&tip);
+            }
+            if a == TitleAct::Relay {
+                let unread = relay::unread_total();
+                if unread > 0 {
+                    badge(c, ix + sq - 2.0, y + 2.0, unread);
+                }
+            }
+            ix += sq + gap;
+        }
+        y += sq + 10.0;
+        // The title promo (Link your Discord, an event...).
+        if let (Some(p), Some(d)) = (promo, home)
+            && let Some(a) = self.promo_card(ui, c, p, d, x, y + 2.0, w, PROMO_H)
+        {
+            act = Some(a);
+        }
+        c.pop_alpha();
+        act
+    }
+
+    /// Play: the one big action, in the launcher's blue, with a play mark and an arrow.
+    #[allow(clippy::too_many_arguments)]
+    fn primary(&self, ui: &mut Ui, c: &mut Canvas, index: usize, id: &str, x: f32, y: f32, w: f32, h: f32, label: &str) -> bool {
+        let e = self.appear(ui, index);
+        c.push_alpha(e);
+        let y = y + (1.0 - e) * 10.0;
+        let over = ui.hover(c, x, y, w, h);
+        let click = ui.clicked(c, id, x, y, w, h);
+        let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
+        let pr = ui.anim_on(&format!("{id}#p"), ui.is_pressing(id), 20.0);
+        if over {
+            ui.cursor_hand = true;
+        }
+        let (r, lift) = (14.0, -hv * 1.5 + pr * 1.5);
+        c.shadow(x + 6.0, y + 10.0 + lift, w - 12.0, h - 6.0, r, 22.0, 0x662A73DC);
+        c.round_gradient_h(x, y + lift, w, h, r, theme::mix(0xFF3B8CF0, 0xFF55A0FF, hv), theme::mix(0xFF1F5FC8, 0xFF2D72E0, hv));
+        c.outline(x, y + lift, w, h, r, 1.0, 0x40FFFFFF);
+        c.fill(x + r, y + lift + 1.0, w - r * 2.0, 1.0, 0x40FFFFFF);
+        c.icon(theme::I_PLAY, 17.0, x + 26.0, y + lift + h / 2.0, 0xFFFFFFFF);
+        let lh = c.line_height(font::BOLD, 15.5);
+        c.text(font::BOLD, 15.5, label, x + 46.0, y + lift + (h - lh) / 2.0, 0xFFFFFFFF);
+        c.icon(theme::I_CHEVRON_RIGHT, 15.0, x + w - 24.0 + hv * 3.0, y + lift + h / 2.0, 0xCCFFFFFF);
+        c.pop_alpha();
+        click
+    }
+
+    /// A menu row: dark glass, the icon and the name on the left, an arrow on the right when hovered.
+    #[allow(clippy::too_many_arguments)]
+    fn list_row(&self, ui: &mut Ui, c: &mut Canvas, index: usize, id: &str, x: f32, y: f32, w: f32, h: f32, label: &str, icon: u32, enabled: bool) -> bool {
+        let e = self.appear(ui, index);
+        c.push_alpha(e * if enabled { 1.0 } else { 0.5 });
+        let y = y + (1.0 - e) * 10.0;
+        let was = ui.interactive;
+        ui.interactive = was && enabled;
+        let over = ui.hover(c, x, y, w, h) && enabled;
+        let click = ui.clicked(c, id, x, y, w, h) && enabled;
+        ui.interactive = was;
+        let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
+        let pr = ui.anim_on(&format!("{id}#p"), ui.is_pressing(id), 20.0);
+        if over {
+            ui.cursor_hand = true;
+        }
+        let r = 12.0;
+        c.round(x, y, w, h, r, theme::mix(theme::mix(0xA60A0B0E, 0xCC14161B, hv), 0xD91B1E25, pr));
+        c.outline(x, y, w, h, r, 1.0, theme::mix(0x1FFFFFFF, 0x38FFFFFF, hv));
+        c.round(x + 9.0, y + (h - 28.0) / 2.0, 28.0, 28.0, 8.0, theme::mix(0x14FFFFFF, 0x24FFFFFF, hv));
+        c.icon(icon, 14.0, x + 23.0, y + h / 2.0, theme::mix(0xD9FFFFFF, 0xFFFFFFFF, hv));
+        let lh = c.line_height(font::SEMIBOLD, 14.0);
+        let text = c.ellipsize(font::SEMIBOLD, 14.0, label, w - 60.0);
+        c.text(font::SEMIBOLD, 14.0, &text, x + 46.0, y + (h - lh) / 2.0, theme::mix(0xE6FFFFFF, 0xFFFFFFFF, hv));
+        if hv > 0.01 && w > 150.0 {
+            c.icon(theme::I_CHEVRON_RIGHT, 13.0, x + w - 20.0 + hv * 2.0, y + h / 2.0, theme::alpha(0x99FFFFFF, hv));
+        }
+        c.pop_alpha();
+        click
     }
 
     /// "3 friends online" with their faces; true when clicked. Right-aligned to `right`.

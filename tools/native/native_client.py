@@ -132,6 +132,11 @@ patch(GAME, escape, done)
 # The Native title screen: its page instead of the title's own (the world lists, the server list and the options
 # stay the game's), on the boot menu and on the title a world returns to. What it asks for goes through the
 # game's own title actions.
+# The game's own textures for the Native UI (the title screen's island): handed over whenever the resources
+# (re)load, so resource packs show there too.
+patch(GAME, 'fn load_clouds(root: &horizon_assets::resource_source::ResourceSource) -> (u32, u32, Vec<bool>) {\n',
+      'fn load_clouds(root: &horizon_assets::resource_source::ResourceSource) -> (u32, u32, Vec<bool>) {\n'
+      '    native_client::set_resources(root.clone());\n')
 MENU = CLIENT / 'game/startup_menu.rs'
 menu_phases = '                &mut |_, _| {},\n' if sources != CLIENT / 'game' else ''
 patch(MENU,
@@ -148,7 +153,7 @@ patch(MENU,
       '                let who = self.options.as_ref().map_or_else(|| "Player".into(), |o| o.player_name());\n'
       '                let logo_width = batch.width.ceil();\n'
       '                super::native_client::native_title_background(batch);\n'
-      '                if matches!(title.mode, horizon_client::title::Mode::Main) {\n'
+      '                if matches!(title.mode, horizon_client::title::Mode::Main) && super::native_client::native_title_wants_logo() {\n'
       '                    horizon_client::title::draw_logo(&gui.atlas, batch, logo_width);\n'
       '                }\n'
       '                super::native_client::native_title_frame(batch, title, &who, &gui.atlas, items, &mut self.menu.clipboard);\n'
@@ -201,7 +206,7 @@ patch(GAME, title_open +
       '                    let who = self.options.player_name();\n'
       '                    let logo_width = batch.width.ceil();\n'
       '                    native_client::native_title_background(&mut batch);\n'
-      '                    if matches!(title.mode, horizon_client::title::Mode::Main) {\n'
+      '                    if matches!(title.mode, horizon_client::title::Mode::Main) && native_client::native_title_wants_logo() {\n'
       '                        horizon_client::title::draw_logo(&self.gui.atlas, &mut batch, logo_width);\n'
       '                    }\n'
       '                    native_client::native_title_frame(&mut batch, title, &who, &self.gui.atlas, Some(&self.pack.item_renderer), &mut self.clipboard);\n'

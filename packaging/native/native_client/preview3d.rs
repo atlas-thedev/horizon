@@ -21,6 +21,11 @@ pub struct PlayerPreview {
     arm_swing: f32,
     time: f32,
     white: Arc<Image>,
+    /// Something drawn under the player in the same view (the title screen's island): `(c, cx, cy, scale, yaw,
+    /// pitch)`, model y = 16 under the feet.
+    pub stage: Option<fn(&mut Canvas, f32, f32, f32, f32, f32)>,
+    /// A Minecraft nametag over the head (the title screen).
+    pub nametag: Option<String>,
 }
 
 impl Default for PlayerPreview {
@@ -67,7 +72,14 @@ impl PlayerPreview {
             arm_swing: 0.0,
             time: 0.0,
             white: Image::new(2, 2, vec![0xFFFFFFFF; 4]),
+            stage: None,
+            nametag: None,
         }
+    }
+
+    /// The camera's tilt: negative looks up at the model (the wardrobe), positive down onto it (the title island).
+    pub fn set_pitch(&mut self, pitch: f32) {
+        self.pitch = pitch;
     }
 
     pub fn reset_view(&mut self) {
@@ -128,7 +140,11 @@ impl PlayerPreview {
         // Floor glow.
         let cx = x + w / 2.0;
         let scale = (h / 50.0).min(w / 30.0);
-        let feet = y + h / 2.0 + 19.0 * scale;
+        let mut feet = y + h / 2.0 + 19.0 * scale;
+        if let Some(stage) = self.stage {
+            stage(c, cx, y + h / 2.0 + 3.0 * scale, scale, self.yaw, self.pitch);
+            feet = y + h / 2.0 + 3.0 * scale + 16.0 * self.pitch.cos() * scale;
+        }
         c.shadow(cx - 9.0 * scale, feet - 1.5 * scale, 18.0 * scale, 3.0 * scale, 1.5 * scale, 10.0, 0x66000000);
         // The skin.
         let (skin, pending, slim) = skin_of(who);
@@ -304,6 +320,11 @@ impl PlayerPreview {
             });
         }
         self.b.end(c);
+        if let Some(name) = self.nametag.as_deref().filter(|n| !n.is_empty()) {
+            // Over the head like in game: model y = -16 is the top of the head, the tag sits a little above it.
+            let bottom = y + h / 2.0 + 3.0 * scale + (-16.0 - 7.0) * self.pitch.cos() * scale;
+            name_tag(c, name, cx, bottom, (scale * 0.28).max(1.5));
+        }
         let _ = theme::TEXT;
     }
 
@@ -552,4 +573,23 @@ pub fn draw_wheel(c: &mut Canvas, skin: &Arc<Image>, slim: bool, p: [[f32; 6]; 6
         b.pop();
     }
     b.end(c);
+}
+
+/// A nametag as the game draws one over a player: the name in the Minecraft font on a dark see-through box, with
+/// the Native mark in front. Centred at `cx`, its bottom edge at `bottom`; `unit` is one font pixel.
+fn name_tag(c: &mut Canvas, name: &str, cx: f32, bottom: f32, unit: f32) {
+    static MARK: std::sync::OnceLock<Option<Arc<Image>>> = std::sync::OnceLock::new();
+    let mark = MARK.get_or_init(|| horizon_client::native_ui::Image::decode(horizon_client::native_ui::assets::LOGO)).clone();
+    let text_w = super::mc_font::width(c, name, unit, false) - unit;
+    let mark_w = if mark.is_some() { 9.0 * unit } else { 0.0 };
+    let pad = 2.0 * unit;
+    let (w, bh) = (text_w + mark_w + pad * 2.0, 8.0 * unit + pad * 2.0);
+    let (x, y) = (cx - w / 2.0, bottom - bh);
+    c.fill(x, y, w, bh, 0x40000000);
+    let mut tx = x + pad;
+    if let Some(m) = mark.as_ref() {
+        c.stamp(0x6E61_7469_7665_6D6B, m, tx, y + pad, 8.0 * unit, 8.0 * unit, true, 0xFFFFFFFF);
+        tx += mark_w;
+    }
+    super::mc_font::draw(c, name, tx, y + pad, unit, 0xFFFFFFFF, false, false);
 }

@@ -441,13 +441,23 @@ fn texture_file(url: &str) -> Option<(PathBuf, String)> {
     if !url.contains("/csl/textures/") { return None; }
     let hash = url.split('?').next()?.rsplit('/').next()?;
     if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) { return None; }
+    let dir = texture_dir()?;
+    Some((dir.join(format!("{hash}.png")), hash.to_owned()))
+}
+
+/// Where textures are kept on disk: the launcher's shared cache when it names one, else `<game>/.native/textures`.
+pub fn texture_dir() -> Option<PathBuf> {
     let game = std::env::var_os("NATIVE_GAME_DIR").map(PathBuf::from).or_else(|| std::env::current_dir().ok())?;
     let info = [game.join(".native/launcher.json"), game.join(".noctra/launcher.json")]
         .into_iter().find_map(|p| std::fs::metadata(&p).ok().filter(|m| m.len() < 16384)
             .and_then(|_| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()));
-    let dir = info.and_then(|v| v["textureCache"].as_str().map(PathBuf::from))
-        .filter(|p| p.is_absolute()).unwrap_or_else(|| game.join(".native/textures"));
-    Some((dir.join(format!("{hash}.png")), hash.to_owned()))
+    Some(info.and_then(|v| v["textureCache"].as_str().map(PathBuf::from))
+        .filter(|p| p.is_absolute()).unwrap_or_else(|| game.join(".native/textures")))
+}
+
+/// A picture's bytes: a Native texture comes from the disk cache when it is there (and is kept after a download).
+pub fn texture_bytes(url: &str, limit: u64) -> Option<Vec<u8>> {
+    image_bytes(url, limit)
 }
 /// Where to download a Native texture from: `/csl/textures/<hash>` with ".png" on the end. Cloudflare keeps only files
 /// whose name ends in a known type, so the bare hash went all the way to the API every time (about half a second);

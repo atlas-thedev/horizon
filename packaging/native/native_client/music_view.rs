@@ -38,6 +38,7 @@ impl MusicView {
     pub fn new() -> Self {
         let mut search = TextField::new("music:search");
         search.max_length = 40;
+        search.bare = true; // the box draws its own pill and icon
         MusicView {
             list: Scroll::new("music-list"),
             side: Scroll::new("music-side"),

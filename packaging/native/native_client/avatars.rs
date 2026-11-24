@@ -1,6 +1,13 @@
 //! `Avatars`: player faces (skin face + hat layer, 8x8) fetched from the
 //! Native texture store (or Mojang's, for a linked account), with Steve's
 //! face as the fallback.
+//!
+//! Fast and reliable (the same as the Java mod):
+//! - Native skins come from the disk texture cache (content-hashed) or Cloudflare;
+//! - Mojang skins are kept on disk with a small "uuid -> skin hash" index, so a face shows at once next
+//!   launch and the (rate limited) session server is asked again at most every 12 hours;
+//! - a failed download is tried again after 10 s, 30 s, 2 min, then every 5 min, not left as Steve;
+//! - at most four downloads at once.
 #![allow(dead_code)]
 
 use super::net;
@@ -8,13 +15,21 @@ use super::relay;
 use horizon_client::native_ui::{Canvas, Image};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 enum Face {
     Loading,
     Ready(Arc<Image>),
     None,
+    /// The download failed: Steve until this moment, then it is tried again.
+    Retry(Instant, u32),
 }
+
+static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+const MAX_IN_FLIGHT: usize = 4;
+const MOJANG_FRESH_SECS: u64 = 12 * 60 * 60;
 
 fn faces() -> &'static Mutex<HashMap<String, Face>> {
     static FACES: OnceLock<Mutex<HashMap<String, Face>>> = OnceLock::new();
@@ -131,36 +146,141 @@ fn is_hex(s: &str, n: usize) -> bool {
 
 /// The face for a skin reference; `None` while it loads.
 fn face(skin: &str) -> Option<Option<Arc<Image>>> {
+    let mut tries = 0;
     {
         let f = faces().lock().unwrap_or_else(|e| e.into_inner());
         match f.get(skin) {
             Some(Face::Ready(i)) => return Some(Some(i.clone())),
             Some(Face::None) => return Some(None),
             Some(Face::Loading) => return None,
+            Some(Face::Retry(at, n)) => {
+                if Instant::now() < *at {
+                    return Some(None);
+                }
+                tries = *n;
+            }
             None => {}
         }
     }
     let mojang = skin.strip_prefix("mj:").filter(|u| is_hex(u, 32)).map(str::to_owned);
-    if mojang.is_none() && !is_hex(skin, 64) {
-        // Not a texture hash: nothing to load.
+    let address = skin.starts_with("https://") || skin.starts_with("http://");
+    if mojang.is_none() && !address && !is_hex(skin, 64) {
+        // Not a texture reference: nothing to load.
         faces().lock().unwrap_or_else(|e| e.into_inner()).insert(skin.to_owned(), Face::None);
         return Some(None);
     }
+    if IN_FLIGHT.load(Ordering::Relaxed) >= MAX_IN_FLIGHT {
+        return None; // the skeleton for a moment; asked again next frame
+    }
+    IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
     faces().lock().unwrap_or_else(|e| e.into_inner()).insert(skin.to_owned(), Face::Loading);
     let skin = skin.to_owned();
-    let _ = std::thread::Builder::new().name("Native avatar".into()).spawn(move || {
-        let url = match &mojang {
-            Some(uuid) => mojang_skin_url(uuid),
-            None => Some(net::hash_url(&format!("{}/csl/textures/", net::api()), &skin)),
-        };
-        let img = url.and_then(|u| net::get_bytes(&u, None, 2 * 1024 * 1024).ok()).and_then(|b| Image::decode(&b));
-        let state = match img {
-            Some(i) if i.width >= 64 => Face::Ready(crop(&i)),
-            _ => Face::None,
-        };
-        faces().lock().unwrap_or_else(|e| e.into_inner()).insert(skin, state);
+    let spawned = std::thread::Builder::new().name("Native avatar".into()).spawn({
+        let skin = skin.clone();
+        move || {
+            let result = match &mojang {
+                Some(uuid) => mojang_skin(&skin, uuid),
+                None if address => net::get_bytes(&skin, None, 2 * 1024 * 1024).map(Some).map_err(|_| ()),
+                None => net::texture_bytes(&net::hash_url(&format!("{}/csl/textures/", net::api()), &skin), 2 * 1024 * 1024)
+                    .map(Some)
+                    .ok_or(()),
+            };
+            match result {
+                Ok(png) => show(&skin, png.as_deref()),
+                Err(()) => {
+                    // a timeout or a rate limit: Steve for now, try again a little later
+                    let n = tries + 1;
+                    let wait = match n { 1 => 10, 2 => 30, 3 => 120, _ => 300 };
+                    faces().lock().unwrap_or_else(|e| e.into_inner()).insert(skin, Face::Retry(Instant::now() + Duration::from_secs(wait), n));
+                }
+            }
+            IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
+        }
     });
+    if spawned.is_err() {
+        IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
+        faces().lock().unwrap_or_else(|e| e.into_inner()).remove(&skin);
+    }
     None
+}
+
+/// Puts a downloaded skin's face up (no skin at all: Steve, for good).
+fn show(skin: &str, png: Option<&[u8]>) {
+    let state = match png.and_then(Image::decode) {
+        Some(i) if i.width >= 64 => Face::Ready(crop(&i)),
+        _ => Face::None,
+    };
+    faces().lock().unwrap_or_else(|e| e.into_inner()).insert(skin.to_owned(), state);
+}
+
+// ── Mojang skins on disk: "uuid -> sha256 of the skin, when it was checked" ──
+
+fn mojang_index_file() -> Option<std::path::PathBuf> {
+    net::texture_dir().map(|d| d.join("mojang-skins.json"))
+}
+
+fn mojang_index() -> &'static Mutex<HashMap<String, (String, u64)>> {
+    static INDEX: OnceLock<Mutex<HashMap<String, (String, u64)>>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let map = mojang_index_file()
+            .and_then(|f| std::fs::read(f).ok())
+            .and_then(|b| serde_json::from_slice::<HashMap<String, (String, u64)>>(&b).ok())
+            .unwrap_or_default();
+        Mutex::new(map)
+    })
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+/// A Mojang player's skin: from disk when known (refreshed after 12 h), else downloaded and kept.
+fn mojang_skin(key: &str, uuid: &str) -> Result<Option<Vec<u8>>, ()> {
+    let known = mojang_index().lock().unwrap_or_else(|e| e.into_inner()).get(uuid).cloned();
+    if let Some((sha, checked)) = known
+        && let Some(dir) = net::texture_dir()
+        && let Ok(bytes) = std::fs::read(dir.join(format!("{sha}.png")))
+        && sha256_hex(&bytes) == sha
+    {
+        if now_secs().saturating_sub(checked) > MOJANG_FRESH_SECS {
+            // show the cached face now, then check for a new skin on this same thread
+            show(key, Some(&bytes));
+            if let Ok(Some(fresh)) = fetch_mojang(uuid) {
+                return Ok(Some(fresh));
+            }
+        }
+        return Ok(Some(bytes));
+    }
+    fetch_mojang(uuid)
+}
+
+fn fetch_mojang(uuid: &str) -> Result<Option<Vec<u8>>, ()> {
+    let Some(url) = mojang_skin_url(uuid) else {
+        return Err(()); // the session server did not answer (or the profile has no skin): tried again later
+    };
+    let png = net::get_bytes(&url, None, 2 * 1024 * 1024).map_err(|_| ())?;
+    let sha = sha256_hex(&png);
+    if let Some(dir) = net::texture_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join(format!("{sha}.png"));
+        if !file.exists() {
+            let _ = std::fs::write(&file, &png);
+        }
+        let mut index = mojang_index().lock().unwrap_or_else(|e| e.into_inner());
+        index.insert(uuid.to_owned(), (sha, now_secs()));
+        if let (Some(path), Ok(json)) = (mojang_index_file(), serde_json::to_vec(&*index)) {
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(tmp, path);
+            }
+        }
+    }
+    Ok(Some(png))
 }
 
 /// Draws a rounded avatar for a player. `skin` = texture hash or "mj:uuid" (may be `None`).

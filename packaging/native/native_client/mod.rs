@@ -55,6 +55,7 @@ mod status;
 mod status_modules;
 mod svc;
 mod textfield;
+mod title_island;
 mod title_view;
 mod toasts;
 mod ui;
@@ -134,6 +135,8 @@ struct State {
     title: title_view::TitleView,
     title_overlay: u8,
     title_was: bool,
+    /// The title's own page (not the server list) is showing: the new title shades its panorama itself.
+    title_main: bool,
     title_pending: Option<title_view::TitleAct>,
     /// The Native multiplayer screen, and whether the game's own was asked for (until the title shows again).
     servers: servers_view::ServersView,
@@ -190,6 +193,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             title: title_view::TitleView::default(),
             title_overlay: 0,
             title_was: false,
+            title_main: false,
             title_pending: None,
             servers: servers_view::ServersView::default(),
             servers_dialog: servers_dialogs::ServerDialog::default(),
@@ -1353,6 +1357,7 @@ pub(super) fn native_title_active(title: &horizon_client::title::Title) -> bool 
         Mode::Main => {
             s.servers_classic = false;
             s.servers.closed();
+            s.title_main = s.cfg.custom_title;
             s.cfg.custom_title
         }
         // The server list and its Add, Edit, Direct Connection and Delete screens (Native dialogs answer those).
@@ -1361,9 +1366,40 @@ pub(super) fn native_title_active(title: &horizon_client::title::Title) -> bool 
             | horizon_client::multiplayer::Screen::Edit { .. }
             | horizon_client::multiplayer::Screen::Direct { .. }
             | horizon_client::multiplayer::Screen::ConfirmDelete { .. },
-        ) => s.cfg.custom_servers && !s.servers_classic,
+        ) => {
+            s.title_main = false;
+            s.cfg.custom_servers && !s.servers_classic
+        }
         _ => false,
     })
+}
+
+/// The new title screen has its own brand in its menu: the game's Minecraft logo is not drawn over it.
+pub(super) fn native_title_wants_logo() -> bool {
+    false
+}
+
+// ── the game's own textures (block textures for the title island), resource packs included ──
+
+static RESOURCES: std::sync::Mutex<Option<horizon_assets::resource_source::ResourceSource>> = std::sync::Mutex::new(None);
+static RESOURCES_GENERATION: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The game hands its resources over whenever it (re)loads them (`load_clouds`).
+pub(super) fn set_resources(root: horizon_assets::resource_source::ResourceSource) {
+    *RESOURCES.lock().unwrap_or_else(|e| e.into_inner()) = Some(root);
+    RESOURCES_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Bumped every time the resources are handed over again: anything built from them should rebuild.
+pub(crate) fn resources_generation() -> usize {
+    RESOURCES_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A texture of the game by name ("block/dirt"), from the resource packs in use; `None` when it is missing.
+pub(crate) fn game_texture(name: &str) -> Option<std::sync::Arc<native_ui::Image>> {
+    let root = RESOURCES.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+    let bytes = root.read(&format!("assets/minecraft/textures/{name}.png")).ok()?;
+    native_ui::Image::decode(&bytes)
 }
 
 /// Shades the panorama before the game's logo and the Native foreground are submitted.
@@ -1373,7 +1409,7 @@ pub(super) fn native_title_background(batch: &mut HudBatch) {
         let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * state.cfg.scale;
         let c = &mut state.canvas;
         c.begin(fb[0], fb[1], scale);
-        state.title.background(c);
+        state.title.background(c, state.title_main);
         c.finish(batch);
     });
 }
