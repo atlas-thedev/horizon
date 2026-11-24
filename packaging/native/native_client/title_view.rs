@@ -122,9 +122,7 @@ impl TitleView {
     /// cards and the footer).
     pub fn background(&self, c: &mut Canvas, main: bool) {
         let (w, h) = (c.width(), c.height());
-        if super::title_world::prepare() > 0.0 {
-            super::title_world::draw(c, 0.0, 0.0, w, h);
-        }
+        super::title_world::draw(c, 0.0, 0.0, w, h);
         if main {
             c.fill(0.0, 0.0, w, h, 0x1A000000);
             c.gradient_h(0.0, 0.0, (w * 0.55).min(680.0), h, 0xB3000000, 0x00000000);

@@ -1,8 +1,9 @@
-//! Launcher-owned account management on the in-game title screen.
+//! In-game title accounts, using the launcher store when connected.
 
 use super::{
     avatars,
     scroll::Scroll,
+    standalone_accounts,
     textfield::TextField,
     ui::{self, Ui},
 };
@@ -12,6 +13,7 @@ use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const ROW: f32 = 47.0;
@@ -19,7 +21,7 @@ const CHIP_HEIGHT: f32 = 36.0;
 const PANEL_BG: u32 = 0xFC08090B;
 const REFRESH_MS: f64 = 1500.0;
 
-fn tr(key: &str) -> String {
+pub(super) fn tr(key: &str) -> String {
     horizon_client::lang::get_or(&format!("native.accounts.{key}"), "")
 }
 
@@ -41,6 +43,8 @@ struct Reply {
     #[serde(default)]
     error: String,
     accounts: Option<Vec<Account>>,
+    #[serde(rename = "addedAccountId")]
+    added_account_id: Option<String>,
     session: Option<SessionGrant>,
     code: Option<String>,
     url: Option<String>,
@@ -97,6 +101,7 @@ enum Panel {
 
 pub struct TitleAccounts {
     bridge: Option<(SocketAddr, String)>,
+    standalone: Arc<Mutex<standalone_accounts::Accounts>>,
     pending: Option<Pending>,
     queued: Option<Action>,
     refresh_at: f64,
@@ -132,12 +137,16 @@ impl Default for TitleAccounts {
         password.max_length = 256;
         let port = std::env::var("NATIVE_TITLE_ACCOUNTS_PORT")
             .ok()
-            .and_then(|v| v.parse::<u16>().ok());
-        let key = std::env::var("NATIVE_TITLE_ACCOUNTS_KEY").ok();
+            .and_then(|v| v.parse::<u16>().ok())
+            .filter(|port| *port != 0);
+        let key = std::env::var("NATIVE_TITLE_ACCOUNTS_KEY")
+            .ok()
+            .filter(|key| !key.is_empty());
         Self {
             bridge: port
                 .zip(key)
                 .map(|(port, key)| ((Ipv4Addr::LOCALHOST, port).into(), key)),
+            standalone: Arc::default(),
             pending: None,
             queued: None,
             refresh_at: 0.0,
@@ -205,11 +214,7 @@ impl TitleAccounts {
         {
             self.microsoft_poll = ui.now + REFRESH_MS;
             self.send(Action::MicrosoftStatus);
-        } else if self.is_open()
-            && self.bridge.is_some()
-            && self.pending.is_none()
-            && ui.now >= self.refresh_at
-        {
+        } else if self.is_open() && self.pending.is_none() && ui.now >= self.refresh_at {
             self.send(Action::List);
         }
 
@@ -351,11 +356,7 @@ impl TitleAccounts {
         let rows = (self.accounts.len() as f32 * ROW)
             .clamp(ROW, 4.0 * ROW)
             .min((c.height() - top - 106.0).max(ROW));
-        let h = if self.bridge.is_none() {
-            79.0
-        } else {
-            82.0 + rows + if message.is_empty() { 0.0 } else { 20.0 }
-        };
+        let h = 82.0 + rows + if message.is_empty() { 0.0 } else { 20.0 };
         let on_chip = ui.hover(c, right - chip, top - CHIP_HEIGHT - 7.0, chip, CHIP_HEIGHT);
         if ui.interactive && ui.pressed && !self.switching() && !on_chip && !ui.hover(c, x, y, w, h)
         {
@@ -375,95 +376,84 @@ impl TitleAccounts {
             theme::TEXT_SECONDARY,
         );
         let (left, inner, list_top) = (x + 8.0, w - 16.0, y + 34.0);
-        if self.bridge.is_none() {
-            let note = c.ellipsize(font::REGULAR, 12.0, &tr("unavailable_short"), inner - 12.0);
+        let delta = self.scroll.begin(ui, c, left, list_top, inner, rows);
+        for (i, account) in self.accounts.iter().enumerate() {
+            let ry = list_top + i as f32 * ROW - delta;
+            if ry + ROW > list_top
+                && ry < list_top + rows
+                && self.draw_row(ui, c, account, left, ry, inner - 7.0)
+                && !self.switching()
+            {
+                self.selected = Some(account.clone());
+                self.status.clear();
+            }
+        }
+        if self.accounts.is_empty() {
+            let empty = if self.failed {
+                "load_failed"
+            } else if self.loaded {
+                "empty"
+            } else {
+                "loading"
+            };
+            let note = c.ellipsize(font::REGULAR, 12.0, &tr(empty), inner - 16.0);
             c.text(
                 font::REGULAR,
                 12.0,
                 &note,
                 left + 6.0,
-                list_top + 9.0,
+                list_top + 12.0,
                 theme::TEXT_SECONDARY,
             );
-        } else {
-            let delta = self.scroll.begin(ui, c, left, list_top, inner, rows);
-            for (i, account) in self.accounts.iter().enumerate() {
-                let ry = list_top + i as f32 * ROW - delta;
-                if ry + ROW > list_top
-                    && ry < list_top + rows
-                    && self.draw_row(ui, c, account, left, ry, inner - 7.0)
-                    && !self.switching()
-                {
-                    self.selected = Some(account.clone());
-                    self.status.clear();
-                }
-            }
-            if self.accounts.is_empty() {
-                let empty = if self.failed {
-                    "offline_bridge"
-                } else if self.loaded {
-                    "empty"
-                } else {
-                    "loading"
-                };
-                let note = c.ellipsize(font::REGULAR, 12.0, &tr(empty), inner - 16.0);
-                c.text(
-                    font::REGULAR,
-                    12.0,
-                    &note,
-                    left + 6.0,
-                    list_top + 12.0,
-                    theme::TEXT_SECONDARY,
-                );
-            }
-            self.scroll.end(ui, c, self.accounts.len() as f32 * ROW);
-            let bar = list_top + rows + 5.0;
-            c.fill(left + 4.0, bar - 3.0, inner - 8.0, 1.0, theme::HAIRLINE);
-            if let Some(account) = self.selected.clone() {
-                let confirm = if account.sign_in_required {
-                    "sign_in"
-                } else {
-                    "switch"
-                };
-                if ui.button(
-                    c,
-                    "title:accounts:back",
-                    left,
-                    bar,
-                    68.0,
-                    34.0,
-                    &tr("back"),
-                    0,
-                    ui::BTN_GHOST,
-                ) && !self.switching()
-                {
-                    self.back(ui, false);
-                } else if ui.button(
-                    c,
-                    "title:accounts:confirm",
-                    left + 75.0,
-                    bar,
-                    inner - 75.0,
-                    34.0,
-                    &tr(confirm),
-                    0,
-                    ui::BTN_PRIMARY,
-                ) || (ui.interactive
-                    && (ui.key(ui::KEY_ENTER) || ui.key(ui::KEY_KP_ENTER)))
-                {
-                    if account.sign_in_required {
-                        self.open_native(ui);
-                    } else {
-                        self.send(Action::Switch(account.id));
-                    }
-                }
-            } else if add_button(ui, c, left, bar, inner) {
-                self.panel = Panel::Add;
-                self.offline = false;
-                self.status.clear();
-            }
-            draw_status(c, &message, left + 5.0, bar + 38.0, inner - 10.0);
         }
+        self.scroll.end(ui, c, self.accounts.len() as f32 * ROW);
+        let bar = list_top + rows + 5.0;
+        c.fill(left + 4.0, bar - 3.0, inner - 8.0, 1.0, theme::HAIRLINE);
+        if let Some(account) = self.selected.clone() {
+            let confirm = if account.sign_in_required {
+                "sign_in"
+            } else {
+                "switch"
+            };
+            if ui.button(
+                c,
+                "title:accounts:back",
+                left,
+                bar,
+                68.0,
+                34.0,
+                &tr("back"),
+                0,
+                ui::BTN_GHOST,
+            ) && !self.switching()
+            {
+                self.back(ui, false);
+            } else if ui.button(
+                c,
+                "title:accounts:confirm",
+                left + 75.0,
+                bar,
+                inner - 75.0,
+                34.0,
+                &tr(confirm),
+                0,
+                ui::BTN_PRIMARY,
+            ) || (ui.interactive && (ui.key(ui::KEY_ENTER) || ui.key(ui::KEY_KP_ENTER)))
+            {
+                if account.sign_in_required && account.provider == "microsoft" {
+                    self.open_microsoft();
+                } else if account.sign_in_required {
+                    self.open_native(ui);
+                } else {
+                    self.send(Action::Switch(account.id));
+                }
+            }
+        } else if add_button(ui, c, left, bar, inner) {
+            self.panel = Panel::Add;
+            self.offline = false;
+            self.status.clear();
+        }
+        draw_status(c, &message, left + 5.0, bar + 38.0, inner - 10.0);
         c.pop_alpha();
     }
 
@@ -494,6 +484,11 @@ impl TitleAccounts {
         c.push_alpha(self.modal_motion);
         super::menu::panel(c, x, y, w, h);
         c.round(x + 18.0, y + 18.0, 36.0, 36.0, 10.0, theme::SUBTLE);
+        let storage = if self.bridge.is_some() {
+            "shared"
+        } else {
+            "local"
+        };
         let (heading, description) = if self.offline {
             c.icon(
                 theme::I_WIFI_OFF,
@@ -505,7 +500,7 @@ impl TitleAccounts {
             ("offline_account", "offline_help")
         } else if self.native_form {
             provider_mark(c, "native", x + 36.0, y + 36.0, 17.0);
-            ("native_title", "shared")
+            ("native_title", storage)
         } else if self.microsoft_form {
             provider_mark(c, "microsoft", x + 36.0, y + 36.0, 17.0);
             ("microsoft_title", "microsoft_code_help")
@@ -517,7 +512,7 @@ impl TitleAccounts {
                 y + 36.0,
                 theme::TEXT_STRONG,
             );
-            ("add_account", "shared")
+            ("add_account", storage)
         };
         c.text(
             font::SEMIBOLD,
@@ -656,14 +651,20 @@ impl TitleAccounts {
                     } else if provider == "native" {
                         self.open_native(ui);
                     } else {
-                        self.microsoft_form = true;
-                        self.send(Action::MicrosoftStart);
+                        self.open_microsoft();
                     }
                 }
             }
             draw_status(c, &self.message(), left, start + step * 3.0 + 5.0, inner);
         }
         c.pop_alpha();
+    }
+
+    fn open_microsoft(&mut self) {
+        self.panel = Panel::Add;
+        self.microsoft_form = true;
+        self.status.clear();
+        self.send(Action::MicrosoftStart);
     }
 
     fn open_native(&mut self, ui: &mut Ui) {
@@ -892,7 +893,7 @@ impl TitleAccounts {
         if account.current && over {
             ui.tip(&tr("current"));
         }
-        !account.current && ui.clicked(c, &key, x, y, w, ROW - 3.0)
+        (!account.current || account.sign_in_required) && ui.clicked(c, &key, x, y, w, ROW - 3.0)
     }
 
     fn message(&self) -> String {
@@ -909,9 +910,6 @@ impl TitleAccounts {
     }
 
     fn send(&mut self, action: Action) {
-        let Some((address, key)) = self.bridge.clone() else {
-            return;
-        };
         if let Some(pending) = &self.pending {
             if (matches!(pending.action, Action::List | Action::MicrosoftStatus)
                 || matches!(action, Action::MicrosoftCancel))
@@ -922,7 +920,8 @@ impl TitleAccounts {
             return;
         }
         let mut request = action.request();
-        request["key"] = key.into();
+        let bridge = self.bridge.clone();
+        let standalone = self.standalone.clone();
         // Passwords are needed only in the request, never in the in-flight UI state.
         let action = match action {
             Action::NativeLogin(_, _) => Action::NativeLogin(String::new(), String::new()),
@@ -930,7 +929,15 @@ impl TitleAccounts {
         };
         let (tx, result) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(exchange(address, request));
+            let reply = if let Some((address, key)) = bridge {
+                request["key"] = key.into();
+                exchange(address, request)
+            } else {
+                standalone.lock().ok().and_then(|mut accounts| {
+                    serde_json::from_value(accounts.exchange(&request)).ok()
+                })
+            };
+            let _ = tx.send(reply);
         });
         self.pending = Some(Pending { action, result });
     }
@@ -944,7 +951,15 @@ impl TitleAccounts {
         };
         let Pending { action, .. } = self.pending.take()?;
         self.refresh_at = now + REFRESH_MS;
-        self.failed = reply.is_none();
+        self.failed = reply.as_ref().is_none_or(|reply| !reply.ok);
+        if self.bridge.is_some() && self.failed && matches!(action, Action::List) {
+            // A failed read-only probe can switch stores without replaying a mutation.
+            self.bridge = None;
+            self.loaded = false;
+            self.accounts.clear();
+            self.send(Action::List);
+            return None;
+        }
         match reply {
             Some(reply) if reply.ok => {
                 let saved = reply.accounts.is_some();
@@ -973,13 +988,31 @@ impl TitleAccounts {
                     Action::AddOffline(_) | Action::NativeLogin(_, _) | Action::MicrosoftStatus
                         if saved =>
                     {
-                        if self.panel == Panel::Add {
+                        let confirm = self.panel == Panel::Add
+                            && match action {
+                                Action::AddOffline(_) => self.offline,
+                                Action::NativeLogin(_, _) => self.native_form,
+                                Action::MicrosoftStatus => self.microsoft_form,
+                                _ => false,
+                            };
+                        if confirm {
                             self.panel = Panel::Dropdown;
+                            self.clear_form();
+                            self.username.clear();
+                            self.selected = None;
                         }
-                        self.clear_form();
-                        self.username.clear();
-                        self.selected = None;
-                        self.status = tr("saved");
+                        self.status = tr(if self.bridge.is_some() {
+                            "saved"
+                        } else {
+                            "saved_local"
+                        });
+                        if confirm
+                            && self.bridge.is_none()
+                            && let Some(id) = reply.added_account_id
+                        {
+                            self.send(Action::Switch(id));
+                            return None;
+                        }
                     }
                     _ => {}
                 }

@@ -2,12 +2,13 @@
 //! shows it (the same land the launcher builds for this instance: a port of its `worldGen.js`). The same as the Java
 //! mod's `TitleWorld`.
 //!
-//! Nothing of the world is drawn per frame. On a few background threads the land is generated and ray-traced ONCE
+//! Nothing of the world is drawn per frame. On a few background threads the land is generated and ray-traced
 //! into one wide picture of the map (the game's block textures, resource packs included, with its flat shading,
 //! corner ambient occlusion, water, plants, clouds, fog and a sky for the time of day), seen from just behind you, so
 //! its ground lands right under your feet, and saved in the game folder. After that the title screen only loads that
 //! one picture and draws it, still, scaled to cover the window: one textured quad. A new one is made only for another
-//! sky (day, sunset, night) or other resources.
+//! sky (day, sunset, night) or other resources. When there is no cached picture, a small view of the same scene
+//! appears first while the full-resolution image finishes.
 
 use horizon_client::native_ui::{Canvas, Image};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -577,6 +578,16 @@ impl View {
         View { w, h, f, origin, fwd, right, up, yaw }
     }
 
+    fn preview(&self) -> View {
+        View::facing(
+            self.w / PREVIEW_DIVISOR,
+            self.h / PREVIEW_DIVISOR,
+            f64::from(FEET),
+            f64::from(PLAYER),
+            self.yaw,
+        )
+    }
+
     /// The unit ray through a point of the picture (pixels, from the top left).
     fn ray(&self, px: f64, py: f64) -> [f64; 3] {
         let (a, b) = ((px - self.w as f64 / 2.0) / self.f, (self.h as f64 / 2.0 - py) / self.f);
@@ -1028,18 +1039,33 @@ pub fn bake(land: &Land, tiles: &Tiles, sky: &Sky, view: &View, threads: usize) 
 
 // ── on the title screen ────────────────────────────────────────────────
 
-const FADE_MS: f64 = 500.0;
+const FADE_MS: f64 = 180.0;
+const PREVIEW_DIVISOR: usize = 5;
 /// Bumped when the picture would come out different for the same world, sky and textures.
 const FORMAT: u32 = 1;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct WorldKey {
+    sky: &'static str,
+    resources: usize,
+}
 
 #[derive(Default)]
 struct Shown {
     img: Option<Arc<Image>>,
     previous: Option<Arc<Image>>,
-    key: String,
-    baking: Option<String>,
-    failed: Option<String>,
+    key: Option<WorldKey>,
+    baking: Option<WorldKey>,
+    failed: Option<WorldKey>,
+    file: Option<std::path::PathBuf>,
     at: Option<Instant>,
+}
+
+impl Shown {
+    fn show(&mut self, img: Arc<Image>) {
+        self.previous = self.img.replace(img);
+        self.at = self.previous.as_ref().map(|_| Instant::now());
+    }
 }
 
 fn shown() -> &'static Mutex<Shown> {
@@ -1065,67 +1091,89 @@ fn clock_sky() -> &'static Sky {
     sky_at((day / 60) as u32, (day % 60) as u32)
 }
 
-/// Starts loading (or, the first time, making) the picture when the sky or the resources ask for another one, and
-/// returns how far it has faded in: 0 = nothing to draw yet (the panorama behind shows), 1 = it covers everything
-/// behind it. Cheap: called every frame.
-pub fn prepare() -> f32 {
+/// Start loading the current world while the title initializes, or schedule a new
+/// picture when the scene changes. The render thread never waits for the job.
+pub fn prepare() {
     let sky = clock_sky();
-    let name = seed_name();
-    let key = format!("{name}|{}|{}", sky.id, super::resources_generation());
+    let mut key = WorldKey { sky: sky.id, resources: super::resources_generation() };
     let mut s = shown().lock().unwrap_or_else(|e| e.into_inner());
-    if s.key != key && s.baking.is_none() && s.failed.as_deref() != Some(key.as_str()) {
-        s.baking = Some(key.clone());
-        let spawned = std::thread::Builder::new().name("Native title world".into()).spawn(move || {
-            let result = std::panic::catch_unwind(|| {
-                let tiles = load_tiles(&|n| super::game_texture(n));
-                let file = cache_file(name, sky, &tiles);
-                if let Some(img) = file.as_deref().and_then(load) {
-                    return img;
-                }
-                // the first time for this world, sky and textures: make it (gently: one or two threads)
-                let land = stand_on(generate(seed_of(name)));
-                let view = View::new(&land, PICTURE_W, PICTURE_H, f64::from(FEET), f64::from(PLAYER));
-                let threads = std::thread::available_parallelism().map_or(1, |n| (n.get() / 4).clamp(1, 2));
-                let img = bake(&land, &tiles, sky, &view, threads);
-                if let Some(file) = &file {
-                    save(file, &img);
-                }
-                img
-            });
-            let mut s = shown().lock().unwrap_or_else(|e| e.into_inner());
-            s.baking = None;
-            match result {
-                Ok(img) => {
-                    s.previous = s.img.take();
-                    s.img = Some(img);
-                    s.at = None;
-                    s.key = key;
-                }
-                Err(_) => s.failed = Some(key),
+    if s.key == Some(key) || s.baking.is_some() || s.failed == Some(key) {
+        return;
+    }
+
+    let (generation, source) = super::title_resources();
+    key.resources = generation;
+    let has_image = s.img.is_some();
+    let displayed_file = s.file.clone();
+    s.baking = Some(key);
+    let spawn = std::thread::Builder::new().name("Native title world".into()).spawn(move || {
+        // The worker owns this resource snapshot and drops it if rendering panics.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let name = seed_name();
+            let tiles = load_tiles(&|n| super::game_texture(source.as_ref()?, n));
+            let file = cache_file(name, sky, &tiles);
+            if file.is_some() && file == displayed_file {
+                return None; // the final resource pack uses the same tile pixels
             }
-        });
-        if spawned.is_err() {
-            s.baking = None;
+            if let Some(img) = file.as_deref().and_then(load) {
+                return Some((img, file, false));
+            }
+
+            let land = stand_on(generate(seed_of(name)));
+            let view = View::new(&land, PICTURE_W, PICTURE_H, f64::from(FEET), f64::from(PLAYER));
+            if !has_image {
+                let img = bake(&land, &tiles, sky, &view.preview(), 1);
+                shown().lock().unwrap_or_else(|e| e.into_inner()).show(img);
+            }
+            // A resource reload during early startup can replace the pack while
+            // the preview is rendering. Leave that preview up and bake the new pack next.
+            if super::resources_generation() != key.resources {
+                return None;
+            }
+            let threads = std::thread::available_parallelism().map_or(1, |n| (n.get() / 4).clamp(1, 2));
+            Some((bake(&land, &tiles, sky, &view, threads), file, true))
+        }));
+
+        let save_after_show = {
+            let mut s = shown().lock().unwrap_or_else(|e| e.into_inner());
+            match result {
+                Ok(Some((img, file, fresh))) => {
+                    s.show(img.clone());
+                    s.file = file.clone();
+                    s.key = Some(key);
+                    file.filter(|_| fresh).map(|file| (file, img))
+                }
+                Ok(None) => {
+                    s.key = Some(key);
+                    None
+                }
+                Err(_) => {
+                    s.failed = Some(key);
+                    None
+                }
+            }
+        };
+        if let Some((file, img)) = save_after_show {
+            save(&file, &img);
         }
+        shown().lock().unwrap_or_else(|e| e.into_inner()).baking = None;
+    });
+    if spawn.is_err() {
+        s.baking = None;
+        s.failed = Some(key);
     }
-    if s.img.is_none() {
-        return 0.0;
-    }
-    let at = *s.at.get_or_insert_with(Instant::now);
-    if s.previous.is_some() {
-        return 1.0; // a new picture fading in over the old one
-    }
-    (at.elapsed().as_secs_f64() * 1000.0 / FADE_MS).min(1.0) as f32
 }
 
-/// Draws the picture (after [`prepare`]) over the box, a new one fading in over an old one.
+/// Draw the cached world or preview, fading between pictures when they change.
 pub fn draw(c: &mut Canvas, x: f32, y: f32, w: f32, h: f32) {
+    prepare();
     let (img, old, k) = {
         let mut s = shown().lock().unwrap_or_else(|e| e.into_inner());
         let Some(img) = s.img.clone() else { return };
-        let k = s.at.map_or(0.0, |at| (at.elapsed().as_secs_f64() * 1000.0 / FADE_MS).min(1.0)) as f32;
+        let k = s.at.map_or(1.0, |at| (at.elapsed().as_secs_f64() * 1000.0 / FADE_MS).min(1.0)) as f32;
         if k >= 1.0 {
             s.previous = None;
+            s.at = None;
         }
         (img, s.previous.clone(), k)
     };
@@ -1222,6 +1270,22 @@ mod tests {
             assert_eq!(fnv(&mut land.blocks.iter().map(|&b| u32::from(b))), blocks, "blocks of {name}");
             assert_eq!(fnv(&mut land.heights.iter().map(|&v| u32::from(v as u16))), heights, "heights of {name}");
         }
+    }
+
+    #[test]
+    fn preview_covers_the_same_scene_and_camera_as_the_final_picture() {
+        let land = stand_on(generate(seed_of("native")));
+        let view = View::new(&land, PICTURE_W, PICTURE_H, f64::from(FEET), f64::from(PLAYER));
+        let preview = view.preview();
+        assert_eq!(preview.w * PREVIEW_DIVISOR, view.w);
+        assert_eq!(preview.h * PREVIEW_DIVISOR, view.h);
+        let factor = PREVIEW_DIVISOR as f64;
+        for (x, y) in [(17.5, 44.5), (200.5, 115.5), (340.5, 156.5)] {
+            let a = preview.ray(x, y);
+            let b = view.ray(x * factor, y * factor);
+            assert!(a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-12));
+        }
+        assert!(preview.origin.iter().zip(view.origin).all(|(a, b)| (a - b).abs() < 1e-12));
     }
 
     #[test]

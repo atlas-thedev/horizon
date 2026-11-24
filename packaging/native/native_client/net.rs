@@ -51,6 +51,7 @@ struct SessionState {
     next_try: Instant,
     failures: u32,
     started: bool,
+    standalone: bool,
 }
 
 fn state() -> &'static (Mutex<SessionState>, Condvar) {
@@ -68,6 +69,7 @@ fn state() -> &'static (Mutex<SessionState>, Condvar) {
                 next_try: Instant::now(),
                 failures: 0,
                 started: false,
+                standalone: false,
             }),
             Condvar::new(),
         )
@@ -189,6 +191,17 @@ pub fn start(dir: Option<PathBuf>) {
     let _ = std::thread::Builder::new().name("Native session".into()).spawn(run);
 }
 
+/// Use the title's game ticket independently of the launcher's hand-off file.
+pub fn use_standalone_ticket(ticket: Option<String>) {
+    let mut s = lock();
+    s.standalone = true;
+    let handoff = ticket.map(|ticket| Handoff { ticket, api: s.api.clone() });
+    adopt(&mut s, handoff);
+    s.account = None;
+    drop(s);
+    wake();
+}
+
 /// Called by anything that got HTTP 401 with `used`. Looks for a newer ticket from the launcher first;
 /// only when there is none is the session marked expired.
 pub fn rejected(used: &str) {
@@ -196,7 +209,7 @@ pub fn rejected(used: &str) {
     if s.ticket.as_deref() != Some(used) {
         return; // An older ticket: the current one is already being handled.
     }
-    let fresh = s.dir.as_deref().and_then(read_handoff);
+    let fresh = if s.standalone { None } else { s.dir.as_deref().and_then(read_handoff) };
     s.stamp = s.dir.as_deref().and_then(stamp);
     match fresh {
         Some(h) if h.ticket != used => adopt(&mut s, Some(h)),
@@ -224,7 +237,7 @@ pub fn unreachable() {
 /// "Try again" in the UI.
 pub fn retry() {
     let mut s = lock();
-    let fresh = s.dir.as_deref().and_then(read_handoff);
+    let fresh = if s.standalone { None } else { s.dir.as_deref().and_then(read_handoff) };
     s.stamp = s.dir.as_deref().and_then(stamp);
     if let Some(h) = fresh
         && (s.ticket.as_deref() != Some(h.ticket.as_str()) || s.status != Status::Expired)
@@ -249,9 +262,9 @@ pub fn lock_title() -> &'static str {
 pub fn lock_body() -> &'static str {
     match status() {
         Status::Checking => "Connecting this game to your Native account.",
-        Status::Expired => "Sign in again in the Native Client. This page unlocks by itself once you do.",
+        Status::Expired => "Sign in again from the title screen or the Native Client.",
         Status::Offline => "Check your connection. Retrying automatically.",
-        _ => "Start Minecraft from the Native Client with a Native or Microsoft account to use this.",
+        _ => "Sign in with a Native or Microsoft account from the title screen.",
     }
 }
 
@@ -260,7 +273,7 @@ fn run() {
         {
             let mut s = lock();
             // The launcher rewrote session.json (a fresh ticket, another account, or signed out).
-            if let Some(dir) = s.dir.clone() {
+            if !s.standalone && let Some(dir) = s.dir.clone() {
                 let now = stamp(&dir);
                 if now != s.stamp {
                     s.stamp = now;

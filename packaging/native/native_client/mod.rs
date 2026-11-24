@@ -56,6 +56,7 @@ mod status_modules;
 mod svc;
 mod textfield;
 mod title_accounts;
+mod standalone_accounts;
 mod title_view;
 mod title_world;
 mod toasts;
@@ -1385,20 +1386,39 @@ pub(super) fn native_title_wants_logo() -> bool {
 static RESOURCES: std::sync::Mutex<Option<horizon_assets::resource_source::ResourceSource>> = std::sync::Mutex::new(None);
 static RESOURCES_GENERATION: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+/// Begin with the startup menu's resource directory while the full pack is still loading.
+pub(super) fn preload_title_world(root: &std::path::Path) {
+    if !UiConfig::load(game_dir().as_deref()).custom_title {
+        return;
+    }
+    {
+        let mut source = RESOURCES.lock().unwrap_or_else(|e| e.into_inner());
+        if source.is_none() {
+            *source = Some(horizon_assets::resource_source::ResourceSource::directory(root.to_owned()));
+            RESOURCES_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    title_world::prepare();
+}
+
 /// The game hands its resources over whenever it (re)loads them (`load_clouds`).
 pub(super) fn set_resources(root: horizon_assets::resource_source::ResourceSource) {
-    *RESOURCES.lock().unwrap_or_else(|e| e.into_inner()) = Some(root);
+    let mut source = RESOURCES.lock().unwrap_or_else(|e| e.into_inner());
+    *source = Some(root);
     RESOURCES_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Bumped every time the resources are handed over again: anything built from them should rebuild.
-pub(crate) fn resources_generation() -> usize {
+fn resources_generation() -> usize {
     RESOURCES_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// A texture of the game by name ("block/dirt"), from the resource packs in use; `None` when it is missing.
-pub(crate) fn game_texture(name: &str) -> Option<std::sync::Arc<native_ui::Image>> {
-    let root = RESOURCES.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+fn title_resources() -> (usize, Option<horizon_assets::resource_source::ResourceSource>) {
+    let source = RESOURCES.lock().unwrap_or_else(|e| e.into_inner());
+    (resources_generation(), source.clone())
+}
+
+/// Read a tile from the pack snapshot for the current picture.
+fn game_texture(root: &horizon_assets::resource_source::ResourceSource, name: &str) -> Option<std::sync::Arc<native_ui::Image>> {
     let bytes = root.read(&format!("assets/minecraft/textures/{name}.png")).ok()?;
     native_ui::Image::decode(&bytes)
 }

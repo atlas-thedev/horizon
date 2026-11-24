@@ -138,6 +138,12 @@ patch(GAME, 'fn load_clouds(root: &horizon_assets::resource_source::ResourceSour
       'fn load_clouds(root: &horizon_assets::resource_source::ResourceSource) -> (u32, u32, Vec<bool>) {\n'
       '    native_client::set_resources(root.clone());\n')
 MENU = CLIENT / 'game/startup_menu.rs'
+TITLE_START = '    pub fn new(options: &Options, pack_error: Option<&str>) -> Result<Self> {\n'
+patch(MENU, TITLE_START,
+      TITLE_START
+      + '        if options.server.is_none() && options.world.is_none() {\n'
+      '            super::native_client::preload_title_world(&options.resources);\n'
+      '        }\n')
 menu_phases = '                &mut |_, _| {},\n' if sources != CLIENT / 'game' else ''
 patch(MENU,
       '            title.draw_with_items(\n'
@@ -368,10 +374,9 @@ labels['native.ui.restore'] = 'Use Native UI'
 for key, label in {
     'title': 'Accounts',
     'switch_account': 'Switch account',
-    'unavailable_short': 'Open the game from Native Client.',
     'empty': 'No saved accounts',
     'loading': 'Loading accounts…',
-    'offline_bridge': 'Trying to reconnect to Native Client…',
+    'load_failed': 'Could not load accounts. Retrying…',
     'sign_in': 'Sign in again',
     'switch': 'Switch account',
     'switched': 'Account switched.',
@@ -389,6 +394,20 @@ for key, label in {
     'back': 'Back',
     'add_account': 'Add account',
     'shared': 'Accounts are saved to the Native launcher.',
+    'local': 'Accounts are saved in this game folder.',
+    'saved_local': 'Account saved in this game folder.',
+    'local_write_failed': 'Could not save accounts in this game folder.',
+    'local_full': 'This game folder already has the maximum number of saved accounts.',
+    'bad_credentials': 'Incorrect email, username or password.',
+    'use_microsoft': 'Sign in with Microsoft for this account.',
+    'rate_limited': 'Too many sign-in attempts. Try again in a few minutes.',
+    'service_unreachable': 'Could not reach the sign-in service. Try again.',
+    'service_failed': 'The sign-in service returned an error. Try again.',
+    'ms_failed': 'Microsoft sign-in failed. Start again.',
+    'ms_expired': 'The Microsoft code expired. Start again.',
+    'ms_declined': 'Sign-in was declined in Microsoft.',
+    'ms_needs_game': 'This Microsoft account does not own Minecraft: Java Edition.',
+    'ms_needs_profile': 'Set up a Minecraft: Java Edition profile first.',
     'offline_account': 'Offline account',
     'offline_help': 'Choose the name you’ll use to play.',
     'username': 'Minecraft username',
@@ -396,7 +415,7 @@ for key, label in {
     'save': 'Save account',
     'bad_name': 'Use 3–16 letters, numbers or underscores.',
     'native': 'Native',
-    'native_help': 'Sign in to Native Client',
+    'native_help': 'Use your Native account',
     'microsoft': 'Microsoft',
     'microsoft_help': 'Use your Minecraft account',
     'offline_type': 'Offline',
