@@ -28,6 +28,7 @@ pub struct TextField {
     pub paste_miss: bool,
     /// No box of its own: the owner draws it (the Relay composer).
     pub bare: bool,
+    pub masked: bool,
 }
 
 impl TextField {
@@ -47,6 +48,7 @@ impl TextField {
             paste_key: false,
             paste_miss: false,
             bare: false,
+            masked: false,
         }
     }
 
@@ -104,7 +106,8 @@ impl TextField {
     }
 
     fn slice(&self, to: usize) -> String {
-        self.text[..to.min(self.text.len())].iter().collect()
+        let len = to.min(self.text.len());
+        if self.masked { "•".repeat(len) } else { self.text[..len].iter().collect() }
     }
 
     /// Draws and edits the field. True when Enter was pressed while focused.
@@ -169,7 +172,7 @@ impl TextField {
         }
         let lh = c.line_height(font::REGULAR, size);
         let ty = y + (h - lh) / 2.0;
-        let s = self.value();
+        let s = self.slice(self.text.len());
         let caret_x = c.text_width(font::REGULAR, size, &self.slice(self.caret));
         if caret_x - self.scroll_x > inner_w - 2.0 {
             self.scroll_x = caret_x - inner_w + 2.0;
@@ -204,7 +207,8 @@ impl TextField {
     fn index_at(&self, c: &mut Canvas, local_x: f32, size: f32) -> usize {
         let mut acc = 0.0;
         for (i, ch) in self.text.iter().enumerate() {
-            let a = c.text_width(font::REGULAR, size, &ch.to_string());
+            let glyph = if self.masked { '•' } else { *ch };
+            let a = c.text_width(font::REGULAR, size, &glyph.to_string());
             if acc + a / 2.0 > local_x {
                 return i;
             }
@@ -294,7 +298,7 @@ impl TextField {
                     }
                 }
                 KEY_A if ctrl => self.select_all(),
-                KEY_C | KEY_X | KEY_INSERT if ctrl && self.caret != self.anchor => {
+                KEY_C | KEY_X | KEY_INSERT if ctrl && !self.masked && self.caret != self.anchor => {
                     let (a, b) = (self.caret.min(self.anchor), self.caret.max(self.anchor));
                     ui.clip_out = Some(self.text[a..b].iter().collect());
                     if key == KEY_X {

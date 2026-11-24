@@ -317,7 +317,94 @@ print('native_client: Native modules applied')
 
 # New Native-only labels remain translation keys.
 import json
+# The live account belongs to the regular title options, not to a new process
+# or any of the other local players in split screen.
+option_anchor = '    fn player_name(&self) -> String {\n'
+options = GAME
+if option_anchor not in GAME.read_text(encoding='utf-8'):
+    option_anchor = '    pub(super) fn player_name(&self) -> String {\n'
+    options = relocate(GAME, option_anchor, '    pub(crate) fn set_native_player_name(')
+patch(options, option_anchor,
+      '    pub(crate) fn set_native_player_name(&mut self, name: String) {\n'
+      '        self.player_name = Some(name);\n'
+      '    }\n\n' + option_anchor)
+patch(MENU, '        if let Some(act) = super::native_client::native_title_take()\n',
+      '        if let Some(options) = self.options.as_mut() {\n'
+      '            super::native_client::native_title_account(options);\n'
+      '        }\n'
+      '        if let Some(act) = super::native_client::native_title_take()\n')
+patch(GAME, '        if let Some(act) = native_client::native_title_take()\n',
+      '        native_client::native_title_account(&mut self.options);\n'
+      '        if let Some(act) = native_client::native_title_take()\n')
+patch(root / 'crates/horizon-client-render/src/auth.rs',
+      '    sync::{Arc, Mutex, OnceLock},\n',
+      '    sync::{Arc, Mutex},\n')
+patch(root / 'crates/horizon-client-render/src/auth.rs',
+      'static CURRENT: OnceLock<Arc<AuthSession>> = OnceLock::new();\n'
+      '\n'
+      '/// The account this game was started with (set once at start).\n'
+      'pub fn set_current(session: AuthSession) {\n'
+      '    let _ = CURRENT.set(Arc::new(session));\n'
+      '}\n'
+      'pub fn current() -> Option<Arc<AuthSession>> {\n'
+      '    CURRENT.get().cloned()\n'
+      '}\n',
+      'static CURRENT: std::sync::RwLock<Option<Arc<AuthSession>>> = std::sync::RwLock::new(None);\n'
+      '\n'
+      'pub fn set_current(session: AuthSession) {\n'
+      '    let mut current = CURRENT.write().unwrap();\n'
+      '    current.get_or_insert_with(|| Arc::new(session));\n'
+      '}\n'
+      'pub fn current() -> Option<Arc<AuthSession>> {\n'
+      '    CURRENT.read().unwrap().clone()\n'
+      '}\n'
+      'pub fn replace_current(session: Option<AuthSession>) {\n'
+      '    *CURRENT.write().unwrap() = session.map(Arc::new);\n'
+      '}\n')
+
 lang = root / 'crates/horizon-client/assets/horizon/lang/en_us.json'
 labels = json.loads(lang.read_text(encoding='utf-8'))
 labels['native.ui.restore'] = 'Use Native UI'
+for key, label in {
+    'title': 'Accounts',
+    'switch_account': 'Switch account',
+    'unavailable_short': 'Open the game from Native Client.',
+    'empty': 'No saved accounts',
+    'loading': 'Loading accounts…',
+    'offline_bridge': 'Trying to reconnect to Native Client…',
+    'sign_in': 'Sign in again',
+    'switch': 'Switch account',
+    'switched': 'Account switched.',
+    'switch_failed': 'Could not apply this account.',
+    'native_title': 'Native sign in',
+    'microsoft_title': 'Microsoft sign in',
+    'login': 'Email or username',
+    'password': 'Password',
+    'sign_in_submit': 'Sign in',
+    'credentials': 'Enter your email or username and password.',
+    'microsoft_code_help': 'Open Microsoft’s sign-in page and enter this code.',
+    'copy_code': 'Copy code and open Microsoft',
+    'waiting_ms': 'Waiting for approval…',
+    'try_again': 'Try again',
+    'back': 'Back',
+    'add_account': 'Add account',
+    'shared': 'Accounts are saved to the Native launcher.',
+    'offline_account': 'Offline account',
+    'offline_help': 'Choose the name you’ll use to play.',
+    'username': 'Minecraft username',
+    'username_example': 'e.g. BlockBuilder',
+    'save': 'Save account',
+    'bad_name': 'Use 3–16 letters, numbers or underscores.',
+    'native': 'Native',
+    'native_help': 'Sign in to Native Client',
+    'microsoft': 'Microsoft',
+    'microsoft_help': 'Use your Minecraft account',
+    'offline_type': 'Offline',
+    'offline_provider_help': 'Play with a local username',
+    'working': 'Working…',
+    'current': 'Playing now',
+    'saved': 'Saved to Native Client.',
+    'connection_lost': 'Could not reach Native Client. Try again.',
+}.items():
+    labels[f'native.accounts.{key}'] = label
 lang.write_text(json.dumps(labels, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

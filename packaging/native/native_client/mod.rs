@@ -55,6 +55,7 @@ mod status;
 mod status_modules;
 mod svc;
 mod textfield;
+mod title_accounts;
 mod title_view;
 mod title_world;
 mod toasts;
@@ -1666,6 +1667,31 @@ fn title_host_draw(
     }
 }
 
+/// Apply a new player session on the title screen before handling world or server actions.
+pub(super) fn native_title_account(options: &mut super::Options) {
+    let grant = with_state(|s| {
+        if matches!(s.title_pending, Some(title_view::TitleAct::SwitchAccount(_))) {
+            if let Some(title_view::TitleAct::SwitchAccount(grant)) = s.title_pending.take() {
+                return Some(grant);
+            }
+        }
+        None
+    });
+    let Some(grant) = grant else { return };
+    let Some(uuid) = horizon_client::auth::parse_uuid(&grant.uuid) else {
+        with_state(|s| s.title.account_failed());
+        return;
+    };
+    if grant.name.is_empty() || grant.name.chars().count() > 16 || (grant.online && grant.access_token.is_empty()) {
+        with_state(|s| s.title.account_failed());
+        return;
+    }
+    let online = grant.online.then(|| horizon_client::auth::AuthSession::new(&grant.name, uuid, &grant.access_token));
+    horizon_client::auth::replace_current(online);
+    options.set_native_player_name(grant.name);
+    with_state(|s| s.title.account_applied(grant.id));
+}
+
 /// What the Native title asked of the game, for the host to do (it needs the event loop).
 pub(super) fn native_title_take() -> Option<title_view::TitleAct> {
     with_state(|s| s.title_pending.take())
@@ -1742,7 +1768,7 @@ pub(super) fn native_title_apply(title: &mut horizon_client::title::Title, act: 
             with_state(|s| s.servers_classic = true);
             None
         }
-        TitleAct::NativeMods | TitleAct::Relay | TitleAct::Classic => None,
+        TitleAct::NativeMods | TitleAct::Relay | TitleAct::Classic | TitleAct::SwitchAccount(_) => None,
     }
 }
 
@@ -1784,8 +1810,8 @@ pub(super) fn native_title_event(event: &WindowEvent, modifiers: winit::keyboard
                 | if modifiers.alt_key() { ui::MOD_ALT } else { 0 }
                 | if modifiers.super_key() { ui::MOD_SUPER } else { 0 };
             with_state(|s| {
-                let State { ui, menu, editor, relay, title_overlay, events, .. } = s;
-                if pressed && glfw == ui::KEY_ESCAPE {
+                let State { ui, menu, editor, relay, title, title_overlay, events, .. } = s;
+                if pressed && glfw == ui::KEY_ESCAPE && !title.accounts_open() {
                     let kept = match *title_overlay {
                         1 => menu.escape(ui),
                         2 => relay.escape(ui),

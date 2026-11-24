@@ -16,13 +16,14 @@ use std::collections::HashSet;
 const AD_ROTATE_MS: f64 = 12_000.0;
 
 /// What a click on the title asks for.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum TitleAct {
     Singleplayer,
     Multiplayer,
     Realms,
     Options,
     Quit,
+    SwitchAccount(super::title_accounts::SessionGrant),
     NativeMods,
     Relay,
     /// The game's Language screen (vanilla's globe button).
@@ -61,6 +62,7 @@ const PITCH: f32 = super::title_world::PITCH as f32;
 
 #[derive(Default)]
 pub struct TitleView {
+    accounts: super::title_accounts::TitleAccounts,
     /// You, standing in the world (`title_world`).
     player: super::preview3d::PlayerPreview,
     /// The banner text closed with its X (this session), the quest card's quest and the picked reward.
@@ -88,6 +90,18 @@ fn button(ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32,
 }
 
 impl TitleView {
+    pub(super) fn account_applied(&mut self, id: String) {
+        self.accounts.applied(id);
+    }
+
+    pub(super) fn account_failed(&mut self) {
+        self.accounts.apply_failed();
+    }
+
+    pub fn accounts_open(&self) -> bool {
+        self.accounts.is_open()
+    }
+
     /// The title came up: the rows rise in again.
     pub fn opened(&mut self, ui: &mut Ui) {
         if self.shown_at == 0.0 {
@@ -126,6 +140,11 @@ impl TitleView {
     pub fn draw(&mut self, ui: &mut Ui, c: &mut Canvas, info: &TitleInfo) -> Option<TitleAct> {
         self.opened(ui);
         let (w_all, h_all) = (c.width(), c.height());
+        let accounts_open = self.accounts.is_open();
+        let interactive = ui.interactive;
+        if accounts_open {
+            ui.interactive = false;
+        }
         let inn = ui.anim("title#in", 1.0, 4.0);
         c.push_alpha(inn);
         let mut act = None;
@@ -172,7 +191,7 @@ impl TitleView {
         // Top-right: friends online (opens Relay).
         let pill = self.appear(ui, 1);
         c.push_alpha(pill);
-        if self.friends_pill(ui, c, w_all - pad + 8.0, 16.0) {
+        if self.friends_pill(ui, c, w_all - pad + 8.0, 61.0) {
             act = Some(TitleAct::Relay);
         }
         c.pop_alpha();
@@ -220,6 +239,10 @@ impl TitleView {
         let cwid = c.text_width(font::MEDIUM, 11.0, copy);
         c.text(font::MEDIUM, 11.0, copy, w_all - pad - cwid, fy, 0x99FFFFFF);
         c.pop_alpha();
+        ui.interactive = interactive;
+        if let Some(grant) = self.accounts.draw(ui, c, w_all - pad + 8.0, 16.0, &info.player, inn * pill) {
+            return Some(TitleAct::SwitchAccount(grant));
+        }
         act
     }
 
