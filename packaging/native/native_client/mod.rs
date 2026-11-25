@@ -187,7 +187,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
             toggles_before: None,
             freelook_switched: false,
             relay: relay_view::RelayView::new(),
-            pause: pause_view::PauseView::default(),
+            pause: pause_view::PauseView,
             pause_was: false,
             relay_open: false,
             emote_wheel: emote_wheel::Wheel::default(),
@@ -594,7 +594,7 @@ impl Game<'_> {
                     state.pause.opened(&mut state.ui);
                     state.pause_was = true;
                 }
-                pause_action = state.pause.draw(&mut state.ui, c, info, &mut state.cfg);
+                pause_action = state.pause.draw(&mut state.ui, c, info);
                 state.ui.tooltips(c);
                 state.ui.end();
             } else if open {
@@ -1268,14 +1268,6 @@ impl Game<'_> {
 
     fn native_pause_info(&self) -> pause_view::PauseInfo {
         let single = !self.external_server();
-        let player = self.options.player_name();
-        horizon_client::native_skins::set_local_player(Some(&player));
-        let server = if single {
-            String::new()
-        } else {
-            self.server_address().map(str::to_owned).unwrap_or_default()
-        };
-        let ping = if single { -1 } else { self.own_latency().unwrap_or(-1) };
         pause_view::PauseInfo {
             title: self.translate("menu.game", "Game Menu"),
             back: self.translate("menu.returnToGame", "Back to Game"),
@@ -1290,9 +1282,6 @@ impl Game<'_> {
             },
             single,
             unread: relay::unread_total(),
-            server,
-            ping,
-            player,
         }
     }
 
@@ -1300,14 +1289,14 @@ impl Game<'_> {
     fn native_pause_do(&mut self, action: pause_view::PauseAction) {
         use pause_view::PauseAction as P;
         let id = match action {
-            P::None | P::ClassicPause => return,
+            P::None => return,
             P::Resume => 0,
             P::Advancements => 4,
             P::Stats => 3,
             P::Options => 1,
             P::WorldOptions => 9,
             P::Leave => 2,
-            P::Relay | P::Menu | P::Cosmetics | P::HudEditor | P::Settings => {
+            P::Relay | P::Menu | P::Cosmetics => {
                 // The pause menu gives way to the Native screen (closing it returns to the game).
                 self.pause_focus = None;
                 self.screen = Screen::Playing;
@@ -1324,19 +1313,11 @@ impl Game<'_> {
                             }
                             P::Menu => {
                                 s.relay_open = false;
-                                s.apply(&menu::Action::OpenMenu(menu::TAB_MODS));
-                            }
-                            P::HudEditor => {
-                                s.relay_open = false;
-                                s.apply(&menu::Action::EditHud);
-                            }
-                            P::Settings => {
-                                s.relay_open = false;
-                                s.apply(&menu::Action::OpenMenu(menu::TAB_SETTINGS));
+                                s.apply(&menu::Action::OpenMenu(0));
                             }
                             _ => {
                                 s.relay_open = false;
-                                s.apply(&menu::Action::OpenMenu(menu::TAB_LOCKER));
+                                s.apply(&menu::Action::OpenMenu(1));
                             }
                         }
                     });
@@ -1368,13 +1349,7 @@ impl Game<'_> {
             }
             WindowEvent::MouseWheel { .. } => true,
             WindowEvent::KeyboardInput { event: key, .. } => {
-                if matches!(key.physical_key, PhysicalKey::Code(winit::keyboard::KeyCode::Escape)) {
-                    if key.state == ElementState::Pressed && !key.repeat {
-                        return with_state(|s| s.pause.escape());
-                    }
-                    return false;
-                }
-                true
+                !matches!(key.physical_key, PhysicalKey::Code(winit::keyboard::KeyCode::Escape))
             }
             _ => false,
         }
@@ -1990,38 +1965,80 @@ fn server_click(title: &mut horizon_client::title::Title, id: u8) -> Option<hori
 }
 
 thread_local! {
-    static RESTORE_NATIVE: std::cell::Cell<([f64;4], bool)> = const { std::cell::Cell::new(([0.0;4],false)) };
+    static CLASSIC_POINTER: std::cell::Cell<(f64, f64, bool)> = const { std::cell::Cell::new((0.0, 0.0, false)) };
 }
 
-/// A visible way back, drawn over the classic title in both startup and return-to-title paths.
+/// The exact same minimal style dropdown in the exact same top-right spot over Vanilla's title screen.
 pub(super) fn native_title_restore_frame(batch: &mut HudBatch, title: &horizon_client::title::Title) {
     let show = matches!(title.mode, horizon_client::title::Mode::Main) && with_state(|s| !s.cfg.custom_title);
-    if !show { RESTORE_NATIVE.with(|r| r.set(([0.0;4],false))); return; }
+    if !show {
+        CLASSIC_POINTER.with(|p| p.set((0.0, 0.0, false)));
+        return;
+    }
     with_state(|s| {
         let fb = [(batch.width * batch.scale) as u32, (batch.height * batch.scale) as u32];
         let scale = (fb[0] as f32 / 1280.0).min(fb[1] as f32 / 760.0).max(0.75) * s.cfg.scale;
         let c = &mut s.canvas;
-        c.begin(fb[0],fb[1],scale);
-        let x=c.width()-152.0;
-        let hovered=RESTORE_NATIVE.with(|r| { let (_,hovered)=r.get();r.set(([f64::from(x*scale),12.0*f64::from(scale),140.0*f64::from(scale),32.0*f64::from(scale)],hovered));hovered });
-        c.round(x,12.0,140.0,32.0,6.0,if hovered {0xFF303036}else{0xE818181C});
-        c.outline(x,12.0,140.0,32.0,6.0,1.0,0xFF606068);
-        let label=horizon_client::lang::get("native.ui.restore");
-        let tw=c.text_width(native_ui::font::BOLD,12.0,&label);
-        c.text(native_ui::font::BOLD,12.0,&label,x+(140.0-tw)/2.0,21.0,0xFFFFFFFF);
-        c.finish_with(batch,&mut |_batch,_draw| {});
+        c.begin(fb[0], fb[1], scale);
+        let events = std::mem::take(&mut s.events);
+        s.ui.begin(&events, scale);
+        if let Some(title_view::TitleAct::SetStyle(style)) = s.title.draw_classic_style_overlay(&mut s.ui, c) {
+            s.cfg.custom_title = true;
+            s.cfg.title_style = if style == "simple" { "simple".to_owned() } else { "modern".to_owned() };
+            s.cfg.save();
+            s.events.clear();
+            s.title_was = false;
+            CLASSIC_POINTER.with(|p| p.set((0.0, 0.0, false)));
+        }
+        s.ui.tooltips(c);
+        s.ui.end();
+        c.finish_with(batch, &mut |_batch, _draw| {});
     });
 }
 
-pub(super) fn native_title_restore_event(title: &horizon_client::title::Title,event: &WindowEvent) -> bool {
-    if !matches!(title.mode,horizon_client::title::Mode::Main) || with_state(|s| s.cfg.custom_title) { return false; }
+pub(super) fn native_title_restore_event(title: &horizon_client::title::Title, event: &WindowEvent) -> bool {
+    if !matches!(title.mode, horizon_client::title::Mode::Main) || with_state(|s| s.cfg.custom_title) {
+        return false;
+    }
     match event {
-        WindowEvent::CursorMoved{position,..} => {RESTORE_NATIVE.with(|r| {let (rect,_)=r.get();let [x,y,w,h]=rect;r.set((rect,w>0.0&&position.x>=x&&position.x<=x+w&&position.y>=y&&position.y<=y+h));});false}
-        WindowEvent::MouseInput{state:ElementState::Pressed,button:MouseButton::Left,..} if RESTORE_NATIVE.with(|r|r.get().1) => {
-            with_state(|s| {s.cfg.custom_title=true;s.cfg.save();s.events.clear();s.title_was=false;});
-            RESTORE_NATIVE.with(|r|r.set(([0.0;4],false)));true
+        WindowEvent::CursorMoved { position, .. } => {
+            CLASSIC_POINTER.with(|p| {
+                let (_, _, pressed) = p.get();
+                p.set((position.x, position.y, pressed));
+            });
+            with_state(|s| s.events.push(Event::Move { x: position.x, y: position.y }));
+            false
         }
-        WindowEvent::Focused(false) => {RESTORE_NATIVE.with(|r|r.set(([0.0;4],false)));false}
-        _=>false,
+        WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+            let pressed = *state == ElementState::Pressed;
+            let (px, py, was_pressed) = CLASSIC_POINTER.with(|p| p.get());
+            let wants = with_state(|s| s.title.wants_classic_pointer(px, py));
+            if pressed && wants {
+                CLASSIC_POINTER.with(|p| p.set((px, py, true)));
+                with_state(|s| s.events.push(Event::Button { button: 0, pressed: true }));
+                return true;
+            }
+            if !pressed && (was_pressed || wants) {
+                CLASSIC_POINTER.with(|p| p.set((px, py, false)));
+                with_state(|s| s.events.push(Event::Button { button: 0, pressed: false }));
+                return true;
+            }
+            CLASSIC_POINTER.with(|p| p.set((px, py, false)));
+            false
+        }
+        WindowEvent::KeyboardInput { event: key, .. }
+            if key.state == ElementState::Pressed
+                && matches!(key.physical_key, PhysicalKey::Code(winit::keyboard::KeyCode::Escape)) =>
+        {
+            with_state(|s| s.title.escape_style_menu())
+        }
+        WindowEvent::Focused(false) => {
+            CLASSIC_POINTER.with(|p| p.set((0.0, 0.0, false)));
+            with_state(|s| {
+                s.title.escape_style_menu();
+            });
+            false
+        }
+        _ => false,
     }
 }

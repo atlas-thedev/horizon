@@ -301,7 +301,6 @@ pub struct Menu {
     /// The instance folder (screenshots live under it).
     pub game_dir: Option<std::path::PathBuf>,
     s_title: Setting,
-    s_pause: Setting,
     s_notify: Setting,
     s_activity: Setting,
     s_scale: Setting,
@@ -367,7 +366,6 @@ impl Menu {
             who: String::new(),
             game_dir: None,
             s_title: Setting::bool("title", "Native title screen", true),
-            s_pause: Setting::bool("pause", "Native pause menu", true),
             s_notify: Setting::bool("notify", "Message notifications in game", true),
             s_activity: Setting::bool("activity", "Show friends what I'm playing", true),
             s_scale: Setting::num("scale", "UI size", 1.0, 0.75, 1.5, 0.05, "x"),
@@ -1323,7 +1321,6 @@ impl Menu {
     fn settings(&mut self, ui: &mut Ui, c: &mut Canvas, mods: &mut Modules, cfg: &mut UiConfig, who: Option<&str>, x: f32, y: f32, w: f32, h: f32) -> Action {
         let mut action = Action::None;
         self.s_title.set_bool(cfg.custom_title);
-        self.s_pause.set_bool(cfg.custom_pause);
         self.s_notify.set_bool(cfg.notifications);
         self.s_activity.set_bool(cfg.share_activity);
         // While the slider is held (and on the frame it is let go) the slider owns the value.
@@ -1377,10 +1374,6 @@ impl Menu {
         let mut save = false;
         if self.s_title.as_bool() != cfg.custom_title {
             cfg.custom_title = self.s_title.as_bool();
-            save = true;
-        }
-        if self.s_pause.as_bool() != cfg.custom_pause {
-            cfg.custom_pause = self.s_pause.as_bool();
             save = true;
         }
         if self.s_notify.as_bool() != cfg.notifications {
@@ -1442,7 +1435,7 @@ impl Menu {
     fn group(&mut self, ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, icon: u32, title: &str, hint: &str, which: Group) -> f32 {
         let head = 62.0;
         let rows: Vec<&mut Setting> = match which {
-            Group::General => vec![&mut self.s_title, &mut self.s_pause, &mut self.s_notify, &mut self.s_activity, &mut self.s_scale],
+            Group::General => vec![&mut self.s_title, &mut self.s_notify, &mut self.s_activity, &mut self.s_scale],
             Group::Keys => vec![&mut self.s_menu, &mut self.s_chat, &mut self.s_emote, &mut self.s_play, &mut self.s_next, &mut self.s_prev],
         };
         let rh: f32 = rows.iter().map(|s| Widgets::row_height(s)).sum();

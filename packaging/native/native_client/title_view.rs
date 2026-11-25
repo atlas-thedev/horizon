@@ -68,6 +68,7 @@ pub struct TitleView {
     accounts: super::title_accounts::TitleAccounts,
     style_menu_open: bool,
     style_menu_motion: f32,
+    style_chip_rect: [f64; 4],
     /// You, standing in the world (`title_world`).
     player: super::preview3d::PlayerPreview,
     /// The banner text closed with its X (this session), the quest card's quest and the picked reward.
@@ -81,6 +82,26 @@ pub struct TitleView {
     ad_switch_at: f64,
     ad_prev: Option<usize>,
     ad_fade_at: f64,
+}
+
+fn style_label(mode: &str) -> &'static str {
+    match mode {
+        "simple" => "Simple",
+        "vanilla" => "Vanilla",
+        _ => "Modern",
+    }
+}
+
+fn style_icon(mode: &str) -> u32 {
+    match mode {
+        "simple" => theme::I_LAYERS,
+        "vanilla" => theme::I_GAMEPAD,
+        _ => theme::I_LAYOUT,
+    }
+}
+
+fn style_chip_width(c: &mut Canvas, mode: &str) -> f32 {
+    (c.text_width(font::SEMIBOLD, 12.0, style_label(mode)) + 50.0).max(96.0)
 }
 
 fn clamp01(v: f32) -> f32 {
@@ -105,6 +126,29 @@ impl TitleView {
 
     pub fn accounts_open(&self) -> bool {
         self.accounts.is_open() || self.style_menu_open
+    }
+
+    pub fn escape_style_menu(&mut self) -> bool {
+        if self.style_menu_open {
+            self.style_menu_open = false;
+            return true;
+        }
+        false
+    }
+
+    /// True when a pointer event at physical window coordinates belongs to the Vanilla title style dropdown.
+    pub fn wants_classic_pointer(&self, x: f64, y: f64) -> bool {
+        let [cx, cy, cw, ch] = self.style_chip_rect;
+        if cw > 0.0 && x >= cx && x <= cx + cw && y >= cy && y <= cy + ch {
+            return true;
+        }
+        self.style_menu_open
+    }
+
+    /// Draws the exact same minimal style dropdown in the exact same top-right spot over Vanilla's title screen.
+    pub fn draw_classic_style_overlay(&mut self, ui: &mut Ui, c: &mut Canvas) -> Option<TitleAct> {
+        let w = c.width();
+        self.draw_style_dropdown(ui, c, w - 16.0, 16.0, "vanilla", 1.0)
     }
 
     /// The title came up: the rows rise in again.
@@ -213,7 +257,7 @@ impl TitleView {
 
             // Top-right: friends online (opens Relay).
             c.push_alpha(pill);
-            if self.friends_pill(ui, c, w_all - pad + 8.0, 61.0) {
+            if self.friends_pill(ui, c, w_all - 16.0, 61.0) {
                 act = Some(TitleAct::Relay);
             }
             c.pop_alpha();
@@ -263,15 +307,16 @@ impl TitleView {
         }
         c.pop_alpha();
 
-        // Top-right Native bar: Style dropdown (Modern / Simple / Vanilla) + Account switcher
-        let right_edge = if simple { w_all - 16.0 } else { w_all - pad + 8.0 };
-        let account_chip_w = (c.text_width(font::SEMIBOLD, 12.5, &info.player) + 65.0).clamp(118.0, 172.0);
+        // Top-right Native bar: Style dropdown pinned at exact same spot (Modern / Simple / Vanilla) + Account switcher beside it
+        let mode = if simple { "simple" } else { "modern" };
+        let right_edge = w_all - 16.0;
+        let style_w = style_chip_width(c, mode);
         ui.interactive = interactive && !self.accounts.is_open();
-        if let Some(style_act) = self.draw_style_dropdown(ui, c, right_edge - account_chip_w - 8.0, 16.0, simple, inn * pill) {
+        if let Some(style_act) = self.draw_style_dropdown(ui, c, right_edge, 16.0, mode, inn * pill) {
             act = Some(style_act);
         }
         ui.interactive = interactive && !self.style_menu_open;
-        if let Some(grant) = self.accounts.draw(ui, c, right_edge, 16.0, &info.player, inn * pill) {
+        if let Some(grant) = self.accounts.draw(ui, c, right_edge - style_w - 8.0, 16.0, &info.player, inn * pill) {
             ui.interactive = interactive;
             return Some(TitleAct::SwitchAccount(grant));
         }
@@ -435,34 +480,37 @@ impl TitleView {
         hit
     }
 
-    /// Sleek Native dropdown bar for switching Title Screen style: Modern / Simple (v2.5.75) / Vanilla.
-    fn draw_style_dropdown(&mut self, ui: &mut Ui, c: &mut Canvas, right: f32, top: f32, simple: bool, entrance: f32) -> Option<TitleAct> {
+    /// Minimal Native dropdown in the same top-right spot across Modern, Simple, and Vanilla title screens.
+    fn draw_style_dropdown(&mut self, ui: &mut Ui, c: &mut Canvas, right: f32, top: f32, mode: &str, entrance: f32) -> Option<TitleAct> {
+        if self.style_menu_open && ui.keys.iter().any(|(k, _)| *k == ui::KEY_ESCAPE) {
+            self.style_menu_open = false;
+        }
         let chip_h = 36.0;
-        let label = if simple { "Simple" } else { "Modern" };
-        let chip_w = (c.text_width(font::SEMIBOLD, 12.5, label) + 54.0).max(100.0);
+        let label = style_label(mode);
+        let chip_w = style_chip_width(c, mode);
         let x = right - chip_w;
+        let sc = f64::from(c.scale);
+        self.style_chip_rect = [f64::from(x) * sc, f64::from(top) * sc, f64::from(chip_w) * sc, f64::from(chip_h) * sc];
+
         let over_chip = ui.hover(c, x, top, chip_w, chip_h);
         if over_chip {
             ui.cursor_hand = true;
         }
         let hv = ui.anim_on("title:style#h", over_chip || self.style_menu_open, 16.0);
         c.push_alpha(entrance);
-        c.round(x, top, chip_w, chip_h, 10.0, theme::mix(0xE9090A0C, 0xFA121316, hv));
-        c.outline(x, top, chip_w, chip_h, 10.0, 1.0, theme::mix(0x20FFFFFF, 0x36FFFFFF, hv));
-        c.icon(if simple { theme::I_LAYERS } else { theme::I_SPARKLES }, 14.0, x + 17.0, top + chip_h / 2.0, theme::TEXT_STRONG);
-        let lh = c.line_height(font::SEMIBOLD, 12.5);
-        c.text(font::SEMIBOLD, 12.5, label, x + 31.0, top + (chip_h - lh) / 2.0, theme::TEXT_STRONG);
-        c.icon(if self.style_menu_open { theme::I_CHEVRON_UP } else { theme::I_CHEVRON_DOWN }, 12.0, x + chip_w - 14.0, top + chip_h / 2.0, theme::TEXT_SECONDARY);
-        if over_chip && !self.style_menu_open {
-            ui.tip("Title screen style");
-        }
+        c.round(x, top, chip_w, chip_h, 10.0, theme::mix(0xE2090A0C, 0xF514161B, hv));
+        c.outline(x, top, chip_w, chip_h, 10.0, 1.0, theme::mix(0x1EFFFFFF, 0x36FFFFFF, hv));
+        c.icon(style_icon(mode), 13.5, x + 16.0, top + chip_h / 2.0, theme::TEXT_STRONG);
+        let lh = c.line_height(font::SEMIBOLD, 12.0);
+        c.text(font::SEMIBOLD, 12.0, label, x + 29.0, top + (chip_h - lh) / 2.0, theme::TEXT_STRONG);
+        c.icon(if self.style_menu_open { theme::I_CHEVRON_UP } else { theme::I_CHEVRON_DOWN }, 11.5, x + chip_w - 13.0, top + chip_h / 2.0, theme::TEXT_SECONDARY);
         if ui.clicked(c, "title:style:chip", x, top, chip_w, chip_h) {
             self.style_menu_open = !self.style_menu_open;
         }
         c.pop_alpha();
 
         let target = if self.style_menu_open { 1.0 } else { 0.0 };
-        self.style_menu_motion += (target - self.style_menu_motion) * (1.0 - (-23.0 * ui.dt).exp());
+        self.style_menu_motion += (target - self.style_menu_motion) * (1.0 - (-24.0 * ui.dt).exp());
         if (self.style_menu_motion - target).abs() < 0.01 {
             self.style_menu_motion = target;
         }
@@ -470,11 +518,11 @@ impl TitleView {
             return None;
         }
 
-        let w = 264.0;
+        let w = 148.0;
         let dx = (right - w).max(8.0);
-        let dy = top + chip_h + 7.0 - 8.0 * (1.0 - self.style_menu_motion);
-        let row_h = 48.0;
-        let dh = 40.0 + row_h * 3.0 + 10.0;
+        let dy = top + chip_h + 6.0 - 6.0 * (1.0 - self.style_menu_motion);
+        let row_h = 32.0;
+        let dh = 12.0 + row_h * 3.0;
         if ui.interactive && self.style_menu_open && ui.pressed && !over_chip && !ui.hover(c, dx, dy, w, dh) {
             self.style_menu_open = false;
             return None;
@@ -482,49 +530,47 @@ impl TitleView {
 
         let mut act = None;
         c.push_alpha(self.style_menu_motion);
-        c.shadow(dx, dy + 4.0, w, dh, 13.0, 21.0, 0xA4000000);
-        c.round(dx, dy, w, dh, 13.0, 0xFC08090B);
-        c.outline(dx, dy, w, dh, 13.0, 1.0, theme::HAIRLINE_STRONG);
-        c.text(font::SEMIBOLD, 11.5, "Title screen layout", dx + 14.0, dy + 12.0, theme::TEXT_SECONDARY);
-        let (rx, rw) = (dx + 8.0, w - 16.0);
-        let mut ry = dy + 36.0;
+        c.shadow(dx, dy + 3.0, w, dh, 10.0, 16.0, 0x99000000);
+        c.round(dx, dy, w, dh, 10.0, 0xF5090A0D);
+        c.outline(dx, dy, w, dh, 10.0, 1.0, theme::HAIRLINE_STRONG);
+        let (rx, rw) = (dx + 6.0, w - 12.0);
+        let mut ry = dy + 6.0;
 
-        if self.style_option_row(ui, c, "title:style:modern", rx, ry, rw, row_h - 4.0, theme::I_SPARKLES, "Modern", "3D world & character stage", !simple) {
+        if self.style_option_row(ui, c, "title:style:modern", rx, ry, rw, row_h, theme::I_LAYOUT, "Modern", mode == "modern") {
             self.style_menu_open = false;
             act = Some(TitleAct::SetStyle("modern".to_owned()));
         }
         ry += row_h;
-        if self.style_option_row(ui, c, "title:style:simple", rx, ry, rw, row_h - 4.0, theme::I_LAYERS, "Simple", "Clean classic centered menu", simple) {
+        if self.style_option_row(ui, c, "title:style:simple", rx, ry, rw, row_h, theme::I_LAYERS, "Simple", mode == "simple") {
             self.style_menu_open = false;
             act = Some(TitleAct::SetStyle("simple".to_owned()));
         }
         ry += row_h;
-        if self.style_option_row(ui, c, "title:style:vanilla", rx, ry, rw, row_h - 4.0, theme::I_GAMEPAD, "Vanilla", "Original Minecraft look", false) {
+        if self.style_option_row(ui, c, "title:style:vanilla", rx, ry, rw, row_h, theme::I_GAMEPAD, "Vanilla", mode == "vanilla") {
             self.style_menu_open = false;
-            act = Some(TitleAct::Classic);
+            if mode != "vanilla" {
+                act = Some(TitleAct::Classic);
+            }
         }
         c.pop_alpha();
         act
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn style_option_row(&self, ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32, icon: u32, title: &str, desc: &str, active: bool) -> bool {
+    fn style_option_row(&self, ui: &mut Ui, c: &mut Canvas, id: &str, x: f32, y: f32, w: f32, h: f32, icon: u32, title: &str, active: bool) -> bool {
         let over = ui.hover(c, x, y, w, h);
         if over {
             ui.cursor_hand = true;
         }
         let hv = ui.anim_on(&format!("{id}#h"), over, 18.0);
-        c.round(x, y, w, h, 9.0, theme::mix(if active { 0x16FFFFFF } else { 0x00000000 }, 0x22FFFFFF, hv));
+        c.round(x, y, w, h, 7.0, theme::mix(if active { 0x16FFFFFF } else { 0x00000000 }, 0x22FFFFFF, hv));
+        let fg = if active { theme::TEXT_STRONG } else { theme::mix(theme::TEXT_SECONDARY, theme::TEXT_STRONG, hv) };
+        c.icon(icon, 13.0, x + 15.0, y + h / 2.0, fg);
+        let fnt = if active { font::SEMIBOLD } else { font::MEDIUM };
+        let lh = c.line_height(font::SEMIBOLD, 12.0);
+        c.text(fnt, 12.0, title, x + 28.0, y + (h - lh) / 2.0, fg);
         if active {
-            c.outline(x, y, w, h, 9.0, 1.0, theme::HAIRLINE_STRONG);
-        }
-        c.round(x + 8.0, y + (h - 28.0) / 2.0, 28.0, 28.0, 7.5, if active { 0x283B8CF0 } else { 0x14FFFFFF });
-        c.icon(icon, 14.0, x + 22.0, y + h / 2.0, if active { 0xFF60A5FA } else { theme::TEXT_STRONG });
-        c.text(font::SEMIBOLD, 12.5, title, x + 44.0, y + 6.0, theme::TEXT_STRONG);
-        let fit = c.ellipsize(font::REGULAR, 10.5, desc, w - 74.0);
-        c.text(font::REGULAR, 10.5, &fit, x + 44.0, y + 23.0, theme::TEXT_SECONDARY);
-        if active {
-            c.icon(theme::I_CHECK, 13.0, x + w - 14.0, y + h / 2.0, 0xFF60A5FA);
+            c.icon(theme::I_CHECK, 12.0, x + w - 13.0, y + h / 2.0, theme::TEXT_STRONG);
         }
         ui.clicked(c, id, x, y, w, h)
     }
@@ -534,7 +580,7 @@ impl TitleView {
     fn menu(&mut self, ui: &mut Ui, c: &mut Canvas, info: &TitleInfo, home: Option<&super::home::Doc>, promo: Option<&super::home::Promo>, x: f32, w: f32, h_all: f32) -> Option<TitleAct> {
         let mut act = None;
         let (rh, gap, sq) = (46.0f32, 8.0f32, 40.0f32);
-        let total = 50.0 + 28.0 + 56.0 + gap + (rh + gap) * 3.0 + 6.0 + 15.0 + sq + 10.0 + if promo.is_some() { PROMO_H + 12.0 } else { 0.0 };
+        let total = 50.0 + 28.0 + (rh + gap) * 4.0 + 6.0 + 15.0 + sq + 10.0 + if promo.is_some() { PROMO_H + 12.0 } else { 0.0 };
         let mut y = 24.0f32.max((h_all * 0.2).min((h_all - 40.0 - total) / 2.0));
         let mp = info.allows_multiplayer;
         let tr = |key: &str, fallback: &str| horizon_client::lang::get_or(key, fallback);
@@ -548,10 +594,10 @@ impl TitleView {
         c.pop_alpha();
         y += 78.0;
 
-        if self.primary(ui, c, 1, "menu:singleplayer", x, y, w, 56.0, &tr("menu.singleplayer", "Singleplayer")) {
+        if self.list_row(ui, c, 1, "menu:singleplayer", x, y, w, rh, &tr("menu.singleplayer", "Singleplayer"), theme::I_PLAY, true) {
             act = Some(TitleAct::Singleplayer);
         }
-        y += 56.0 + gap;
+        y += rh + gap;
         if self.list_row(ui, c, 2, "menu:multiplayer", x, y, w, rh, &tr("menu.multiplayer", "Multiplayer"), theme::I_SERVER, mp) {
             act = Some(TitleAct::Multiplayer);
         }
@@ -612,32 +658,6 @@ impl TitleView {
         }
         c.pop_alpha();
         act
-    }
-
-    /// Play: the one big action, in the launcher's blue, with a play mark and an arrow.
-    #[allow(clippy::too_many_arguments)]
-    fn primary(&self, ui: &mut Ui, c: &mut Canvas, index: usize, id: &str, x: f32, y: f32, w: f32, h: f32, label: &str) -> bool {
-        let e = self.appear(ui, index);
-        c.push_alpha(e);
-        let y = y + (1.0 - e) * 10.0;
-        let over = ui.hover(c, x, y, w, h);
-        let click = ui.clicked(c, id, x, y, w, h);
-        let hv = ui.anim_on(&format!("{id}#h"), over, 14.0);
-        let pr = ui.anim_on(&format!("{id}#p"), ui.is_pressing(id), 20.0);
-        if over {
-            ui.cursor_hand = true;
-        }
-        let (r, lift) = (14.0, -hv * 1.5 + pr * 1.5);
-        c.shadow(x + 6.0, y + 10.0 + lift, w - 12.0, h - 6.0, r, 22.0, 0x662A73DC);
-        c.round_gradient_h(x, y + lift, w, h, r, theme::mix(0xFF3B8CF0, 0xFF55A0FF, hv), theme::mix(0xFF1F5FC8, 0xFF2D72E0, hv));
-        c.outline(x, y + lift, w, h, r, 1.0, 0x40FFFFFF);
-        c.fill(x + r, y + lift + 1.0, w - r * 2.0, 1.0, 0x40FFFFFF);
-        c.icon(theme::I_PLAY, 17.0, x + 26.0, y + lift + h / 2.0, 0xFFFFFFFF);
-        let lh = c.line_height(font::BOLD, 15.5);
-        c.text(font::BOLD, 15.5, label, x + 46.0, y + lift + (h - lh) / 2.0, 0xFFFFFFFF);
-        c.icon(theme::I_CHEVRON_RIGHT, 15.0, x + w - 24.0 + hv * 3.0, y + lift + h / 2.0, 0xCCFFFFFF);
-        c.pop_alpha();
-        click
     }
 
     /// A menu row: dark glass, the icon and the name on the left, an arrow on the right when hovered.

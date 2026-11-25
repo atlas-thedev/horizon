@@ -58,8 +58,13 @@ jobs:
               date, short = m.groups()
               name = f'Nightly {date} \u00b7 {short}'
           else:
-              out = subprocess.check_output(['gh', 'api', f"repos/{os.environ['UPSTREAM']}/releases/tags/nightly"], text=True, encoding='utf-8')
-              name = json.loads(out)['name']
+              proc = subprocess.run(['gh', 'api', f"repos/{os.environ['UPSTREAM']}/releases/tags/nightly"], capture_output=True, text=True, encoding='utf-8')
+              if proc.returncode != 0:
+                  print(f"Upstream {os.environ['UPSTREAM']} nightly lookup unavailable ({proc.stderr.strip()}); skipping scheduled build.")
+                  with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+                      f.write('available=false\n')
+                  raise SystemExit(0)
+              name = json.loads(proc.stdout)['name']
               m = re.match(r'^Nightly (\d{4}-\d{2}-\d{2}) \u00b7 ([0-9a-f]+)$', name)
               if not m:
                   raise SystemExit(f'Unexpected Nightly title: {name!r}')
@@ -69,12 +74,15 @@ jobs:
               raise SystemExit('A release suffix needs a pinned Nightly and 1–24 letters, numbers, dots, underscores or hyphens.')
           tag = f'native-{date}-{short}' + (f'-{suffix}' if suffix else '')
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
-              f.write(f'date={date}\nshort={short}\ntag={tag}\nname={name}\n')
+              f.write(f'available=true\ndate={date}\nshort={short}\ntag={tag}\nname={name}\n')
           PY
       - name: Skip when already built
         id: need
         run: |
-          if [ "${{ inputs.force }}" != "true" ] && gh release view "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          if [ "${{ steps.up.outputs.available }}" != "true" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream Nightly unavailable; skipping."
+          elif [ "${{ inputs.force }}" != "true" ] && gh release view "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "build=false" >> "$GITHUB_OUTPUT"
             echo "${{ steps.up.outputs.tag }} already exists"
           else
