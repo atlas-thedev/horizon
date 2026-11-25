@@ -135,20 +135,28 @@ jobs:
           BIN=horizon-client
           if [ -d crates/horizon-official ]; then BIN=horizon-official; fi
           echo "NATIVE_BIN=$BIN" >> "$GITHUB_ENV"
-          cargo build --release -p "$BIN" -p horizon-client-lib --bin "$BIN"
+          cargo build --release -p "$BIN" -p horizon-client-lib --bin "$BIN" -p horizon-prepare --bin horizon-prepare
       - name: Check it starts and has no foreign DLLs
         if: steps.need.outputs.build == 'true'
         working-directory: src
         run: |
           target/release/$NATIVE_BIN.exe --help | grep -q -- '--resources'
-          python tools/check_imports.py target/release/$NATIVE_BIN.exe
+          target/release/horizon-prepare.exe --help | grep -q -- '--minecraft-dir'
+          python tools/check_imports.py target/release/$NATIVE_BIN.exe target/release/horizon-prepare.exe
       - name: Publish
         if: steps.need.outputs.build == 'true'
         run: |
-          mkdir dist
+          rm -rf dist
+          mkdir -p dist/horizon-windows-x64/crates
+          git -C src archive --format=tar HEAD tools mods/horizon/src/test/java research-lock.json LICENSE | tar -x -C dist/horizon-windows-x64
+          cp -R src/crates/horizon-prepare dist/horizon-windows-x64/crates/horizon-prepare
           cp "src/target/release/$NATIVE_BIN.exe" dist/horizon-client-windows-x64.exe
+          cp "src/target/release/$NATIVE_BIN.exe" dist/horizon-windows-x64/horizon-client.exe
+          cp "src/target/release/horizon-prepare.exe" dist/horizon-windows-x64/horizon-prepare.exe
+          if [ -f src/packaging/PLAY.txt ]; then cp src/packaging/PLAY.txt dist/horizon-windows-x64/PLAY.txt; fi
           cd dist
-          sha256sum horizon-client-windows-x64.exe > SHA256SUMS
+          7z a -tzip horizon-windows-x64.zip horizon-windows-x64 > /dev/null
+          sha256sum horizon-client-windows-x64.exe horizon-windows-x64.zip > SHA256SUMS
           printf '%s\n' '{"upstream_release":"${{ steps.up.outputs.name }}","upstream_commit":"${{ steps.up.outputs.short }}"}' > compat.json
           if [ "${{ inputs.force }}" = "true" ]; then
             gh release delete "${{ steps.up.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2> /dev/null || true
@@ -156,7 +164,7 @@ jobs:
           # Launchers follow the latest *release*: a scheduled build of a new upstream Nightly is a pre-release
           # (for testing) and reaches no player; a build started by hand (release.bat) is the release players get.
           if [ "${{ github.event_name }}" = "schedule" ]; then CHANNEL=--prerelease; else CHANNEL=--latest; fi
-          gh release create "${{ steps.up.outputs.tag }}" horizon-client-windows-x64.exe SHA256SUMS compat.json \
+          gh release create "${{ steps.up.outputs.tag }}" horizon-client-windows-x64.exe horizon-windows-x64.zip SHA256SUMS compat.json \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $CHANNEL \
             --title "Native engine for ${{ steps.up.outputs.name }}" \
-            --notes "Rebranded Horizon client built from upstream's ${{ steps.up.outputs.name }} (MIT, see NATIVE.md)."
+            --notes "Standalone Native Rust Edition bundle & client built from ${{ steps.up.outputs.name }} (MIT, see NATIVE.md)."
