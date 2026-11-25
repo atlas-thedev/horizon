@@ -1736,6 +1736,7 @@ pub(super) fn native_title_account(options: &mut super::Options) {
     net::set_active_identity(Some(grant.uuid.clone()), grant.online);
     horizon_client::native_skins::set_local_player(Some(&grant.name));
     options.set_native_player_name(grant.name);
+    home::refresh();
     with_state(|s| s.title.account_applied(grant.id));
 }
 
@@ -1991,13 +1992,18 @@ pub(super) fn native_title_restore_frame(batch: &mut HudBatch, title: &horizon_c
         c.begin(fb[0], fb[1], scale);
         let events = std::mem::take(&mut s.events);
         s.ui.begin(&events, scale);
-        if let Some(title_view::TitleAct::SetStyle(style)) = s.title.draw_classic_style_overlay(&mut s.ui, c) {
-            s.cfg.custom_title = true;
-            s.cfg.title_style = if style == "simple" { "simple".to_owned() } else { "modern".to_owned() };
-            s.cfg.save();
-            s.events.clear();
-            s.title_was = false;
-            CLASSIC_POINTER.with(|p| p.set((0.0, 0.0, false)));
+        if let Some(act) = s.title.draw_classic_style_overlay(&mut s.ui, c, game_dir()) {
+            match act {
+                title_view::TitleAct::SetStyle(style) => {
+                    s.cfg.custom_title = true;
+                    s.cfg.title_style = if style == "simple" { "simple".to_owned() } else { "modern".to_owned() };
+                    s.cfg.save();
+                    s.events.clear();
+                    s.title_was = false;
+                    CLASSIC_POINTER.with(|p| p.set((0.0, 0.0, false)));
+                }
+                other => s.title_pending = Some(other),
+            }
         }
         s.ui.tooltips(c);
         s.ui.end();

@@ -69,6 +69,8 @@ pub struct TitleView {
     style_menu_open: bool,
     style_menu_motion: f32,
     style_chip_rect: [f64; 4],
+    classic_quest_rect: [f64; 4],
+    classic_ad_rect: [f64; 4],
     /// You, standing in the world (`title_world`).
     player: super::preview3d::PlayerPreview,
     /// The banner text closed with its X (this session), the quest card's quest and the picked reward.
@@ -104,6 +106,10 @@ fn style_chip_width(c: &mut Canvas, mode: &str) -> f32 {
     (c.text_width(font::SEMIBOLD, 12.0, style_label(mode)) + 50.0).max(96.0)
 }
 
+fn in_rect(x: f64, y: f64, r: [f64; 4]) -> bool {
+    r[2] > 0.0 && r[3] > 0.0 && x >= r[0] && x <= r[0] + r[2] && y >= r[1] && y <= r[1] + r[3]
+}
+
 fn clamp01(v: f32) -> f32 {
     v.clamp(0.0, 1.0)
 }
@@ -136,19 +142,67 @@ impl TitleView {
         false
     }
 
-    /// True when a pointer event at physical window coordinates belongs to the Vanilla title style dropdown.
+    /// True when a pointer event at physical window coordinates belongs to Native's Vanilla title overlay.
     pub fn wants_classic_pointer(&self, x: f64, y: f64) -> bool {
-        let [cx, cy, cw, ch] = self.style_chip_rect;
-        if cw > 0.0 && x >= cx && x <= cx + cw && y >= cy && y <= cy + ch {
+        if in_rect(x, y, self.style_chip_rect)
+            || in_rect(x, y, self.classic_quest_rect)
+            || in_rect(x, y, self.classic_ad_rect)
+        {
             return true;
         }
         self.style_menu_open
     }
 
-    /// Draws the exact same minimal style dropdown in the exact same top-right spot over Vanilla's title screen.
-    pub fn draw_classic_style_overlay(&mut self, ui: &mut Ui, c: &mut Canvas) -> Option<TitleAct> {
-        let w = c.width();
-        self.draw_style_dropdown(ui, c, w - 16.0, 16.0, "vanilla", 1.0)
+    /// Draws the style dropdown, quests, and ads cleanly over Vanilla's title screen.
+    pub fn draw_classic_style_overlay(
+        &mut self,
+        ui: &mut Ui,
+        c: &mut Canvas,
+        game_dir: Option<std::path::PathBuf>,
+    ) -> Option<TitleAct> {
+        let (w, h) = (c.width(), c.height());
+        self.classic_quest_rect = [0.0; 4];
+        self.classic_ad_rect = [0.0; 4];
+        let mut act = None;
+        let home = super::home::get();
+        let ads: Vec<Ad> = ads::list(game_dir).into_iter().filter(|a| !self.hidden_ads.contains(&a.id)).collect();
+        let quests = home.as_ref().is_some_and(|d| !d.quests.is_empty());
+        let card_w = if w >= 860.0 { ((w - 440.0) / 2.0 - 24.0).clamp(0.0, 280.0) } else { 0.0 };
+        let interactive = ui.interactive;
+        if self.style_menu_open {
+            ui.interactive = false;
+        }
+        if card_w >= 195.0 && (quests || !ads.is_empty()) {
+            let cy = h - 34.0;
+            if let Some(d) = home.as_ref().filter(|_| quests) {
+                let qh = quest_height(card_w);
+                let qy = cy - qh;
+                if qy >= 64.0 {
+                    let sc = f64::from(c.scale);
+                    self.classic_quest_rect = [16.0 * sc, f64::from(qy) * sc, f64::from(card_w) * sc, f64::from(qh) * sc];
+                    if let Some(a) = self.quest_card(ui, c, d, 16.0, qy, card_w, qh) {
+                        act = Some(a);
+                    }
+                }
+            }
+            if !ads.is_empty() {
+                let ad_h = card_w * 5.0 / 12.0 + 62.0;
+                let ay = cy - ad_h;
+                let ax = w - 16.0 - card_w;
+                if ay >= 64.0 {
+                    let sc = f64::from(c.scale);
+                    self.classic_ad_rect = [f64::from(ax) * sc, f64::from(ay) * sc, f64::from(card_w) * sc, f64::from(ad_h) * sc];
+                    if let Some(a) = self.ad_card(ui, c, &ads, ax, ay, card_w) {
+                        act = Some(a);
+                    }
+                }
+            }
+        }
+        ui.interactive = interactive;
+        if let Some(style_act) = self.draw_style_dropdown(ui, c, w - 16.0, 16.0, "vanilla", 1.0) {
+            act = Some(style_act);
+        }
+        act
     }
 
     /// The title came up: the rows rise in again.
@@ -229,7 +283,7 @@ impl TitleView {
             // Three columns: the menu, you, the cards (only when there is room for all three).
             let pw = (w_all * 0.26).clamp(270.0, 340.0);
             let cards_w = (w_all * 0.23).min(300.0);
-            let cards = (quests || !ads.is_empty()) && cards_w >= 230.0 && w_all - pad * 2.0 - pw - cards_w >= 360.0;
+            let cards = (quests || !ads.is_empty()) && cards_w >= 205.0 && w_all - pad * 2.0 - pw - cards_w >= 300.0;
             let stage_x = pad + pw + 12.0;
             let stage_r = if cards { w_all - pad - cards_w - 12.0 } else { w_all - pad };
             let stage_w = stage_r - stage_x;
@@ -270,29 +324,27 @@ impl TitleView {
                 self.banner(ui, c, d, b, w_all, 14.0);
                 c.pop_alpha();
             }
-            // Right: the sponsored card at the bottom, the quest card over it.
+            // Right: the sponsored card at the bottom, the quest card over it (if tight vertically, keep quests visible).
             if cards {
                 let card_x = w_all - pad - cards_w;
                 let mut cy = h_all - 40.0;
                 let e = self.appear(ui, 5);
                 c.push_alpha(e);
-                if !ads.is_empty() {
-                    let ad_h = cards_w * 5.0 / 12.0 + 62.0;
-                    if cy - ad_h >= 64.0 {
-                        cy -= ad_h;
-                        if let Some(a) = self.ad_card(ui, c, &ads, card_x + (1.0 - e) * 20.0, cy, cards_w) {
-                            act = Some(a);
-                        }
-                        cy -= 12.0;
-                    }
-                }
-                if let Some(d) = home.as_ref().filter(|_| quests) {
-                    let qh = quest_height(cards_w);
-                    if cy - qh >= 64.0
-                        && let Some(a) = self.quest_card(ui, c, d, card_x + (1.0 - e) * 20.0, cy - qh, cards_w, qh)
-                    {
+                let ad_h = if ads.is_empty() { 0.0 } else { cards_w * 5.0 / 12.0 + 62.0 };
+                let qh = if quests { quest_height(cards_w) } else { 0.0 };
+                let show_ad = !ads.is_empty() && (!quests || cy - ad_h - 12.0 - qh >= 64.0) && cy - ad_h >= 64.0;
+                if show_ad {
+                    cy -= ad_h;
+                    if let Some(a) = self.ad_card(ui, c, &ads, card_x + (1.0 - e) * 20.0, cy, cards_w) {
                         act = Some(a);
                     }
+                    cy -= 12.0;
+                }
+                if let Some(d) = home.as_ref().filter(|_| quests)
+                    && cy - qh >= 64.0
+                    && let Some(a) = self.quest_card(ui, c, d, card_x + (1.0 - e) * 20.0, cy - qh, cards_w, qh)
+                {
+                    act = Some(a);
                 }
                 c.pop_alpha();
             }
@@ -432,7 +484,7 @@ impl TitleView {
         let qw = 300.0f32.min(qside);
         if let Some(d) = home
             && !d.quests.is_empty()
-            && qw >= 230.0
+            && qw >= 200.0
         {
             let qh = quest_height(qw);
             let qy = h_all - 36.0 - qh;
