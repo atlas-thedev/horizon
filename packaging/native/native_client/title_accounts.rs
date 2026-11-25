@@ -849,7 +849,7 @@ impl TitleAccounts {
             "microsoft" => account
                 .uuid
                 .as_ref()
-                .map(|uuid| format!("mj:{}", uuid.replace('-', ""))),
+                .map(|uuid| format!("mj:{}", uuid.replace('-', "").to_ascii_lowercase())),
             "native" => horizon_client::native_skins::directory()
                 .entry(&account.name)
                 .and_then(|entry| entry.skin.clone()),

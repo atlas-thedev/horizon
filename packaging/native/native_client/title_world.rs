@@ -531,8 +531,8 @@ const PLANT_INSET: f64 = 0.15;
 
 /// The one picture of the map: wide enough (7:3) to cover any usual window, scaled to it on screen, so it never has
 /// to be made again when the window changes size.
-pub const PICTURE_W: usize = 2240;
-pub const PICTURE_H: usize = 960;
+pub const PICTURE_W: usize = 1680;
+pub const PICTURE_H: usize = 720;
 /// Your size it is made for, as a fraction of the screen height (the title screen draws you about this tall).
 pub const PLAYER: f32 = 0.33;
 
@@ -1039,10 +1039,10 @@ pub fn bake(land: &Land, tiles: &Tiles, sky: &Sky, view: &View, threads: usize) 
 
 // ── on the title screen ────────────────────────────────────────────────
 
-const FADE_MS: f64 = 180.0;
+const FADE_MS: f64 = 150.0;
 const PREVIEW_DIVISOR: usize = 5;
 /// Bumped when the picture would come out different for the same world, sky and textures.
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct WorldKey {
@@ -1121,8 +1121,9 @@ pub fn prepare() {
 
             let land = stand_on(generate(seed_of(name)));
             let view = View::new(&land, PICTURE_W, PICTURE_H, f64::from(FEET), f64::from(PLAYER));
+            let threads = std::thread::available_parallelism().map_or(2, |n| n.get().saturating_sub(1).clamp(2, 8));
             if !has_image {
-                let img = bake(&land, &tiles, sky, &view.preview(), 1);
+                let img = bake(&land, &tiles, sky, &view.preview(), threads);
                 shown().lock().unwrap_or_else(|e| e.into_inner()).show(img);
             }
             // A resource reload during early startup can replace the pack while
@@ -1130,7 +1131,6 @@ pub fn prepare() {
             if super::resources_generation() != key.resources {
                 return None;
             }
-            let threads = std::thread::available_parallelism().map_or(1, |n| (n.get() / 4).clamp(1, 2));
             Some((bake(&land, &tiles, sky, &view, threads), file, true))
         }));
 

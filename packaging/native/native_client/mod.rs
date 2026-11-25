@@ -1394,15 +1394,24 @@ static RESOURCES_GENERATION: std::sync::atomic::AtomicUsize = std::sync::atomic:
 
 /// Begin with the startup menu's resource directory while the full pack is still loading.
 pub(super) fn preload_title_world(root: &std::path::Path) {
-    if !UiConfig::load(game_dir().as_deref()).custom_title {
-        return;
-    }
+    net::start(game_dir());
+    let cfg = UiConfig::load(game_dir().as_deref());
     {
         let mut source = RESOURCES.lock().unwrap_or_else(|e| e.into_inner());
         if source.is_none() {
             *source = Some(horizon_assets::resource_source::ResourceSource::directory(root.to_owned()));
             RESOURCES_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
+    }
+    if let Some(who) = horizon_client::auth::current()
+        .map(|a| a.name.clone())
+        .or_else(|| net::account().and_then(|a| a.name))
+    {
+        avatars::warm_own(&who);
+        preview3d::warm(&who);
+    }
+    if !cfg.custom_title || cfg.title_style == "simple" {
+        return;
     }
     title_world::prepare();
 }

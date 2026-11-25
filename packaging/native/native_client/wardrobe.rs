@@ -905,6 +905,7 @@ mod tests {
             skins_for_user: None,
             skins_loaded_at: None,
             loaded_at: None,
+            session_gen: 0,
         };
         apply(
             &mut l,

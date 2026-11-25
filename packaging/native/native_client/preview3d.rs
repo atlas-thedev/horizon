@@ -2,13 +2,17 @@
 //! for the wardrobe. Drag to turn it.
 #![allow(dead_code)]
 
+use super::avatars;
 use super::boxes::Boxes;
 use super::net::{self, Pic};
+use super::relay;
 use super::ui::Ui;
 use super::wardrobe::{self, Item, Locker};
 use horizon_client::native_ui::{Canvas, Image, theme};
 use horizon_cosmetics::Bone;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 pub struct PlayerPreview {
     b: Boxes,
@@ -42,7 +46,8 @@ impl Default for PlayerPreview {
 }
 
 fn is_signed_in_as(who: &str) -> bool {
-    if !net::signed_in() {
+    let active_native = net::signed_in() || (net::status() == net::Status::Checking && net::account().is_some());
+    if !active_native {
         return false;
     }
     let Some(acc) = net::account() else {
@@ -51,15 +56,14 @@ fn is_signed_in_as(who: &str) -> bool {
     if who.is_empty() || acc.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(who)) {
         return true;
     }
-    let (switched, active_uuid, _) = net::active_identity();
-    switched
-        && active_uuid.as_deref().zip(acc.uuid.as_deref()).is_some_and(|(u1, u2)| {
-            u1.replace('-', "").eq_ignore_ascii_case(&u2.replace('-', ""))
-        })
+    avatars::online_uuid()
+        .as_deref()
+        .zip(acc.uuid.as_deref())
+        .is_some_and(|(u1, u2)| u1.eq_ignore_ascii_case(&u2.replace('-', "")))
 }
 
-/// The skin for `name`: Native directory (only when signed into Native), else Mojang for online accounts, else default.
-fn skin_of(name: &str, native_signed: bool) -> (Option<Arc<Image>>, bool, Option<bool>) {
+/// The skin for `name`: Native directory (only when signed into Native), else Mojang for online accounts, else Steve.
+fn skin_of(name: &str, native_signed: bool) -> (Option<Arc<Image>>, Option<bool>) {
     if native_signed {
         let lookup = net::account().and_then(|a| a.name);
         let (hash, base, slim) = {
@@ -70,39 +74,110 @@ fn skin_of(name: &str, native_signed: bool) -> (Option<Arc<Image>>, bool, Option
                 None => (None, String::new(), None),
             }
         };
+        let slim = slim.or_else(|| {
+            net::account()
+                .and_then(|a| a.model)
+                .map(|m| m.eq_ignore_ascii_case("slim"))
+        });
         if let Some(hash) = hash {
             let base = if base.is_empty() { wardrobe::base() } else { base };
             return match net::image(&net::hash_url(&base, &hash), 2 * 1024 * 1024) {
-                Pic::Ready(img) => (Some(img), false, slim),
-                Pic::Loading => (None, true, slim),
-                Pic::Failed => (None, false, slim),
+                Pic::Ready(img) => (Some(img), slim),
+                _ => (None, slim),
+            };
+        }
+        if let Some(hash) = relay::snapshot().me_skin {
+            let base = if base.is_empty() { wardrobe::base() } else { base };
+            return match net::image(&net::hash_url(&base, &hash), 2 * 1024 * 1024) {
+                Pic::Ready(img) => (Some(img), slim),
+                _ => (None, slim),
             };
         }
         if let Some(uuid) = net::account().and_then(|a| a.uuid).filter(|u| !u.is_empty()) {
-            return mojang_skin_image(&uuid, slim);
+            return (mojang_skin_image(&uuid), slim);
         }
-        return (None, false, slim);
+        return (None, slim);
     }
-    if net::status() == net::Status::Checking {
-        return (None, true, None);
+    if let Some(uuid) = avatars::online_uuid() {
+        return (mojang_skin_image(&uuid), None);
     }
-    let (switched, active_uuid, active_online) = net::active_identity();
-    if switched && active_online
-        && let Some(uuid) = active_uuid.filter(|u| !u.is_empty())
-    {
-        return mojang_skin_image(&uuid, None);
-    }
-    (None, false, Some(false))
+    (None, Some(false))
 }
 
-fn mojang_skin_image(uuid: &str, slim: Option<bool>) -> (Option<Arc<Image>>, bool, Option<bool>) {
-    let clean = uuid.replace('-', "").to_lowercase();
-    let url = format!("https://mc-heads.net/skin/{clean}");
-    match net::image(&url, 2 * 1024 * 1024) {
-        Pic::Ready(img) => (Some(img), false, slim),
-        Pic::Loading => (None, true, slim),
-        Pic::Failed => (None, false, slim),
+enum MojangSkin {
+    Loading,
+    Ready(Arc<Image>),
+    Retry(Instant),
+}
+
+fn mojang_skins() -> &'static Mutex<HashMap<String, MojangSkin>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, MojangSkin>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+fn mojang_skin_image(uuid: &str) -> Option<Arc<Image>> {
+    let clean = uuid.replace('-', "").to_ascii_lowercase();
+    if clean.len() != 32 {
+        return None;
     }
+    {
+        let map = mojang_skins().lock().unwrap_or_else(|e| e.into_inner());
+        match map.get(&clean) {
+            Some(MojangSkin::Ready(img)) => return Some(img.clone()),
+            Some(MojangSkin::Loading) => return None,
+            Some(MojangSkin::Retry(at)) if Instant::now() < *at => return None,
+            _ => {}
+        }
+    }
+    mojang_skins()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(clean.clone(), MojangSkin::Loading);
+    let key = clean.clone();
+    let spawned = std::thread::Builder::new()
+        .name("Native 3D skin".into())
+        .spawn(move || {
+            let decoded = avatars::mojang_skin_bytes(&key).and_then(|b| Image::decode(&b));
+            let next = match decoded {
+                Some(img) if img.width >= 64 => MojangSkin::Ready(img),
+                _ => MojangSkin::Retry(Instant::now() + Duration::from_secs(15)),
+            };
+            mojang_skins()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(key, next);
+        });
+    if spawned.is_err() {
+        mojang_skins()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&clean);
+    }
+    None
+}
+
+/// Default Steve texture loaded from the game's resources, cached once available.
+fn default_steve() -> Option<Arc<Image>> {
+    static STEVE: OnceLock<Mutex<Option<Arc<Image>>>> = OnceLock::new();
+    let slot = STEVE.get_or_init(Default::default);
+    {
+        let guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(img) = guard.as_ref() {
+            return Some(img.clone());
+        }
+    }
+    let (_, source) = super::title_resources();
+    let src = source.as_ref()?;
+    let img = super::game_texture(src, "entity/player/wide/steve")
+        .or_else(|| super::game_texture(src, "entity/steve"))?;
+    *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(img.clone());
+    Some(img)
+}
+
+/// Starts loading the player's own 3D skin ahead of time so the Modern title screen shows it on frame 1.
+pub fn warm(who: &str) {
+    let native_signed = is_signed_in_as(who);
+    let _ = skin_of(who, native_signed);
 }
 
 fn image_of(url: Option<&str>) -> Option<Arc<Image>> {
@@ -222,21 +297,18 @@ impl PlayerPreview {
         c.shadow(cx - 9.0 * scale, feet - 1.5 * scale, 18.0 * scale, 3.0 * scale, 1.5 * scale, 10.0, 0x66000000);
         wardrobe::sync_session();
         let native_signed = is_signed_in_as(who);
-        // The skin.
-        let (skin, pending, slim) = if let Some((ref img, s)) = self.override_skin {
-            (Some(img.clone()), false, Some(s))
+        // The skin (falls back cleanly to Steve instead of a grey mannequin or skeleton boxes).
+        let (skin, slim) = if let Some((ref img, s)) = self.override_skin {
+            (Some(img.clone()), Some(s))
         } else {
             skin_of(who, native_signed)
         };
+        let (skin, slim) = match skin {
+            Some(img) => (Some(img), slim),
+            None => (default_steve(), Some(false)),
+        };
         if let Some(slim) = slim {
             self.slim = slim;
-        }
-        if pending {
-            // The skin is still on its way: a skeleton of the model instead of a grey body that turns into the skin.
-            for (bx, by, bw, bh) in [(-4.0, -32.0, 8.0, 8.0), (-4.0, -24.0, 8.0, 12.0), (-8.0, -24.0, 4.0, 12.0), (4.0, -24.0, 4.0, 12.0), (-4.0, -12.0, 4.0, 12.0), (0.0, -12.0, 4.0, 12.0)] {
-                c.skeleton(cx + bx * scale, feet + by * scale, bw * scale, bh * scale, 2.0 * scale);
-            }
-            return;
         }
         // The cape: the store cape worn (or the one being hovered), only for signed-in Native accounts.
         let mut cape: Option<Arc<Image>> = None;
@@ -474,7 +546,7 @@ pub fn wheel_skin(name: &str) -> (Arc<Image>, bool) {
     use std::sync::{Mutex, OnceLock};
     static URLS: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
     static SMALL: OnceLock<Mutex<HashMap<u64, Arc<Image>>>> = OnceLock::new();
-    let (skin, _, directory_slim) = skin_of(name, is_signed_in_as(name));
+    let (skin, directory_slim) = skin_of(name, is_signed_in_as(name));
     let local = wheel_local_look(name);
     let slim = directory_slim.or_else(|| local.as_ref().map(|(_, slim)| *slim))
         .or_else(|| net::account().and_then(|a| a.model).map(|m| m.eq_ignore_ascii_case("slim"))).unwrap_or(false);

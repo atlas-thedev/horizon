@@ -40,21 +40,41 @@ fn key_of(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)) | 1 << 63
 }
 
+/// Active online (Microsoft) UUID as 32 lowercase hex chars, or `None` for offline accounts.
+pub fn online_uuid() -> Option<String> {
+    let (switched, active_uuid, active_online) = net::active_identity();
+    if switched {
+        return active_online
+            .then_some(active_uuid)
+            .flatten()
+            .map(|u| u.replace('-', "").to_ascii_lowercase())
+            .filter(|u| is_hex(u, 32));
+    }
+    horizon_client::auth::current().map(|a| format!("{:032x}", a.uuid))
+}
+
+/// Starts loading the player's own face ahead of time so the title bar shows it on frame 1.
+pub fn warm_own(name: &str) {
+    if let Some(skin) = own(name) {
+        let _ = face(&skin);
+    }
+}
+
 /// The current player's own skin reference (store hash or "mj:uuid"), `None` for offline/default Steve.
 pub fn own(name: &str) -> Option<String> {
-    let signed_in = net::signed_in();
-    let acc = signed_in.then(net::account).flatten();
-    let (switched, active_uuid, active_online) = net::active_identity();
-    let matches_signed_in = signed_in
+    let active_native = net::signed_in() || (net::status() == net::Status::Checking && net::account().is_some());
+    let acc = active_native.then(net::account).flatten();
+    let online = online_uuid();
+    let matches_native = active_native
         && acc.as_ref().is_some_and(|a| {
             name.is_empty()
                 || a.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name))
-                || (switched
-                    && active_uuid.as_deref().zip(a.uuid.as_deref()).is_some_and(|(u1, u2)| {
-                        u1.replace('-', "").eq_ignore_ascii_case(&u2.replace('-', ""))
-                    }))
+                || online
+                    .as_deref()
+                    .zip(a.uuid.as_deref())
+                    .is_some_and(|(u1, u2)| u1.eq_ignore_ascii_case(&u2.replace('-', "")))
         });
-    if matches_signed_in {
+    if matches_native {
         if !name.is_empty()
             && let Some(hash) = horizon_client::native_skins::directory().entry(name).and_then(|e| e.skin.clone())
         {
@@ -69,13 +89,11 @@ pub fn own(name: &str) -> Option<String> {
             return Some(skin);
         }
         if let Some(u) = acc.and_then(|a| a.uuid) {
-            return Some(format!("mj:{}", u.replace('-', "").to_lowercase()));
+            return Some(format!("mj:{}", u.replace('-', "").to_ascii_lowercase()));
         }
     }
-    if switched && active_online
-        && let Some(u) = active_uuid
-    {
-        return Some(format!("mj:{}", u.replace('-', "").to_lowercase()));
+    if let Some(u) = online {
+        return Some(format!("mj:{u}"));
     }
     None
 }
@@ -264,6 +282,15 @@ fn now_secs() -> u64 {
 fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     format!("{:x}", Sha256::digest(bytes))
+}
+
+/// Disk-cached Mojang skin PNG bytes for a UUID (32 hex chars, with or without dashes).
+pub fn mojang_skin_bytes(uuid: &str) -> Option<Vec<u8>> {
+    let clean = uuid.replace('-', "").to_ascii_lowercase();
+    if !is_hex(&clean, 32) {
+        return None;
+    }
+    mojang_skin(&format!("mj:{clean}"), &clean).ok().flatten()
 }
 
 /// A Mojang player's skin: from disk when known (refreshed after 12 h), else downloaded and kept.

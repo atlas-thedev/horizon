@@ -173,6 +173,7 @@ pub fn api_allowed(url: &str) -> bool {
 struct Handoff {
     ticket: String,
     api: String,
+    account: Option<Account>,
 }
 
 fn session_file(dir: &std::path::Path) -> PathBuf {
@@ -191,7 +192,14 @@ fn read_handoff(dir: &std::path::Path) -> Option<Handoff> {
         return None;
     }
     let api = value.get("api").and_then(Value::as_str).unwrap_or(DEFAULT_API).trim().trim_end_matches('/').to_owned();
-    api_allowed(&api).then_some(Handoff { ticket, api })
+    let account = value.get("account").and_then(Value::as_object).and_then(|a| {
+        let id = a.get("id").and_then(Value::as_str).map(str::to_owned);
+        let name = a.get("name").and_then(Value::as_str).map(str::to_owned);
+        let uuid = a.get("uuid").and_then(Value::as_str).map(str::to_owned);
+        let model = a.get("model").and_then(Value::as_str).map(str::to_owned);
+        (id.is_some() || name.is_some() || uuid.is_some()).then_some(Account { id, name, uuid, model })
+    });
+    api_allowed(&api).then_some(Handoff { ticket, api, account })
 }
 
 fn stamp(dir: &std::path::Path) -> Option<SystemTime> {
@@ -199,14 +207,15 @@ fn stamp(dir: &std::path::Path) -> Option<SystemTime> {
 }
 
 fn adopt(s: &mut SessionState, handoff: Option<Handoff>) {
-    s.account = None;
     s.generation = s.generation.wrapping_add(1);
     match handoff {
         None => {
+            s.account = None;
             s.ticket = None;
             s.status = Status::Guest;
         }
         Some(h) => {
+            s.account = h.account;
             s.ticket = Some(h.ticket);
             s.api = h.api;
             s.status = Status::Checking;
@@ -241,7 +250,7 @@ pub fn start(dir: Option<PathBuf>) {
 pub fn use_standalone_ticket(ticket: Option<String>) {
     let mut s = lock();
     s.standalone = true;
-    let handoff = ticket.map(|ticket| Handoff { ticket, api: s.api.clone() });
+    let handoff = ticket.map(|ticket| Handoff { ticket, api: s.api.clone(), account: None });
     adopt(&mut s, handoff);
     s.account = None;
     drop(s);
@@ -262,6 +271,7 @@ pub fn rejected(used: &str) {
         _ => {
             if s.status != Status::Expired {
                 s.status = Status::Expired;
+                s.account = None;
             }
         }
     }
